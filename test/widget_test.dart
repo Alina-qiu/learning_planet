@@ -7,6 +7,8 @@ import 'package:learning_planet/features/auth_family/data/auth_repository.dart';
 import 'package:learning_planet/features/auth_family/data/family_repository.dart';
 import 'package:learning_planet/features/auth_family/domain/auth_session.dart';
 import 'package:learning_planet/features/auth_family/domain/family.dart';
+import 'package:learning_planet/features/tasks/data/task_repository.dart';
+import 'package:learning_planet/features/tasks/domain/task_item.dart';
 
 void main() {
   testWidgets('未登录时展示邮箱登录并发送验证码', (tester) async {
@@ -15,6 +17,7 @@ void main() {
       LearningPlanetApp(
         authRepository: repository,
         familyRepository: FakeFamilyRepository(),
+        taskRepository: FakeTaskRepository(),
       ),
     );
     await tester.pump();
@@ -36,6 +39,7 @@ void main() {
       LearningPlanetApp(
         authRepository: repository,
         familyRepository: FakeFamilyRepository.withChild(),
+        taskRepository: FakeTaskRepository(),
       ),
     );
     await tester.pumpAndSettle();
@@ -53,6 +57,7 @@ void main() {
           const AuthSession(userId: 'parent-1'),
         ),
         familyRepository: familyRepository,
+        taskRepository: FakeTaskRepository(),
       ),
     );
     await tester.pumpAndSettle();
@@ -158,4 +163,33 @@ class FakeFamilyRepository implements FamilyRepository {
     required String nickname,
     required int grade,
   }) async {}
+}
+
+class FakeTaskRepository implements TaskRepository {
+  @override
+  Future<List<TaskItem>> loadTasks(String childId) async => const [];
+
+  @override
+  Future<void> createOneTimeTask({
+    required String childId,
+    required String title,
+    required DateTime dueDate,
+    required int coinReward,
+    required int xpReward,
+  }) async {}
+
+  @override
+  Future<void> start(String taskId) async {}
+
+  @override
+  Future<void> pause(String taskId) async {}
+
+  @override
+  Future<void> resume(String taskId) async {}
+
+  @override
+  Future<void> complete(String taskId) async {}
+
+  @override
+  Future<void> manualComplete(String taskId, String reason) async {}
 }

@@ -10,6 +10,7 @@ class HomeScreen extends StatefulWidget {
     required this.selectedChildId,
     required this.onChildSelected,
     required this.onManageFamily,
+    required this.onManageTasks,
     required this.isParentMode,
     required this.onParentMode,
     required this.onSignOut,
@@ -21,6 +22,7 @@ class HomeScreen extends StatefulWidget {
   final String selectedChildId;
   final ValueChanged<String> onChildSelected;
   final VoidCallback onManageFamily;
+  final VoidCallback onManageTasks;
   final bool isParentMode;
   final VoidCallback onParentMode;
   final Future<void> Function() onSignOut;
@@ -98,6 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: '更多',
             onSelected: (value) {
               if (value == 'manage') widget.onManageFamily();
+              if (value == 'tasks') widget.onManageTasks();
               if (value == 'parent') widget.onParentMode();
               if (value == 'logout') widget.onSignOut();
             },
@@ -108,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Text('进入家长模式'),
                 ),
               const PopupMenuItem(value: 'manage', child: Text('家庭与孩子')),
+              const PopupMenuItem(value: 'tasks', child: Text('任务管理')),
               const PopupMenuItem(value: 'logout', child: Text('退出登录')),
             ],
           ),

@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "scripts": {
+    "supabase:status": "supabase status",
+    "db:start": "supabase start",
+    "db:reset": "supabase db reset",
+    "db:lint": "supabase db lint --local --level warning --fail-on error"
+  },
+  "devDependencies": {
+    "supabase": "^2.117.0"
+  }
+}

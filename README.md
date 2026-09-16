@@ -37,3 +37,14 @@ flutter run
 ```powershell
 flutter run --dart-define=SUPABASE_URL=https://xxx.supabase.co --dart-define=SUPABASE_ANON_KEY=xxx
 ```
+
+## Supabase 本地开发
+
+Supabase CLI 作为 npm 开发依赖锁定版本。安装 Docker Desktop 并启动后执行：
+
+```powershell
+npm install
+npm run db:start
+npm run db:reset
+npm run db:lint
+```

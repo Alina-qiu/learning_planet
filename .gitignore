@@ -1,4 +1,6 @@
 .dart_tool/
+node_modules/
+supabase/.temp/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages

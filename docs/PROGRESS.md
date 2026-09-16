@@ -24,5 +24,17 @@
 
 ## 当前限制
 
-- 本机未安装 Supabase CLI，新增迁移尚未在本地 PostgreSQL 实例执行。
+- Supabase CLI 2.117.0 已作为项目开发依赖安装；本机没有 Docker/Podman，新增迁移尚未在本地 PostgreSQL 实例执行。
 - 本机未配置 Android SDK；Android/iOS 构建由 GitHub Actions 验证。
+
+## 阶段 2：任务系统
+
+- [x] 一次性任务模板与任务实例快照
+- [x] `scheduled → ready → in_progress ↔ paused → completed` 状态约束
+- [x] 开始、暂停、继续与累计计时
+- [x] 服务端事务化完成、金币/XP 结算及幂等账本键
+- [x] 家长补签、必填原因与审计记录
+- [x] 当前孩子任务列表、创建及状态操作界面
+- [x] 客户端禁止直接修改任务实例状态、钱包和账本
+- [x] 每日/每周/自定义模板的服务端幂等实例生成与 App 补偿调用
+- [ ] 本地提醒与长期计划完成率

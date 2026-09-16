@@ -6,6 +6,7 @@ import '../application/auth_providers.dart';
 import '../application/family_providers.dart';
 import 'family_management_screen.dart';
 import 'family_onboarding_screen.dart';
+import '../../tasks/presentation/task_management_screen.dart';
 
 class FamilyGate extends ConsumerWidget {
   const FamilyGate({super.key});
@@ -92,6 +93,15 @@ class FamilyGate extends ConsumerWidget {
               onManageFamily: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => const FamilyManagementScreen(),
+                ),
+              ),
+              onManageTasks: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => TaskManagementScreen(
+                    childId: child.id,
+                    childNickname: child.nickname,
+                    isParentMode: isParentMode,
+                  ),
                 ),
               ),
               isParentMode: isParentMode,
