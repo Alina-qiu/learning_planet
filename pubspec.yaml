@@ -1,0 +1,37 @@
+name: learning_planet
+description: 家庭小学生学习成长与游戏化激励 App
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.8.1
+  supabase_flutter: ^2.8.4
+  drift: ^2.25.1
+  sqlite3_flutter_libs: ^0.5.29
+  path_provider: ^2.1.5
+  shared_preferences: ^2.5.2
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+  intl: ^0.20.2
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.15
+  drift_dev: ^2.25.2
+  freezed: ^2.5.8
+  json_serializable: ^6.9.4
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+

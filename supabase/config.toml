@@ -1,0 +1,18 @@
+project_id = "learning_planet"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enabled = true
+site_url = "io.learningplanet.app://login-callback"
+
+[storage]
+enabled = true
+
