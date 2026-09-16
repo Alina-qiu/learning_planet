@@ -14,3 +14,5 @@ final familiesProvider = FutureProvider<List<domain.Family>>((ref) {
 final selectedChildIdProvider = StateProvider<String?>((ref) => null);
 
 final parentModeProvider = StateProvider<bool>((ref) => false);
+
+final parentFamilyIdProvider = StateProvider<String?>((ref) => null);

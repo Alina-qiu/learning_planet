@@ -3,8 +3,10 @@ import 'package:uuid/uuid.dart';
 
 import '../domain/task.dart';
 import '../domain/task_item.dart';
+import '../domain/wallet_summary.dart';
 
 abstract interface class TaskRepository {
+  Future<WalletSummary> loadWallet(String childId);
   Future<List<TaskItem>> loadTasks(String childId);
 
   Future<void> createOneTimeTask({
@@ -27,6 +29,20 @@ class SupabaseTaskRepository implements TaskRepository {
 
   final SupabaseClient _client;
   static const _uuid = Uuid();
+
+  @override
+  Future<WalletSummary> loadWallet(String childId) async {
+    final row = await _client
+        .from('wallets')
+        .select('coin_balance, frozen_balance, xp')
+        .eq('child_id', childId)
+        .single();
+    return WalletSummary(
+      coins: row['coin_balance'] as int,
+      frozen: row['frozen_balance'] as int,
+      xp: row['xp'] as int,
+    );
+  }
 
   @override
   Future<List<TaskItem>> loadTasks(String childId) async {
@@ -139,6 +155,9 @@ class SupabaseTaskRepository implements TaskRepository {
 }
 
 class UnconfiguredTaskRepository implements TaskRepository {
+  @override
+  Future<WalletSummary> loadWallet(String childId) =>
+      Future.error(StateError('开发环境尚未配置 Supabase。'));
   const UnconfiguredTaskRepository();
 
   Future<void> _fail() => Future<void>.error(
