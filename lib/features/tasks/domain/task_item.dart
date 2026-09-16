@@ -10,6 +10,8 @@ class TaskItem {
     required this.xpReward,
     required this.dueDate,
     required this.accumulatedSeconds,
+    this.activeStartedAt,
+    this.minimumSeconds = 0,
   });
 
   final String id;
@@ -20,4 +22,13 @@ class TaskItem {
   final int xpReward;
   final DateTime dueDate;
   final int accumulatedSeconds;
+  final DateTime? activeStartedAt;
+  final int minimumSeconds;
+  int elapsedSeconds(DateTime now) {
+    final active = activeStartedAt;
+    return accumulatedSeconds +
+        (status == TaskStatus.inProgress && active != null
+            ? now.difference(active).inSeconds.clamp(0, 2147483647)
+            : 0);
+  }
 }

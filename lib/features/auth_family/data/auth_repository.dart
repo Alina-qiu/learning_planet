@@ -30,9 +30,9 @@ class SupabaseAuthRepository implements AuthRepository {
 
   @override
   Future<void> sendEmailOtp(String email) => _client.auth.signInWithOtp(
-        email: email,
-        emailRedirectTo: 'io.learningplanet.app://login-callback',
-      );
+    email: email,
+    emailRedirectTo: 'io.learningplanet.app://login-callback',
+  );
 
   @override
   Future<void> signOut() => _client.auth.signOut();
@@ -54,9 +54,8 @@ class UnconfiguredAuthRepository implements AuthRepository {
   Stream<AuthSession?> watchSession() => Stream.value(null);
 
   @override
-  Future<void> sendEmailOtp(String email) => Future<void>.error(
-        StateError('开发环境尚未配置 Supabase。'),
-      );
+  Future<void> sendEmailOtp(String email) =>
+      Future<void>.error(StateError('开发环境尚未配置 Supabase。'));
 
   @override
   Future<void> signOut() async {}

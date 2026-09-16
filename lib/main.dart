@@ -6,6 +6,7 @@ import 'core/config/app_config.dart';
 import 'features/auth_family/data/auth_repository.dart';
 import 'features/auth_family/data/family_repository.dart';
 import 'features/tasks/data/task_repository.dart';
+import 'features/tasks/data/notification_scheduler.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +35,7 @@ Future<void> main() async {
       authRepository: authRepository,
       familyRepository: familyRepository,
       taskRepository: taskRepository,
+      notificationScheduler: LocalNotificationScheduler(),
     ),
   );
 }

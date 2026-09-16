@@ -8,6 +8,7 @@ import '../features/auth_family/data/family_repository.dart';
 import '../features/auth_family/presentation/auth_gate.dart';
 import '../features/tasks/application/task_providers.dart';
 import '../features/tasks/data/task_repository.dart';
+import '../features/tasks/data/notification_scheduler.dart';
 import 'theme.dart';
 
 class LearningPlanetApp extends StatelessWidget {
@@ -15,12 +16,14 @@ class LearningPlanetApp extends StatelessWidget {
     required this.authRepository,
     required this.familyRepository,
     required this.taskRepository,
+    this.notificationScheduler = const DisabledNotificationScheduler(),
     super.key,
   });
 
   final AuthRepository authRepository;
   final FamilyRepository familyRepository;
   final TaskRepository taskRepository;
+  final NotificationScheduler notificationScheduler;
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +32,7 @@ class LearningPlanetApp extends StatelessWidget {
         authRepositoryProvider.overrideWithValue(authRepository),
         familyRepositoryProvider.overrideWithValue(familyRepository),
         taskRepositoryProvider.overrideWithValue(taskRepository),
+        notificationSchedulerProvider.overrideWithValue(notificationScheduler),
       ],
       child: MaterialApp(
         title: '学习星球',

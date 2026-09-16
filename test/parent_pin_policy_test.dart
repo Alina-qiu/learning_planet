@@ -32,8 +32,10 @@ void main() {
       lockedUntil: now.add(const Duration(minutes: 10)),
     );
 
-    final result =
-        policy.registerFailure(locked, now.add(const Duration(minutes: 5)));
+    final result = policy.registerFailure(
+      locked,
+      now.add(const Duration(minutes: 5)),
+    );
 
     expect(result.failedAttempts, locked.failedAttempts);
     expect(result.lockedUntil, locked.lockedUntil);

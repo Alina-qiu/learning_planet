@@ -31,9 +31,11 @@ class ParentPinVerification {
     required this.verified,
     required this.remainingAttempts,
     this.retryAt,
+    this.authorizedUntil,
   });
 
   final bool verified;
   final int remainingAttempts;
   final DateTime? retryAt;
+  final DateTime? authorizedUntil;
 }

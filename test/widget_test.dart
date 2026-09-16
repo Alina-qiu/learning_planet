@@ -56,8 +56,9 @@ void main() {
   testWidgets('家庭管理先验证 PIN，且家长模式可以退出', (tester) async {
     await tester.pumpWidget(
       LearningPlanetApp(
-        authRepository:
-            FakeAuthRepository(const AuthSession(userId: 'parent-1')),
+        authRepository: FakeAuthRepository(
+          const AuthSession(userId: 'parent-1'),
+        ),
         familyRepository: FakeFamilyRepository.withChild(),
         taskRepository: FakeTaskRepository(),
       ),
@@ -125,24 +126,26 @@ class FakeAuthRepository implements AuthRepository {
 }
 
 class FakeFamilyRepository implements FamilyRepository {
+  @override
+  Future<void> revokeParentAuthorization() async {}
   FakeFamilyRepository() : families = [];
 
   FakeFamilyRepository.withChild()
-      : families = const [
-          Family(
-            id: 'family-1',
-            name: '星星家',
-            timezone: 'Asia/Shanghai',
-            children: [
-              ChildProfile(
-                id: 'child-1',
-                familyId: 'family-1',
-                nickname: '星宝',
-                grade: 3,
-              ),
-            ],
-          ),
-        ];
+    : families = const [
+        Family(
+          id: 'family-1',
+          name: '星星家',
+          timezone: 'Asia/Shanghai',
+          children: [
+            ChildProfile(
+              id: 'child-1',
+              familyId: 'family-1',
+              nickname: '星宝',
+              grade: 3,
+            ),
+          ],
+        ),
+      ];
 
   final List<Family> families;
   String? createdFamilyName;
@@ -188,8 +191,11 @@ class FakeFamilyRepository implements FamilyRepository {
   Future<ParentPinVerification> verifyParentPin({
     required String familyId,
     required String pin,
-  }) async =>
-      const ParentPinVerification(verified: true, remainingAttempts: 5);
+  }) async => ParentPinVerification(
+    verified: true,
+    remainingAttempts: 5,
+    authorizedUntil: DateTime.now().add(const Duration(minutes: 10)),
+  );
 
   @override
   Future<void> updateChild({
@@ -205,17 +211,17 @@ class FakeTaskRepository implements TaskRepository {
       const WalletSummary(coins: 37, frozen: 5, xp: 91);
   @override
   Future<List<TaskItem>> loadTasks(String childId) async => [
-        TaskItem(
-          id: 'review-1',
-          childId: childId,
-          title: '今日错题复习',
-          status: TaskStatus.ready,
-          coinReward: 10,
-          xpReward: 20,
-          dueDate: DateTime.now(),
-          accumulatedSeconds: 0,
-        ),
-      ];
+    TaskItem(
+      id: 'review-1',
+      childId: childId,
+      title: '今日错题复习',
+      status: TaskStatus.ready,
+      coinReward: 10,
+      xpReward: 20,
+      dueDate: DateTime.now(),
+      accumulatedSeconds: 0,
+    ),
+  ];
 
   @override
   Future<void> createOneTimeTask({

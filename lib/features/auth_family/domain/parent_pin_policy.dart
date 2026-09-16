@@ -1,8 +1,5 @@
 class ParentPinAttemptState {
-  const ParentPinAttemptState({
-    this.failedAttempts = 0,
-    this.lockedUntil,
-  });
+  const ParentPinAttemptState({this.failedAttempts = 0, this.lockedUntil});
 
   final int failedAttempts;
   final DateTime? lockedUntil;
@@ -25,8 +22,9 @@ class ParentPinPolicy {
   ) {
     if (state.isLockedAt(now)) return state;
 
-    final previousAttempts =
-        state.lockedUntil == null ? state.failedAttempts : 0;
+    final previousAttempts = state.lockedUntil == null
+        ? state.failedAttempts
+        : 0;
     final failedAttempts = previousAttempts + 1;
     if (failedAttempts >= maximumAttempts) {
       return ParentPinAttemptState(

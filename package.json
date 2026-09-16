@@ -1,12 +1,15 @@
 {
   "private": true,
   "scripts": {
+    "test:db": "node scripts/test_database.mjs",
     "supabase:status": "supabase status",
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:lint": "supabase db lint --local --level warning --fail-on error"
   },
   "devDependencies": {
+    "embedded-postgres": "^18.4.0-beta.17",
+    "pg": "^8.23.0",
     "supabase": "^2.117.0"
   }
 }

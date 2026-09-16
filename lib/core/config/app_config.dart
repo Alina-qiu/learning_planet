@@ -50,8 +50,8 @@ class AppConfig {
       'staging' => AppEnvironment.staging,
       'production' => AppEnvironment.production,
       _ => throw StateError(
-          'APP_ENV must be development, staging, or production.',
-        ),
+        'APP_ENV must be development, staging, or production.',
+      ),
     };
   }
 }

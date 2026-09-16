@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../domain/family.dart';
 
 abstract interface class FamilyRepository {
+  Future<void> revokeParentAuthorization();
   Future<List<Family>> loadFamilies();
 
   Future<void> createFamilyWithChild({
@@ -28,10 +29,7 @@ abstract interface class FamilyRepository {
 
   Future<void> setParentPin({required String familyId, required String pin});
 
-  Future<void> inviteParent({
-    required String familyId,
-    required String email,
-  });
+  Future<void> inviteParent({required String familyId, required String email});
 
   Future<ParentPinVerification> verifyParentPin({
     required String familyId,
@@ -43,6 +41,10 @@ class SupabaseFamilyRepository implements FamilyRepository {
   SupabaseFamilyRepository(this._client);
 
   final SupabaseClient _client;
+
+  @override
+  Future<void> revokeParentAuthorization() =>
+      _client.rpc<void>('revoke_parent_authorization');
 
   @override
   Future<List<Family>> loadFamilies() async {
@@ -59,7 +61,9 @@ class SupabaseFamilyRepository implements FamilyRepository {
     final childrenByFamily = <String, List<ChildProfile>>{};
     for (final row in childRows) {
       final familyId = row['family_id'] as String;
-      childrenByFamily.putIfAbsent(familyId, () => []).add(
+      childrenByFamily
+          .putIfAbsent(familyId, () => [])
+          .add(
             ChildProfile(
               id: row['id'] as String,
               familyId: familyId,
@@ -173,6 +177,9 @@ class SupabaseFamilyRepository implements FamilyRepository {
     return ParentPinVerification(
       verified: row['verified'] as bool,
       remainingAttempts: row['remaining_attempts'] as int,
+      authorizedUntil: row['authorized_until'] == null
+          ? null
+          : DateTime.parse(row['authorized_until'] as String),
       retryAt: row['retry_at'] == null
           ? null
           : DateTime.parse(row['retry_at'] as String),
@@ -181,11 +188,11 @@ class SupabaseFamilyRepository implements FamilyRepository {
 }
 
 class UnconfiguredFamilyRepository implements FamilyRepository {
+  @override
+  Future<void> revokeParentAuthorization() async {}
   const UnconfiguredFamilyRepository();
 
-  Future<void> _fail() => Future<void>.error(
-        StateError('开发环境尚未配置 Supabase。'),
-      );
+  Future<void> _fail() => Future<void>.error(StateError('开发环境尚未配置 Supabase。'));
 
   @override
   Future<List<Family>> loadFamilies() async => const [];
@@ -196,48 +203,38 @@ class UnconfiguredFamilyRepository implements FamilyRepository {
     required String timezone,
     required String childNickname,
     required int grade,
-  }) =>
-      _fail();
+  }) => _fail();
 
   @override
   Future<void> createChild({
     required String familyId,
     required String nickname,
     required int grade,
-  }) =>
-      _fail();
+  }) => _fail();
 
   @override
   Future<void> updateChild({
     required String childId,
     required String nickname,
     required int grade,
-  }) =>
-      _fail();
+  }) => _fail();
 
   @override
   Future<void> deleteChild(String childId) => _fail();
 
   @override
-  Future<void> setParentPin({
-    required String familyId,
-    required String pin,
-  }) =>
+  Future<void> setParentPin({required String familyId, required String pin}) =>
       _fail();
 
   @override
   Future<void> inviteParent({
     required String familyId,
     required String email,
-  }) =>
-      _fail();
+  }) => _fail();
 
   @override
   Future<ParentPinVerification> verifyParentPin({
     required String familyId,
     required String pin,
-  }) =>
-      Future<ParentPinVerification>.error(
-        StateError('开发环境尚未配置 Supabase。'),
-      );
+  }) => Future<ParentPinVerification>.error(StateError('开发环境尚未配置 Supabase。'));
 }

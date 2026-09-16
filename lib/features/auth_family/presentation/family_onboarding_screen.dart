@@ -33,7 +33,9 @@ class _FamilyOnboardingScreenState
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSaving = true);
     try {
-      await ref.read(familyRepositoryProvider).createFamilyWithChild(
+      await ref
+          .read(familyRepositoryProvider)
+          .createFamilyWithChild(
             familyName: _familyController.text.trim(),
             timezone: 'Asia/Shanghai',
             childNickname: _childController.text.trim(),
@@ -42,9 +44,9 @@ class _FamilyOnboardingScreenState
       ref.invalidate(familiesProvider);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('创建失败：$error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('创建失败：$error')));
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }

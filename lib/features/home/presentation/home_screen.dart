@@ -30,6 +30,7 @@ class HomeScreen extends ConsumerWidget {
   Future<void> _refresh(WidgetRef ref) async {
     ref.invalidate(tasksProvider(selectedChildId));
     ref.invalidate(walletProvider(selectedChildId));
+    ref.invalidate(familyTodayProvider(selectedChildId));
     await Future.wait([
       ref.read(tasksProvider(selectedChildId).future),
       ref.read(walletProvider(selectedChildId).future),
@@ -40,6 +41,7 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tasks = ref.watch(tasksProvider(selectedChildId));
     final wallet = ref.watch(walletProvider(selectedChildId));
+    final familyToday = ref.watch(familyTodayProvider(selectedChildId));
     return Scaffold(
       appBar: AppBar(
         title: const Text('冒险大厅'),
@@ -101,7 +103,12 @@ class HomeScreen extends ConsumerWidget {
             Text('今日任务', style: Theme.of(context).textTheme.titleLarge),
             tasks.when(
               data: (items) {
-                final today = DateUtils.dateOnly(DateTime.now());
+                if (familyToday.hasError) {
+                  return Text('家庭日期读取失败：${familyToday.error}');
+                }
+                final value = familyToday.value;
+                if (value == null) return const LinearProgressIndicator();
+                final today = DateUtils.dateOnly(value);
                 final visible = items
                     .where(
                       (task) =>

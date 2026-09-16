@@ -28,6 +28,7 @@ class SupabaseTaskRepository implements TaskRepository {
   SupabaseTaskRepository(this._client);
 
   final SupabaseClient _client;
+  SupabaseClient get client => _client;
   static const _uuid = Uuid();
 
   @override
@@ -46,19 +47,15 @@ class SupabaseTaskRepository implements TaskRepository {
 
   @override
   Future<List<TaskItem>> loadTasks(String childId) async {
-    final now = DateTime.now();
     await _client.rpc<int>(
       'generate_scheduled_tasks',
-      params: {
-        'target_child_id': childId,
-        'target_date': _dateOnly(now),
-      },
+      params: {'target_child_id': childId},
     );
     final rows = await _client
         .from('task_instances')
         .select(
           'id, child_id, title, status, coin_reward, xp_reward, '
-          'due_date, accumulated_seconds',
+          'due_date, accumulated_seconds, active_started_at, minimum_seconds',
         )
         .eq('child_id', childId)
         .order('due_date')
@@ -74,23 +71,21 @@ class SupabaseTaskRepository implements TaskRepository {
     required int coinReward,
     required int xpReward,
   }) async {
-    final template = await _client
-        .from('task_templates')
-        .insert({
-          'child_id': childId,
+    await _client.rpc<dynamic>(
+      'save_task_schedule',
+      params: {
+        'target_child_id': childId,
+        'config': {
           'title': title,
           'recurrence': 'once',
-          'coin_reward': coinReward,
-          'xp_reward': xpReward,
-          'active': true,
-        })
-        .select('id')
-        .single();
-    await _client.rpc<void>(
-      'create_task_from_template',
-      params: {
-        'target_template_id': template['id'],
-        'target_date': _dateOnly(dueDate),
+          'starts_on': _dateOnly(dueDate),
+          'ends_on': _dateOnly(dueDate),
+          'start_time': '16:00',
+          'due_time': '20:00',
+          'coins': coinReward,
+          'xp': xpReward,
+          'minimum_seconds': 0,
+        },
       },
     );
   }
@@ -109,12 +104,12 @@ class SupabaseTaskRepository implements TaskRepository {
 
   @override
   Future<void> complete(String taskId) => _client.rpc<void>(
-        'complete_task',
-        params: {
-          'target_task_id': taskId,
-          'completion_key': 'task:$taskId:${_uuid.v4()}',
-        },
-      );
+    'complete_task',
+    params: {
+      'target_task_id': taskId,
+      'completion_key': 'task:$taskId:${_uuid.v4()}',
+    },
+  );
 
   @override
   Future<void> manualComplete(String taskId, String reason) =>
@@ -128,25 +123,29 @@ class SupabaseTaskRepository implements TaskRepository {
       );
 
   static TaskItem _mapTask(Map<String, dynamic> row) => TaskItem(
-        id: row['id'] as String,
-        childId: row['child_id'] as String,
-        title: row['title'] as String,
-        status: _mapStatus(row['status'] as String),
-        coinReward: row['coin_reward'] as int,
-        xpReward: row['xp_reward'] as int,
-        dueDate: DateTime.parse(row['due_date'] as String),
-        accumulatedSeconds: row['accumulated_seconds'] as int,
-      );
+    id: row['id'] as String,
+    childId: row['child_id'] as String,
+    title: row['title'] as String,
+    status: _mapStatus(row['status'] as String),
+    coinReward: row['coin_reward'] as int,
+    xpReward: row['xp_reward'] as int,
+    dueDate: DateTime.parse(row['due_date'] as String),
+    accumulatedSeconds: row['accumulated_seconds'] as int,
+    minimumSeconds: row['minimum_seconds'] as int,
+    activeStartedAt: row['active_started_at'] == null
+        ? null
+        : DateTime.parse(row['active_started_at'] as String),
+  );
 
   static TaskStatus _mapStatus(String value) => switch (value) {
-        'scheduled' => TaskStatus.scheduled,
-        'ready' => TaskStatus.ready,
-        'in_progress' => TaskStatus.inProgress,
-        'paused' => TaskStatus.paused,
-        'completed' => TaskStatus.completed,
-        'skipped' || 'expired' => TaskStatus.skipped,
-        _ => throw StateError('Unknown task status: $value'),
-      };
+    'scheduled' => TaskStatus.scheduled,
+    'ready' => TaskStatus.ready,
+    'in_progress' => TaskStatus.inProgress,
+    'paused' => TaskStatus.paused,
+    'completed' => TaskStatus.completed,
+    'skipped' || 'expired' => TaskStatus.skipped,
+    _ => throw StateError('Unknown task status: $value'),
+  };
 
   static String _dateOnly(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-'
@@ -160,9 +159,7 @@ class UnconfiguredTaskRepository implements TaskRepository {
       Future.error(StateError('开发环境尚未配置 Supabase。'));
   const UnconfiguredTaskRepository();
 
-  Future<void> _fail() => Future<void>.error(
-        StateError('开发环境尚未配置 Supabase。'),
-      );
+  Future<void> _fail() => Future<void>.error(StateError('开发环境尚未配置 Supabase。'));
 
   @override
   Future<List<TaskItem>> loadTasks(String childId) async => const [];
@@ -173,8 +170,7 @@ class UnconfiguredTaskRepository implements TaskRepository {
     required DateTime dueDate,
     required int coinReward,
     required int xpReward,
-  }) =>
-      _fail();
+  }) => _fail();
   @override
   Future<void> start(String taskId) => _fail();
   @override
