@@ -22,12 +22,12 @@ class LearningTask {
   final TaskStatus status;
 
   LearningTask copyWith({TaskStatus? status}) => LearningTask(
-    id: id,
-    title: title,
-    subtitle: subtitle,
-    coinReward: coinReward,
-    xpReward: xpReward,
-    source: source,
-    status: status ?? this.status,
-  );
+        id: id,
+        title: title,
+        subtitle: subtitle,
+        coinReward: coinReward,
+        xpReward: xpReward,
+        source: source,
+        status: status ?? this.status,
+      );
 }

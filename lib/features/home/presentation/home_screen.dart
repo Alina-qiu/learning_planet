@@ -122,9 +122,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       task.status == TaskStatus.completed
                           ? '已完成'
                           : task.source ==
-                                TaskSource.automaticWrongQuestionReview
-                          ? '复习'
-                          : '开始',
+                                  TaskSource.automaticWrongQuestionReview
+                              ? '复习'
+                              : '开始',
                     ),
                   ),
                 ),

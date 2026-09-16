@@ -17,10 +17,29 @@ if (git @gitArguments status --porcelain) {
 }
 
 flutter create . --platforms=android,ios --org com.learningplanet
+if ($LASTEXITCODE -ne 0) {
+  throw 'Flutter 平台工程生成失败。'
+}
+
 git @gitArguments diff --stat
 flutter pub get
+if ($LASTEXITCODE -ne 0) {
+  throw 'Flutter 依赖解析失败。'
+}
+
 dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test
+if ($LASTEXITCODE -ne 0) {
+  throw 'Dart 格式检查失败。'
+}
+
+dart analyze
+if ($LASTEXITCODE -ne 0) {
+  throw 'Dart 静态分析失败。'
+}
+
+flutter test --no-test-assets
+if ($LASTEXITCODE -ne 0) {
+  throw 'Flutter 测试失败。'
+}
 
 Write-Host '学习星球项目初始化完成。'

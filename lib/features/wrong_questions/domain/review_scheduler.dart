@@ -32,14 +32,13 @@ class ReviewScheduler {
       familyDate.day,
     );
     final dayEnd = dayStart.add(const Duration(days: 1));
-    final due =
-        candidates.where((item) => item.reviewDueAt.isBefore(dayEnd)).toList()
-          ..sort((a, b) {
-            final dueOrder = a.reviewDueAt.compareTo(b.reviewDueAt);
-            return dueOrder != 0
-                ? dueOrder
-                : b.wrongCount.compareTo(a.wrongCount);
-          });
+    final due = candidates
+        .where((item) => item.reviewDueAt.isBefore(dayEnd))
+        .toList()
+      ..sort((a, b) {
+        final dueOrder = a.reviewDueAt.compareTo(b.reviewDueAt);
+        return dueOrder != 0 ? dueOrder : b.wrongCount.compareTo(a.wrongCount);
+      });
 
     if (due.isEmpty) return null;
     return DailyReviewTaskDraft(
