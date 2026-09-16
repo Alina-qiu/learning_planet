@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../home/presentation/home_screen.dart';
 import '../application/auth_providers.dart';
+import 'family_gate.dart';
 import 'login_screen.dart';
 
 class AuthGate extends ConsumerWidget {
@@ -12,7 +12,7 @@ class AuthGate extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return ref.watch(authSessionProvider).when(
           data: (session) =>
-              session == null ? const LoginScreen() : const HomeScreen(),
+              session == null ? const LoginScreen() : const FamilyGate(),
           loading: () => const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           ),

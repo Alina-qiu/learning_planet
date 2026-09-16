@@ -1,9 +1,29 @@
 import 'package:flutter/material.dart';
 
+import '../../auth_family/domain/family.dart';
 import '../../tasks/domain/task.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    required this.childNickname,
+    required this.children,
+    required this.selectedChildId,
+    required this.onChildSelected,
+    required this.onManageFamily,
+    required this.isParentMode,
+    required this.onParentMode,
+    required this.onSignOut,
+    super.key,
+  });
+
+  final String childNickname;
+  final List<ChildProfile> children;
+  final String selectedChildId;
+  final ValueChanged<String> onChildSelected;
+  final VoidCallback onManageFamily;
+  final bool isParentMode;
+  final VoidCallback onParentMode;
+  final Future<void> Function() onSignOut;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -63,9 +83,39 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('冒险大厅'),
-        actions: const [
-          Chip(label: Text('☁ 已同步')),
-          SizedBox(width: 12),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: '切换孩子',
+            initialValue: widget.selectedChildId,
+            onSelected: widget.onChildSelected,
+            itemBuilder: (context) => [
+              for (final child in widget.children)
+                PopupMenuItem(value: child.id, child: Text(child.nickname)),
+            ],
+            icon: const Icon(Icons.switch_account_outlined),
+          ),
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            onSelected: (value) {
+              if (value == 'manage') widget.onManageFamily();
+              if (value == 'parent') widget.onParentMode();
+              if (value == 'logout') widget.onSignOut();
+            },
+            itemBuilder: (context) => [
+              if (!widget.isParentMode)
+                const PopupMenuItem(
+                  value: 'parent',
+                  child: Text('进入家长模式'),
+                ),
+              const PopupMenuItem(value: 'manage', child: Text('家庭与孩子')),
+              const PopupMenuItem(value: 'logout', child: Text('退出登录')),
+            ],
+          ),
+          if (widget.isParentMode)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Chip(label: Text('家长模式')),
+            ),
         ],
       ),
       body: ListView(
@@ -78,8 +128,8 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    '星宝 · Lv. 12',
+                  Text(
+                    '${widget.childNickname} · Lv. 12',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 22,
