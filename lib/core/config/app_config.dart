@@ -29,6 +29,9 @@ class AppConfig {
   bool get hasBackendConfig =>
       supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
+  bool get hasAnyBackendConfig =>
+      supabaseUrl.isNotEmpty || supabaseAnonKey.isNotEmpty;
+
   void validate() {
     if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
       throw StateError(

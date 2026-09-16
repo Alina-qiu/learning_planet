@@ -5,6 +5,7 @@ ThemeData buildAppTheme() {
   return ThemeData(
     colorScheme: ColorScheme.fromSeed(seedColor: primary),
     useMaterial3: true,
+    splashFactory: InkRipple.splashFactory,
     scaffoldBackgroundColor: const Color(0xFFF4F7FF),
     cardTheme: const CardThemeData(
       elevation: 0,
