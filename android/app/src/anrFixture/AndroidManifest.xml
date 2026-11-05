@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:name="com.learningplanet.learning_planet.LearningPlanetApplication"
+        android:label="学习星球ANR本机测试" android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher">
+        <meta-data android:name="push_kit_auto_init_enabled" android:value="false" />
+        <meta-data android:name="flutterEmbedding" android:value="2" />
+        <activity android:name="com.learningplanet.learning_planet.LegacyAnrFixtureActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
