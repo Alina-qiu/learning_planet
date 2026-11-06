@@ -1,6 +1,6 @@
 # iPhone 工程与构建验证
 
-最新已完成验证：`ce7015e`的[CI 42162003423](https://github.com/Alina-qiu/learning_planet/actions/runs/42162003423)八项全通过，包含24项纯Swift通知校验以及iPhone SE第三代/iOS18.5模拟器的Keychain、加密SQLite、千任务滚动、大字体和重开恢复，报告/两张截图已复核。Debug合成数据结果不属于性能验收。后续诊断日志策略检查编译实际生产文件，与通知策略一同放在模拟器CI的Flutter初始化之前；结果见当前PR对应提交。尚未签名或完成真机验证。
+已完成的代码验证：`2aa445c`的[CI 42165056276](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)八项全通过，包含24项Swift通知策略、30项诊断日志及跨进程恢复检查，以及iPhone SE第三代/iOS18.5模拟器的Keychain、加密SQLite、千任务滚动、大字体和重开恢复；报告和两张截图已复核。日志检查使用生产策略和合成数据；Debug模拟器结果不属于性能验收。后续提交结果见当前PR对应CI，尚未签名或完成真机验证。
 
 更新于2026-11-06。通过[草稿PR #1](https://github.com/Alina-qiu/learning_planet/pull/1)运行实际macOS构建，提交`6722047`的[Debug和Release任务](https://github.com/Alina-qiu/learning_planet/actions/runs/42139724907)均通过Xcode编译及打包资源检查。首轮发现的Swift生命周期注册方法名已修正为`add(parentPush)`。**产物未签名，尚未完成安装和iPhone运行验证**；业务Dart/SQL与Android本机包未变。
 

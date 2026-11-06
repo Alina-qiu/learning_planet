@@ -8,14 +8,14 @@
 
 - [当前需求覆盖与逐项验收](docs/CURRENT_STATUS.md)：ACC、TSK、ERR、AC-01至AC-11、非功能要求及剩余依赖。
 - [当前Android安装包](docs/ANDROID_BUILD.md)与[本机联调方法](docs/LOCAL_DEBUG.md)：普通包只作启动验证；本机包需电脑服务及USB端口转发，临时后端重启为空库。
-- [测试记录](docs/TESTING.md)：最新804项Flutter通过，核心覆盖率90.93%，完整分析无问题；历史实际设备报告绑定各自APK和测试范围。
-- [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：草稿PR已公开；提交`4b68180`的七项基础CI全部通过，包括iOS/Android构建与数据库跨平台复验；另设iOS模拟器运行检查，最新结果见PR的Checks。
+- [测试记录](docs/TESTING.md)：最近完成的代码验证为`2aa445c`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)，818项Flutter、403项数据库、24项通知策略及30项诊断日志检查通过，CI核心覆盖率90.73%；历史设备报告绑定各自APK和测试范围。
+- [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：草稿PR已公开，包含iOS Debug/Release未签名构建、Android构建、数据库/HTTP/Storage及iOS模拟器运行检查；后续提交结果见PR的Checks。
 - [本机备份恢复演练](docs/BACKUP_RESTORE.md)：新环境恢复数据库与私有图片/PDF，9项检查通过；目标云端备份仍待验收。
 - [开发历史](docs/PROGRESS.md)、[技术架构](docs/ARCHITECTURE.md)与[完整计划](docs/DEVELOPMENT_PLAN.md)。
 
-主要剩余项为云端部署、iOS签名安装、华为鸿蒙4.2/iPhone端到端验证、iOS后台本地通知安静边界、真实设备性能、模型评测和四周家庭试用。家长补签和计时纠正已实现，是否扩展为撤回误完成仍待确认。
+主要剩余项为云端部署、iOS签名安装、华为鸿蒙4.2/iPhone端到端验证、iOS收到远程提醒后的安静时段检查、真实设备性能、模型评测和四周家庭试用。家长补签和计时纠正已实现，是否扩展为撤回误完成仍待确认。
 
-最近代码改动包括[首页与任务列表字号/安全区域](docs/TASK_ACCESSIBILITY.md)、[组卷适配与上传隐私提示](docs/WORKSHEET_ACCESSIBILITY.md)、[图片导入中断保护](docs/OCR_INTERRUPTION.md)和[更换图片后重新校对](docs/OCR_SOURCE_CHANGES.md)。原README的逐轮状态已保留到[历史记录](docs/README_STATUS_HISTORY.md)，以免旧测试数量和旧待办被误读为当前结论。
+最近代码改动包括[iPhone任务远程提醒](docs/TASK_REMOTE_PUSH.md)、[iOS诊断日志策略及跨进程恢复验证](docs/RUNTIME_DIAGNOSTICS.md#ios诊断日志的原生策略检查)、[首页与任务列表字号/安全区域](docs/TASK_ACCESSIBILITY.md)、[组卷适配与上传隐私提示](docs/WORKSHEET_ACCESSIBILITY.md)、[图片导入中断保护](docs/OCR_INTERRUPTION.md)和[更换图片后重新校对](docs/OCR_SOURCE_CHANGES.md)。原README的逐轮状态已保留到[历史记录](docs/README_STATUS_HISTORY.md)，以免旧测试数量和旧待办被误读为当前结论。
 
 ## 技术栈
 
@@ -26,7 +26,7 @@
 - pinyin_pro_flutter：本地读音候选、轻声、多音字备选及可选“一、不”变调，保存前须家长核对。
 - pdf-lib/fontkit：服务端嵌入字体生成确定性PDF；printing/file_picker：客户端预览、打印、分享与保存。
 - archive/crypto：CSV及图片索引ZIP打包、文件完整性哈希；导出快照由授权RPC分页提供。
-- Kotlin/AlarmManager：Android任务提醒在实际投递前校验家庭时区/安静时段；flutter_local_notifications/timezone：即时通知及iOS本地排程。HMS/APNs提供可配置的家长远程通知通道。
+- Kotlin/AlarmManager：Android任务提醒在实际投递前校验家庭时区/安静时段；iPhone任务通过APNs data-only投递，由Swift收到后复查范围、时点和安静策略，再发即时通知。flutter_local_notifications/timezone用于即时通知与时间策略；HMS/APNs另提供家长远程消息通道。
 - Node脚本及embedded-postgres：隔离数据库回归；Android原生逻辑为Kotlin，iOS为Swift。
 - Deno AI网关：最小化题目输入、可替换的模型适配器、严格结构化输出；API密钥仅存服务端。
 

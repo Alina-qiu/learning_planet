@@ -6,7 +6,7 @@
 
 需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，SHA256 `4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`；本轮重新核对文件摘要，前一轮已重提正文并确认与读取内容一致。
 
-最新验证：提交`ce7015e`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42162003423)全部通过，含818项Flutter、403项数据库、24项Swift通知策略、iOS Debug/Release及千任务原生模拟器流程；iPhone“优先安静”提醒已有对应源码的编译与策略证据，真实APNs和手机验收仍未完成。本轮继续将iOS诊断日志策略提取为生产共用代码，增加账号边界、去重、容量、损坏数据及跨进程恢复检查，执行结果以[草稿PR](https://github.com/Alina-qiu/learning_planet/pull/1)当前提交的CI为准。详见[任务远程提醒](TASK_REMOTE_PUSH.md)和[原生诊断检查](RUNTIME_DIAGNOSTICS.md#ios诊断日志的原生策略检查)。
+最近完成的代码验证：提交`2aa445c`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)全部通过，含818项Flutter、403项数据库、24项Swift通知策略、30项诊断日志检查、iOS Debug/Release及千任务原生模拟器流程。诊断检查包含全新进程读取、重放和确认同一份合成日志；通知和诊断原生检查不能替代真实APNs、MetricKit回调、锁屏存储或手机验收。后续提交状态以[草稿PR](https://github.com/Alina-qiu/learning_planet/pull/1)对应的CI为准。详见[任务远程提醒](TASK_REMOTE_PUSH.md)和[原生诊断检查](RUNTIME_DIAGNOSTICS.md#ios诊断日志的原生策略检查)。
 
 ## 技术栈与交付方式
 

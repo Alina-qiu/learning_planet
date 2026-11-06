@@ -1,6 +1,6 @@
 # 本地审阅分支与远程验证准备
 
-最新本机候选加入[iPhone任务远程提醒](TASK_REMOTE_PUSH.md)：完整818项Flutter、核心覆盖率90.75%、403项数据库、14项升级及发送/Edge/HTTP2回归通过；完整分析无问题。任务/家长APNs共用传输模块，原PEM解析字面量移至`apns_push_transport.mjs`，并非新增私钥。源码之外的测试缓存不进入发布候选。本轮Swift策略和原生接收须由同提交macOS CI验证，结果以PR Checks为准。
+最近完成的代码验证为`2aa445c`的[CI 42165056276](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)，八项任务全部通过。818项Flutter、403项数据库、14项升级、24项通知策略、30项诊断日志检查及iOS模拟器流程有对应提交的运行证据；CI核心覆盖率90.73%。独立工作树的672个发布文件与原工作区逐字节一致，主工作区暂存区保持为空；当前清单见本机`build/review_candidate/final-results.json`，后续提交以PR Checks为准。任务/家长APNs共用传输模块中的PEM解析字面量不是私钥；测试缓存和构建产物不进入发布候选。
 
 此前`60d8ff4`的[CI 42151905737](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)八项均通过，iOS模拟器千任务流程、加密库重开及双倍字体截图已取得且复核。这不替代本次新增通知代码的编译和目标手机验收。
 
@@ -15,16 +15,18 @@
 
 需求原始Word文件、`.env`、本机SDK与服务配置、设备凭据、构建缓存、APK、截图和导出文件均未纳入发布候选。公开发布源码会同时公开已整理的功能设计与技术文档，不能将排除需求原件理解为隐藏了所有产品设计。
 
-## 本机验证
+## 首次候选的本机验证
 
 - 初始复制652个源码/文档/资源文件、约15.9MB，逐文件SHA256与原工作区一致。离线依赖恢复后没有修改这些文件。
 - 审阅目录独立执行`flutter pub get --offline`与`flutter analyze --no-pub`成功，分析30.7秒无问题；日志位于原工作区`tmp/review-candidate-*.log`。
 - Gitleaks 8.30.1目录扫描使用官方校验和验证的工具，扫描器报告1处`private-key`命中并返回1。人工逐行核对后，命中为`supabase/functions/_shared/parent_push_worker.mjs`中验证及移除PEM头尾的解析语法，不含私钥数据。没有改动生产解析器，也没有添加扫描豁免；这不等于自动扫描零告警或完整安全审计。
-- 当前业务代码最近完整验证为804项Flutter通过、核心覆盖率90.93%，并已重建两个Android调试包；详细日志与适用范围见[任务适配](TASK_ACCESSIBILITY.md)、[测试记录](TESTING.md)和[构建记录](ANDROID_BUILD.md)。本次仅整理分支与文档，未把历史测试计为新执行。
+- 首次候选整理时，业务代码最近完整验证为804项Flutter通过、核心覆盖率90.93%，并已重建两个Android调试包；详细日志与适用范围见[任务适配](TASK_ACCESSIBILITY.md)、[测试记录](TESTING.md)和[构建记录](ANDROID_BUILD.md)。本次仅整理分支与文档，未把历史测试计为新执行。
 
 本机候选清单、扫描报告及最终本地提交标识保存在原工作区`build/review_candidate/`，不随源码发布。
 
-## 远程构建进展
+## 远程构建历史
+
+以下按当时提交保留首轮失败和后续修复，最新已完成结果见本文开头；历史“下一轮验证”不表示该问题仍未处理。
 
 原仓库为公开的[Alina-qiu/learning_planet](https://github.com/Alina-qiu/learning_planet)。旧[成功CI](https://github.com/Alina-qiu/learning_planet/actions/runs/35095053736)只覆盖基线`2a476d6`。当前源码的[首轮CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42138320338)已实际运行：两组HTTP集成和Storage/隐私/PDF/备份恢复通过；启动检查的一项250ms网络断言不稳定，iOS Debug/Release均在生命周期注册方法名处编译失败。
 
