@@ -70,7 +70,7 @@ Debug/Release产物中的`Podfile.lock`逐字节一致，SHA256为`9d576f3677efd
 
 ## iOS模拟器运行验证
 
-新增CI任务`ios-simulator`，从当前macOS镜像实际可用的iOS运行时中选择iPhone，启动后按[Flutter集成测试方式](https://docs.flutter.dev/testing/integration-tests)执行：
+新增CI任务`ios-simulator`，使用[GitHub提供的Intel镜像](https://github.com/actions/runner-images/blob/main/README.md)`macos-15-intel`和Xcode16.4，从实际可用的iOS18.5模拟器中选择iPhone，启动后按[Flutter集成测试方式](https://docs.flutter.dev/testing/integration-tests)执行：
 
 ```sh
 flutter drive --no-pub --debug --driver=test_driver/task_flow_driver.dart --target=integration_test/task_flow_test.dart --dart-define=TEST_DEVICE_LABEL=github-ios-simulator -d SIMULATOR_UDID
@@ -78,7 +78,7 @@ flutter drive --no-pub --debug --driver=test_driver/task_flow_driver.dart --targ
 
 测试使用1000条合成任务、真实Keychain和加密SQLite，检查网络响应挂起时本机完成反馈、金币保持待服务端确认、重开后命令和状态恢复，以及两倍字体滚动截图。它直接装载合成家庭页面，不经过生产冷启动或登录，不连接真实后端；Debug模拟器耗时不能作为PRD性能验收。CI上传`ios-simulator-task-flow`附件，包括实际设备/运行时、日志、`task_flow.json`和两张PNG。运行结束关闭所选模拟器。
 
-该任务是本轮新增，尚待远程执行。上一轮`4b68180`的[七项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42141570527)全部通过，其中iOS仍只证明未签名编译与资源完整性。
+首次[模拟器CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42143885652)对应`37a3549`，其余七项全部通过，但Apple Silicon模拟器链接失败：`MLImage.framework`的arm64对象只支持iOS真机，不能链接进iOS-simulator。测试未启动，因此没有运行通过或性能结果。现单独将模拟器任务改用Intel/x86_64及iOS18.5；Debug/Release真机架构构建继续保留Apple Silicon。修正后的模拟器运行仍待验证，原始失败日志保留在CI附件。
 
 ## 历史本机准备验证及剩余事项
 

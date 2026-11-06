@@ -236,8 +236,11 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
 
   ios-simulator:
-    runs-on: macos-latest
+    # MLImage's arm64 slice targets devices, not Apple Silicon simulators.
+    runs-on: macos-15-intel
     timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -259,12 +262,12 @@ jobs:
           devices = json.loads((report / 'devices.json').read_text())['devices']
           candidates = [
               (tuple(map(int, re.findall(r'\d+', runtime))), runtime, device)
-              for runtime, entries in devices.items() if '.iOS-' in runtime
+              for runtime, entries in devices.items() if runtime.endswith('.iOS-18-5')
               for device in entries
               if device.get('isAvailable') and device['name'].startswith('iPhone')
           ]
           if not candidates:
-              raise SystemExit('No available iPhone simulator in this runner image')
+              raise SystemExit('No available iOS 18.5 iPhone simulator in this runner image')
           _, runtime, device = max(candidates, key=lambda item: (item[0], item[2]['name']))
           selected = {**device, 'runtime': runtime, 'scope': 'Simulator; synthetic tasks; no cloud or physical-device acceptance'}
           (report / 'selected.json').write_text(json.dumps(selected, indent=2) + '\n')
