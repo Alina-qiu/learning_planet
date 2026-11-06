@@ -30,4 +30,6 @@
 
 本机备份复验第一次Storage启动超过60秒，已保存失败记录；随后独立启动探测确认SCRAM下可启动，完整重跑通过。未放宽超时，也未将只启动探测记为完整集成通过。详情见[备份恢复](BACKUP_RESTORE.md)。
 
+[第三轮CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42141570527)对应`4b68180`，七项任务全部通过，包括Linux完整388项数据库检查、两组HTTP、Storage/备份恢复、Flutter/Android以及iOS Debug/Release。当前又加入独立iOS模拟器任务，运行已有原生加密离线任务测试；新增任务仍待远程执行，不能把第三轮结果用于证明它通过。
+
 工作流由PR或`main`上的push触发，后续修复继续提交至草稿分支。签名安装、iPhone/鸿蒙4.2实机、云端配置、iOS后台安静边界、真实性能和家庭试用仍须单独完成。

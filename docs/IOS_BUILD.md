@@ -68,7 +68,19 @@ Debug/Release产物中的`Podfile.lock`逐字节一致，SHA256为`9d576f3677efd
 
 实际安装需在Mac打开`ios/Runner.xcworkspace`，选择自己的开发团队和设备，完成签名与相应能力配置。未签名`.app`不能直接交付iPhone安装；普通未配置服务的包只能检查启动配置提示，在线业务仍需可访问的后端。[Android本机联调](LOCAL_DEBUG.md)中的USB端口转发步骤不适用于iPhone。
 
-## 本轮本机验证及剩余事项
+## iOS模拟器运行验证
+
+新增CI任务`ios-simulator`，从当前macOS镜像实际可用的iOS运行时中选择iPhone，启动后按[Flutter集成测试方式](https://docs.flutter.dev/testing/integration-tests)执行：
+
+```sh
+flutter drive --no-pub --debug --driver=test_driver/task_flow_driver.dart --target=integration_test/task_flow_test.dart --dart-define=TEST_DEVICE_LABEL=github-ios-simulator -d SIMULATOR_UDID
+```
+
+测试使用1000条合成任务、真实Keychain和加密SQLite，检查网络响应挂起时本机完成反馈、金币保持待服务端确认、重开后命令和状态恢复，以及两倍字体滚动截图。它直接装载合成家庭页面，不经过生产冷启动或登录，不连接真实后端；Debug模拟器耗时不能作为PRD性能验收。CI上传`ios-simulator-task-flow`附件，包括实际设备/运行时、日志、`task_flow.json`和两张PNG。运行结束关闭所选模拟器。
+
+该任务是本轮新增，尚待远程执行。上一轮`4b68180`的[七项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42141570527)全部通过，其中iOS仍只证明未签名编译与资源完整性。
+
+## 历史本机准备验证及剩余事项
 
 - 6份工程plist/entitlements/隐私清单可解析；3类API理由和12类数据名称/用途与2026-11-06读取的Apple官方结构化文档一致。
 - 资源引用、对象ID及CocoaPods引用顺序静态检查通过。第一次检查把`TargetAttributes`的嵌套键误算作对象定义，缩小检查范围后通过；没有因此修改原生目标。
@@ -76,4 +88,4 @@ Debug/Release产物中的`Podfile.lock`逐字节一致，SHA256为`9d576f3677efd
 - 报告：`build/ios_preparation/source-checks.json`明确记录`ios_built: false`；日志为`tmp/ios-preparation-checks.log`、`tmp/ios-ci-source-check.log`。工作流YAML解析通过。
 - 本轮不修改Swift运行逻辑、Dart、SQL或Android资源，既有778项Flutter、387组SQL、34项JVM及90.94%覆盖率为历史结果，没有重复计为本轮执行。
 
-接下来仍需实际Xcode编译、签名与iPhone上的相机/中文OCR、多图中断恢复、Keychain/加密库/锁屏、退出清理、推送与静默时段、MetricKit回调、离线同步、打印分享和性能验收。Android鸿蒙4.2、云端部署与真实家庭试用同样仍未完成，完整进度见[开发进度](PROGRESS.md)。
+Xcode未签名编译已经通过；接下来仍需签名与iPhone上的相机/中文OCR、多图中断恢复、Keychain/加密库/锁屏、退出清理、推送与静默时段、MetricKit回调、离线同步、打印分享和性能验收。Android鸿蒙4.2、云端部署与真实家庭试用同样仍未完成，完整进度见[开发进度](PROGRESS.md)。

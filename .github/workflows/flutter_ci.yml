@@ -235,6 +235,78 @@ jobs:
           name: android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
 
+  ios-simulator:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.4'
+          cache: true
+      - run: flutter pub get
+      - name: Select an available iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          mkdir -p build/ios-simulator
+          xcodebuild -version | tee build/ios-simulator/xcode.txt
+          xcrun simctl list devices available --json > build/ios-simulator/devices.json
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          report = pathlib.Path('build/ios-simulator')
+          devices = json.loads((report / 'devices.json').read_text())['devices']
+          candidates = [
+              (tuple(map(int, re.findall(r'\d+', runtime))), runtime, device)
+              for runtime, entries in devices.items() if '.iOS-' in runtime
+              for device in entries
+              if device.get('isAvailable') and device['name'].startswith('iPhone')
+          ]
+          if not candidates:
+              raise SystemExit('No available iPhone simulator in this runner image')
+          _, runtime, device = max(candidates, key=lambda item: (item[0], item[2]['name']))
+          selected = {**device, 'runtime': runtime, 'scope': 'Simulator; synthetic tasks; no cloud or physical-device acceptance'}
+          (report / 'selected.json').write_text(json.dumps(selected, indent=2) + '\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"id={device['udid']}\nstate={device['state']}\n")
+          print(device['name'], runtime, device['state'])
+          PY
+      - name: Boot simulator
+        timeout-minutes: 5
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+          SIMULATOR_STATE: ${{ steps.simulator.outputs.state }}
+        run: |
+          if [ "$SIMULATOR_STATE" != Booted ]; then
+            xcrun simctl boot "$SIMULATOR_ID"
+          fi
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+      - name: Run native encrypted offline task flow
+        shell: bash
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          set -o pipefail
+          flutter drive --no-pub --debug \
+            --driver=test_driver/task_flow_driver.dart \
+            --target=integration_test/task_flow_test.dart \
+            --dart-define=TEST_DEVICE_LABEL=github-ios-simulator \
+            -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/task-flow.log
+      - name: Stop simulator
+        if: always() && steps.simulator.outputs.id != ''
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: xcrun simctl shutdown "$SIMULATOR_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-simulator-task-flow
+          path: |
+            build/ios-simulator/
+            build/integration_results/
+          if-no-files-found: error
+
   ios-build:
     runs-on: macos-latest
     timeout-minutes: 25
