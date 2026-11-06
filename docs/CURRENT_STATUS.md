@@ -10,7 +10,7 @@
 
 | 层 | 当前实现 | 边界 |
 |---|---|---|
-| 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；iOS工程尚无Xcode结果 |
+| 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS首轮Xcode编译](IOS_BUILD.md)发现Swift方法名错误，修复后待CI复验 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
 | 后端 | Supabase PostgreSQL/Auth/Storage，68份业务迁移至066 | 本机PG15.19、GoTrue、PostgREST、Storage、MinIO已有联调；未部署用户云端项目 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |

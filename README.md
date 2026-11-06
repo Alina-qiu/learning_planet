@@ -9,7 +9,7 @@
 - [当前需求覆盖与逐项验收](docs/CURRENT_STATUS.md)：ACC、TSK、ERR、AC-01至AC-11、非功能要求及剩余依赖。
 - [当前Android安装包](docs/ANDROID_BUILD.md)与[本机联调方法](docs/LOCAL_DEBUG.md)：普通包只作启动验证；本机包需电脑服务及USB端口转发，临时后端重启为空库。
 - [测试记录](docs/TESTING.md)：最新804项Flutter通过，核心覆盖率90.93%，完整分析无问题；历史实际设备报告绑定各自APK和测试范围。
-- [本地审阅分支与远程验证准备](docs/REVIEW_CANDIDATE.md)：当前源码已隔离整理；公开仓库的历史CI只覆盖旧版本，发布当前源码尚待授权。
+- [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：已获授权发布并创建草稿PR；当前源码已进入Linux/macOS CI，首轮问题正在修复复验。
 - [本机备份恢复演练](docs/BACKUP_RESTORE.md)：新环境恢复数据库与私有图片/PDF，9项检查通过；目标云端备份仍待验收。
 - [开发历史](docs/PROGRESS.md)、[技术架构](docs/ARCHITECTURE.md)与[完整计划](docs/DEVELOPMENT_PLAN.md)。
 

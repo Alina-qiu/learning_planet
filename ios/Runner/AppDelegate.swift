@@ -13,7 +13,8 @@ import UserNotifications
   ) -> Bool {
     // Register before any Flutter engine is needed. Flutter forwards this
     // optional UIApplication callback dynamically through lifecycle delegates.
-    addApplicationLifeCycleDelegate(parentPush)
+    // Swift imports addApplicationLifeCycleDelegate: as add(_:).
+    add(parentPush)
     nativeDiagnostics.start()
     UNUserNotificationCenter.current().delegate = taskNotifications
     // A terminated document picker can leave its staging ZIP behind. Only our

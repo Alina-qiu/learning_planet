@@ -1,6 +1,6 @@
 # iPhone 工程与构建验证
 
-更新于2026-11-06。本轮补齐应用隐私清单、CocoaPods配置引用和构建产物检查。当前工作机是Windows，**尚无Xcode编译、签名安装或iPhone运行通过的证据**；下列本机源码检查不替代这些步骤。Android安装包和业务Dart/SQL未变。
+更新于2026-11-06。已补齐应用隐私清单、CocoaPods配置引用和构建产物检查，并经用户授权通过[草稿PR #1](https://github.com/Alina-qiu/learning_planet/pull/1)启动实际macOS构建。首轮Debug/Release均发现Swift生命周期注册方法名错误，已按Swift接口修正为`add(parentPush)`；**修复后的构建尚待CI验证，签名安装和iPhone运行仍未验证**。Android安装包和业务Dart/SQL未变。
 
 ## 工程配置
 
@@ -60,7 +60,9 @@ python3 scripts/verify_ios_bundle.py build/ios/iphoneos/Runner.app
 
 检查器验证应用清单被打包且与源码一致、Bundle ID、最低系统版本、相机/相册说明、后台通知模式、Flutter二进制/资源存在且非空，并解析所有已打包的隐私plist。它不运行二进制，不验证所有SDK声明语义、签名或设备行为。
 
-CI的`ios-build`现在分别运行Debug与Release，保留构建日志、资源检查JSON和实际解析的Podfile.lock，构建失败也尝试上传日志。当前实现尚未上传，**没有当前源码的macOS CI结果**。2026-11-06核对到[历史CI 35095053736](https://github.com/Alina-qiu/learning_planet/actions/runs/35095053736)的macOS任务通过，但它对应旧提交`2a476d6`，不能作为本轮iOS代码的构建证据。当前源码已整理为[本地审阅分支](REVIEW_CANDIDATE.md)，公开发布仍待用户授权。第一次成功解析依赖后应审查并保留Podfile.lock；当前没有生成或伪造锁文件。
+CI的`ios-build`分别运行Debug与Release，保留构建日志、资源检查JSON和实际解析的Podfile.lock，构建失败也上传日志。[首轮CI 42138320338](https://github.com/Alina-qiu/learning_planet/actions/runs/42138320338)对应`0aa7b9a`，实际Xcode编译报`Cannot find 'addApplicationLifeCycleDelegate' in scope`。Flutter将该Objective-C选择子导入为Swift的`add(_:)`，参照[Flutter官方Swift示例](https://docs.flutter.dev/add-to-app/ios/add-flutter-screen)修正调用，保持原注册时机。不能用仅修改源码代替下一轮编译成功。
+
+Debug/Release产物中的`Podfile.lock`逐字节一致，SHA256为`9d576f3677efd68eee4703997030ba511df611f4827f32965b171ccbd5651fe8`，Podfile校验值与已提交源码一致。已审查并保留此实际解析结果；它锁定CocoaPods依赖，不替代Flutter自动管理的Swift Package Manager依赖。原始日志和锁文件保存在本机`build/review_candidate/`及CI附件中。[历史CI 35095053736](https://github.com/Alina-qiu/learning_planet/actions/runs/35095053736)仍只覆盖旧提交`2a476d6`。
 
 实际安装需在Mac打开`ios/Runner.xcworkspace`，选择自己的开发团队和设备，完成签名与相应能力配置。未签名`.app`不能直接交付iPhone安装；普通未配置服务的包只能检查启动配置提示，在线业务仍需可访问的后端。[Android本机联调](LOCAL_DEBUG.md)中的USB端口转发步骤不适用于iPhone。
 

@@ -24,16 +24,21 @@ test('readiness waits for a successful HTTP response', async () => {
   });
 });
 
-test('readiness reports status and deadline without response contents', async () => {
-  await withProbe((_, response) => {
-    response.writeHead(503); response.end('private-response');
-  }, async (process, url) => {
-    await assert.rejects(process.ready(url, {timeoutMs: 250}), error => {
+test('readiness reports status and deadline without response contents', async t => {
+  // Keep this diagnostic assertion independent of a final socket request racing
+  // the deadline. Real HTTP retry and response timeout behavior is covered below.
+  const fetch = t.mock.method(globalThis, 'fetch', async () =>
+    new Response('private-response', {status: 503}));
+  const process = localProcess(globalThis.process.execPath,
+    ['-e', 'setInterval(() => {}, 1000)'], {name: 'Startup fixture'});
+  try {
+    await assert.rejects(process.ready('http://127.0.0.1:1/status', {timeoutMs: 250}), error => {
       assert.match(error.message, /last probe: HTTP 503; process alive: true/);
       assert.doesNotMatch(error.message, /private-response|127\.0\.0\.1/);
       return true;
     });
-  });
+    assert.ok(fetch.mock.callCount() > 0);
+  } finally { await process.stop(); }
 });
 
 test('edge readiness uses OPTIONS and requires the exact expected status', async () => {
