@@ -146,12 +146,21 @@ void main() {
       report['committed_before_network_reply'] = true;
 
       await tester.pumpAndSettle();
+      final taskList = find.byKey(PageStorageKey('tasks:$workloadChild'));
+      expect(taskList, findsOneWidget);
+      final scrolling = tester.state<ScrollableState>(
+        find.descendant(of: taskList, matching: find.byType(Scrollable)),
+      );
+      final initialOffset = scrolling.position.pixels;
       await binding.watchPerformance(() async {
         for (var i = 0; i < 10; i++) {
-          await tester.drag(find.byType(ListView).last, const Offset(0, -350));
+          await tester.drag(taskList, const Offset(0, -350));
           await tester.pumpAndSettle();
         }
       }, reportKey: 'task_scroll');
+      expect(scrolling.position.pixels, greaterThan(initialOffset));
+      expect(find.byType(TaskHeading).evaluate().length, lessThan(30));
+      report['task_list_scrolled'] = true;
 
       // Screenshot conversion is excluded from timing measurements.
       if (Platform.isAndroid) await binding.convertFlutterSurfaceToImage();

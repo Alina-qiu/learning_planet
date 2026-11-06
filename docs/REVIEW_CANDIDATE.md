@@ -34,4 +34,6 @@
 
 `37a3549`的[后续CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42143885652)原七项再次通过；新增模拟器任务因MLImage缺少arm64模拟器库而链接失败，测试未启动。改为Intel/Xcode16.4/iOS18.5后，`c341a29`的[复验](https://github.com/Alina-qiu/learning_planet/actions/runs/42145294617)成功编译模拟器应用，但编译后等待直至30分钟任务上限，未取得测试结果；原七项仍通过。现将构建与运行拆开、设置独立时限并补充诊断附件，最新结果见PR的Checks。保留原Apple Silicon Debug/Release构建。
 
+`8a1dc7f`的[诊断复验](https://github.com/Alina-qiu/learning_planet/actions/runs/42149149028)已在iOS18.5模拟器实际启动并执行本机加密任务流程，失败原因定位为旧测试脚本仍查找`ListView`，与已改为`CustomScrollView`的任务页不符。现使用页面既有滚动区域标识，并补充实际滚动及按需构建断言。该轮在滚动前失败，不能算完整通过；最新结果见PR的Checks。
+
 工作流由PR或`main`上的push触发，后续修复继续提交至草稿分支。签名安装、iPhone/鸿蒙4.2实机、云端配置、iOS后台安静边界、真实性能和家庭试用仍须单独完成。

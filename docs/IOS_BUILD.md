@@ -82,6 +82,10 @@ flutter drive --no-pub --debug --driver=test_driver/task_flow_driver.dart --targ
 
 `c341a29`的[Intel复验](https://github.com/Alina-qiu/learning_planet/actions/runs/42145294617)七项基础任务通过，模拟器Xcode编译248.3秒成功；随后没有进入测试输出，最终达到30分钟上限，任务为cancelled，不能记为测试通过。失败附件及原始任务日志保留。后续工作流拆分12分钟构建、5分钟启动、8分钟预构建应用测试，并采集Runner日志、安装路径及结束时截图；预构建显式保留调试端口发布，供驱动连接。最新运行结果以[草稿PR的Checks](https://github.com/Alina-qiu/learning_planet/pull/1/checks)及对应提交的附件为准。
 
+`8a1dc7f`的[诊断复验](https://github.com/Alina-qiu/learning_planet/actions/runs/42149149028)确认应用在iPhone SE第三代/iOS18.5模拟器上启动，驱动连接成功；已通过Keychain读写、加密库创建、合成首页/任务页和网络挂起时的本机完成断言。随后脚本用旧`ListView`定位器滚动，因页面已经采用`CustomScrollView`而报`Bad state: No element`；该轮未执行完滚动截图及重开恢复，不能记为整项通过。已改为页面现有的`PageStorageKey`定位，并检查滚动偏移确实增加且可见任务保持按需构建。原始失败报告与日志继续保留。
+
+定位器修正的本机静态分析无问题，8项千任务列表/完成反馈/大字体与安全区域布局测试通过。它们不能替代iOS原生完整复验；CI仍保留加密库重开、命令一致性、金币未提前发放和两倍字体截图断言。
+
 ## 历史本机准备验证及剩余事项
 
 - 6份工程plist/entitlements/隐私清单可解析；3类API理由和12类数据名称/用途与2026-11-06读取的Apple官方结构化文档一致。
