@@ -9,7 +9,7 @@
 - [当前需求覆盖与逐项验收](docs/CURRENT_STATUS.md)：ACC、TSK、ERR、AC-01至AC-11、非功能要求及剩余依赖。
 - [当前Android安装包](docs/ANDROID_BUILD.md)与[本机联调方法](docs/LOCAL_DEBUG.md)：普通包只作启动验证；本机包需电脑服务及USB端口转发，临时后端重启为空库。
 - [测试记录](docs/TESTING.md)：最新804项Flutter通过，核心覆盖率90.93%，完整分析无问题；历史实际设备报告绑定各自APK和测试范围。
-- [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：草稿PR已公开；提交`4b68180`的七项CI全部通过，包括iOS/Android构建与数据库跨平台复验；新增iOS模拟器任务待实际运行。
+- [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：草稿PR已公开；提交`4b68180`的七项基础CI全部通过，包括iOS/Android构建与数据库跨平台复验；另设iOS模拟器运行检查，最新结果见PR的Checks。
 - [本机备份恢复演练](docs/BACKUP_RESTORE.md)：新环境恢复数据库与私有图片/PDF，9项检查通过；目标云端备份仍待验收。
 - [开发历史](docs/PROGRESS.md)、[技术架构](docs/ARCHITECTURE.md)与[完整计划](docs/DEVELOPMENT_PLAN.md)。
 

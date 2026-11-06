@@ -32,6 +32,6 @@
 
 [第三轮CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42141570527)对应`4b68180`，七项任务全部通过，包括Linux完整388项数据库检查、两组HTTP、Storage/备份恢复、Flutter/Android以及iOS Debug/Release。当前又加入独立iOS模拟器任务，运行已有原生加密离线任务测试；新增任务仍待远程执行，不能把第三轮结果用于证明它通过。
 
-`37a3549`的[后续CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42143885652)原七项再次通过；新增模拟器任务因MLImage缺少arm64模拟器库而链接失败，测试未启动。已将模拟器任务限定为Intel/Xcode16.4/iOS18.5，保留原Apple Silicon的Debug/Release构建；修正后等待复验。
+`37a3549`的[后续CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42143885652)原七项再次通过；新增模拟器任务因MLImage缺少arm64模拟器库而链接失败，测试未启动。改为Intel/Xcode16.4/iOS18.5后，`c341a29`的[复验](https://github.com/Alina-qiu/learning_planet/actions/runs/42145294617)成功编译模拟器应用，但编译后等待直至30分钟任务上限，未取得测试结果；原七项仍通过。现将构建与运行拆开、设置独立时限并补充诊断附件，最新结果见PR的Checks。保留原Apple Silicon Debug/Release构建。
 
 工作流由PR或`main`上的push触发，后续修复继续提交至草稿分支。签名安装、iPhone/鸿蒙4.2实机、云端配置、iOS后台安静边界、真实性能和家庭试用仍须单独完成。

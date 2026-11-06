@@ -275,7 +275,19 @@ jobs:
               output.write(f"id={device['udid']}\nstate={device['state']}\n")
           print(device['name'], runtime, device['state'])
           PY
+      - name: Build simulator test app
+        timeout-minutes: 12
+        shell: bash
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          set -o pipefail
+          flutter build ios --simulator --debug --no-pub --publish-port \
+            --target=integration_test/task_flow_test.dart \
+            --dart-define=TEST_DEVICE_LABEL=github-ios-simulator \
+            -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
       - name: Boot simulator
+        id: boot
         timeout-minutes: 5
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
@@ -286,16 +298,42 @@ jobs:
           fi
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
       - name: Run native encrypted offline task flow
+        timeout-minutes: 8
         shell: bash
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
         run: |
           set -o pipefail
-          flutter drive --no-pub --debug \
+          flutter drive --no-pub --debug --verbose \
+            --use-application-binary=build/ios/iphonesimulator/Runner.app \
             --driver=test_driver/task_flow_driver.dart \
             --target=integration_test/task_flow_test.dart \
             --dart-define=TEST_DEVICE_LABEL=github-ios-simulator \
             -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/task-flow.log
+      - name: Collect simulator launch diagnostics
+        if: always() && steps.boot.outcome == 'success'
+        timeout-minutes: 2
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          report = pathlib.Path('build/ios-simulator')
+          device = os.environ['SIMULATOR_ID']
+          commands = {
+              'installed-app.txt': ['get_app_container', device, 'com.learningplanet.learningPlanet', 'app'],
+              'runner.log': ['spawn', device, 'log', 'show', '--last', '15m', '--style', 'compact', '--predicate', 'process == "Runner"'],
+              'screenshot.log': ['io', device, 'screenshot', str(report / 'simulator-final.png')],
+          }
+          for name, arguments in commands.items():
+              with (report / name).open('wb') as output:
+                  try:
+                      result = subprocess.run(['xcrun', 'simctl', *arguments], stdout=output, stderr=subprocess.STDOUT, timeout=30)
+                      print(name, 'exit', result.returncode)
+                  except subprocess.TimeoutExpired:
+                      output.write(b'\nDiagnostic command exceeded 30 seconds\n')
+                      print(name, 'timeout')
+          PY
       - name: Stop simulator
         if: always() && steps.simulator.outputs.id != ''
         env:

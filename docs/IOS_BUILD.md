@@ -76,9 +76,11 @@ Debug/Release产物中的`Podfile.lock`逐字节一致，SHA256为`9d576f3677efd
 flutter drive --no-pub --debug --driver=test_driver/task_flow_driver.dart --target=integration_test/task_flow_test.dart --dart-define=TEST_DEVICE_LABEL=github-ios-simulator -d SIMULATOR_UDID
 ```
 
-测试使用1000条合成任务、真实Keychain和加密SQLite，检查网络响应挂起时本机完成反馈、金币保持待服务端确认、重开后命令和状态恢复，以及两倍字体滚动截图。它直接装载合成家庭页面，不经过生产冷启动或登录，不连接真实后端；Debug模拟器耗时不能作为PRD性能验收。CI上传`ios-simulator-task-flow`附件，包括实际设备/运行时、日志、`task_flow.json`和两张PNG。运行结束关闭所选模拟器。
+测试使用1000条合成任务、真实Keychain和加密SQLite，检查网络响应挂起时本机完成反馈、金币保持待服务端确认、重开后命令和状态恢复，以及两倍字体滚动截图。它直接装载合成家庭页面，不经过生产冷启动或登录，不连接真实后端；Debug模拟器耗时不能作为PRD性能验收。CI上传`ios-simulator-task-flow`附件，包括实际设备/运行时和日志；只有测试实际完成才会生成`task_flow.json`及两张测试PNG。运行结束关闭所选模拟器。
 
-首次[模拟器CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42143885652)对应`37a3549`，其余七项全部通过，但Apple Silicon模拟器链接失败：`MLImage.framework`的arm64对象只支持iOS真机，不能链接进iOS-simulator。测试未启动，因此没有运行通过或性能结果。现单独将模拟器任务改用Intel/x86_64及iOS18.5；Debug/Release真机架构构建继续保留Apple Silicon。修正后的模拟器运行仍待验证，原始失败日志保留在CI附件。
+首次[模拟器CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42143885652)对应`37a3549`，其余七项全部通过，但Apple Silicon模拟器链接失败：`MLImage.framework`的arm64对象只支持iOS真机，不能链接进iOS-simulator。测试未启动，因此没有运行通过或性能结果。现单独将模拟器任务改用Intel/x86_64及iOS18.5；Debug/Release真机架构构建继续保留Apple Silicon。
+
+`c341a29`的[Intel复验](https://github.com/Alina-qiu/learning_planet/actions/runs/42145294617)七项基础任务通过，模拟器Xcode编译248.3秒成功；随后没有进入测试输出，最终达到30分钟上限，任务为cancelled，不能记为测试通过。失败附件及原始任务日志保留。后续工作流拆分12分钟构建、5分钟启动、8分钟预构建应用测试，并采集Runner日志、安装路径及结束时截图；预构建显式保留调试端口发布，供驱动连接。最新运行结果以[草稿PR的Checks](https://github.com/Alina-qiu/learning_planet/pull/1/checks)及对应提交的附件为准。
 
 ## 历史本机准备验证及剩余事项
 
