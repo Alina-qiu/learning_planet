@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/offline/network_failure.dart';
@@ -236,6 +237,10 @@ class _ReminderSettingsDialogState
                     ),
                     const SizedBox(height: 12),
                     const Text('按家庭时区；相同时间的提醒合并。相同起止时间表示不静默。'),
+                    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS)
+                      const Text(
+                        'iPhone 收到远程提醒后会再次检查静默时段。断网、强退应用或系统限制可能使提醒缺失，请同时查看应用内任务。',
+                      ),
                   ],
                   if (!_authorized) const Text('请重新验证家长 PIN，或返回当前孩子的设置。'),
                   if (_message != null) Text(_message!),

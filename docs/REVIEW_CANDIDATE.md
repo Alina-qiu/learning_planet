@@ -1,5 +1,9 @@
 # 本地审阅分支与远程验证准备
 
+最新本机候选加入[iPhone任务远程提醒](TASK_REMOTE_PUSH.md)：完整817项Flutter、核心覆盖率90.75%、403项数据库、14项升级及发送/Edge/HTTP2回归通过；完整分析无问题。任务/家长APNs共用传输模块，原PEM解析字面量移至`apns_push_transport.mjs`，并非新增私钥。源码之外的测试缓存不进入发布候选。本轮Swift策略和原生接收须由同提交macOS CI验证，结果以PR Checks为准。
+
+此前`60d8ff4`的[CI 42151905737](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)八项均通过，iOS模拟器千任务流程、加密库重开及双倍字体截图已取得且复核。这不替代本次新增通知代码的编译和目标手机验收。
+
 更新于2026-11-06。当前完整源码已复制到独立工作树`D:/learning-planet-tools/review-app-20261106`，分支为`codex/app-implementation-20261106`，基于`2a476d69600c6fc4747e25cadd01b8c9345d5e22`。用户授权公开发布后，已推送提交`0aa7b9a`并创建[草稿PR #1](https://github.com/Alina-qiu/learning_planet/pull/1)。原工作区仍保留在`main`，未覆盖原有改动或暂存区；尚未合并或部署。
 
 ## 审阅范围

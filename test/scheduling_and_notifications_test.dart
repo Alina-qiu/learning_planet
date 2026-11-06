@@ -392,16 +392,19 @@ void main() {
         isFalse,
       );
     });
-    test('iOS系统关闭权限后不保留旧任务计划', () async {
+    test('iOS无远程配置时明确提示且不回退到本地定时，关闭权限后清除旧通知', () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       final plugin = FakeNotifications();
       final scheduler = schedulerFor(plugin);
       await scheduler.setScope('child');
-      await scheduler.synchronize('child', [reminder('old', 60)]);
+      await expectLater(
+        scheduler.synchronize('child', [reminder('old', 60)]),
+        throwsStateError,
+      );
       plugin.ios.enabled = false;
       await scheduler.synchronize('child', [reminder('new', 90)]);
       expect(plugin.pending, isEmpty);
-      expect(plugin.schedules, 1);
+      expect(plugin.schedules, 0);
     });
     test('权限申请被拒绝会持久关闭并清除旧提醒', () async {
       final plugin = FakeNotifications();

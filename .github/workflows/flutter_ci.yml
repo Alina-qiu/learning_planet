@@ -35,6 +35,7 @@ jobs:
       - run: npm run test:cleanup
       - run: npm run test:account-worker
       - run: npm run test:parent-push
+      - run: npm run test:task-push
       - run: npm run test:pdf-worker
       - run: node scripts/test_ai_analysis.mjs
       - run: node scripts/test_ai_similar.mjs
@@ -243,6 +244,11 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Check native push delivery policy
+        run: |
+          mkdir -p build/ios-push-policy
+          xcrun swiftc ios/Runner/PushDeliveryPolicy.swift scripts/fixtures/push_delivery_policy.swift -o build/ios-push-policy/checks
+          build/ios-push-policy/checks
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

@@ -5,9 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
-import 'package:timezone/timezone.dart' as tz;
 import '../domain/task_reminder_policy.dart';
 import 'task_alarm_backend.dart';
+import 'remote_task_push.dart';
 import '../../../core/diagnostics/startup_timings.dart';
 
 final notificationSchedulerProvider = Provider<NotificationScheduler>(
@@ -73,10 +73,12 @@ class LocalNotificationScheduler
     FlutterLocalNotificationsPlugin? plugin,
     TaskAlarmBackend? taskAlarms,
     this.onScopeChanged,
+    this.remoteTaskPush,
   }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
        _taskAlarms = taskAlarms ?? MethodChannelTaskAlarms();
   final TaskAlarmBackend _taskAlarms;
   final Future<void> Function(String?)? onScopeChanged;
+  final RemoteTaskPush? Function()? remoteTaskPush;
   final FlutterLocalNotificationsPlugin _plugin;
   Future<void>? _initialization;
   Future<void> _queue = Future.value();
@@ -127,6 +129,7 @@ class LocalNotificationScheduler
   }
 
   Future<void> _clearAll() async {
+    await remoteTaskPush?.call()?.disable();
     if (defaultTargetPlatform == TargetPlatform.android) {
       await measureStartup(StartupPhase.taskAlarmClear, _taskAlarms.clear);
     }
@@ -226,10 +229,15 @@ class LocalNotificationScheduler
       }
       final now = DateTime.now();
       final desired = <int, Map<String, dynamic>>{};
-      // Reserve four of iOS's 64 pending slots. Never schedule past slots.
+      // Android schedules future alarms. iOS keeps a bounded receipt allowlist,
+      // including just-due slots that can still arrive within the 15-minute TTL.
       for (final reminder in reminders) {
         final at = DateTime.parse(reminder['remind_at'] as String);
-        if (!at.isAfter(now)) continue;
+        if (defaultTargetPlatform == TargetPlatform.iOS
+            ? !at.isAfter(now.subtract(const Duration(minutes: 15)))
+            : !at.isAfter(now)) {
+          continue;
+        }
         var id = reminderNotificationId('$childId:${reminder['reminder_key']}');
         while (desired.containsKey(id)) {
           id = (id + 1) & 0x7fffffff;
@@ -253,41 +261,18 @@ class LocalNotificationScheduler
         await _taskAlarms.replace(alarms);
         return;
       }
-      final pending = await _plugin.pendingNotificationRequests();
-      final existing = {
-        for (final notification in pending) notification.id: notification,
-      };
-      for (final id in existing.keys) {
-        if (!desired.containsKey(id)) await _plugin.cancel(id: id);
+      // iOS task reminders are data-only remote pushes. Clear legacy scheduled
+      // notifications on scope entry; never fall back to an un-gated timer.
+      final remote = remoteTaskPush?.call();
+      if (remote == null) {
+        if (alarms.isNotEmpty) {
+          throw StateError('此版本尚未配置 iPhone 远程任务提醒，应用内提醒仍可使用。');
+        }
+        return;
       }
-      for (final entry in desired.entries) {
-        if (_scope != childId || version != _version) return;
-        final payload = jsonEncode({
-          'kind': 'task-reminder-v1',
-          ...alarms.firstWhere((alarm) => alarm['id'] == entry.key),
-        });
-        if (existing[entry.key]?.payload == payload) continue;
-        await _plugin.zonedSchedule(
-          id: entry.key,
-          title: '学习星球 · 任务提醒',
-          body: '有学习任务需要关注，请打开应用查看。',
-          scheduledDate: tz.TZDateTime.from(
-            DateTime.parse(entry.value['remind_at'] as String),
-            tz.UTC,
-          ),
-          notificationDetails: const NotificationDetails(
-            android: AndroidNotificationDetails(
-              'learning_tasks',
-              '学习任务',
-              channelDescription: '任务开始与截止提醒',
-              visibility: NotificationVisibility.private,
-            ),
-            iOS: DarwinNotificationDetails(threadIdentifier: 'learning_tasks'),
-          ),
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-          payload: payload,
-        );
-      }
+      await remote.setScope(childId);
+      if (_scope != childId || version != _version) return;
+      await remote.synchronize(childId, alarms);
     });
   }
 

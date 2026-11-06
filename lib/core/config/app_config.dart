@@ -8,6 +8,7 @@ class AppConfig {
     required this.supabaseUrl,
     required this.supabaseAnonKey,
     this.parentRemotePush = false,
+    this.taskRemotePush = false,
     this.localBackend = false,
   });
 
@@ -15,6 +16,7 @@ class AppConfig {
   final String supabaseUrl;
   final String supabaseAnonKey;
   final bool parentRemotePush;
+  final bool taskRemotePush;
   final bool localBackend;
 
   static AppConfig fromEnvironment() {
@@ -30,6 +32,7 @@ class AppConfig {
       supabaseUrl: supabaseUrl,
       supabaseAnonKey: supabaseAnonKey,
       parentRemotePush: const bool.fromEnvironment('PARENT_REMOTE_PUSH'),
+      taskRemotePush: const bool.fromEnvironment('TASK_REMOTE_PUSH'),
       localBackend: const bool.fromEnvironment('LOCAL_BACKEND'),
     );
   }

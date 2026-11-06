@@ -48,6 +48,10 @@ verify_jwt = false
 # Server-only dispatch: exact service-role bearer check inside the handler.
 verify_jwt = false
 
+[functions.task-push]
+# Server-only dispatch: exact service-role bearer check inside the handler.
+verify_jwt = false
+
 [functions.worksheet-render]
 verify_jwt = false
 import_map = "./functions/worksheet-render/deno.json"

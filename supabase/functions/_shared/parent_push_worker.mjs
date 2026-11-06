@@ -1,6 +1,6 @@
 // Server-only transports. No provider response, registration token, signing key,
 // or child data may be returned by the Edge handler or included in logs.
-const encoder=new TextEncoder();
+import {createApnsPushTransport} from './apns_push_transport.mjs';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const fields=['expires_ms','issued_ms','kind','message_id','quiet_end','quiet_start','scope_nonce','settings_version','timezone','version'];
 const outcomes=new Set(['accepted','retry','rejected','invalid_token']);
@@ -35,13 +35,6 @@ async function readJson(response) {
     return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
   } finally {await reader.cancel().catch(()=>{});reader.releaseLock();}
 }
-const base64url=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
-const json64=value=>base64url(encoder.encode(JSON.stringify(value)));
-function pkcs8(pem) {
-  if(typeof pem!=='string' || pem.length>16384 || !pem.startsWith('-----BEGIN PRIVATE KEY-----')) throw new Error('PUSH_CONFIG_INVALID');
-  return Uint8Array.from(atob(pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g,'')),c=>c.charCodeAt(0));
-}
-
 export function createParentPushTransports(env,{fetcher=fetch,now=Date.now,cryptoApi=globalThis.crypto,timeoutMs=8000}={}) {
   const transports={};
   // Abort covers response body reads too. Providers may never redirect secrets.
@@ -94,40 +87,9 @@ export function createParentPushTransports(env,{fetcher=fetch,now=Date.now,crypt
       } catch {return 'retry';}
     };
   }
-  const apnsKey=env('PARENT_PUSH_APNS_KEY'),keyId=env('PARENT_PUSH_APNS_KEY_ID'),teamId=env('PARENT_PUSH_APNS_TEAM_ID'),topic=env('PARENT_PUSH_APNS_TOPIC'),apnsEnv=env('PARENT_PUSH_APNS_ENVIRONMENT');
-  if(apnsKey || keyId || teamId || topic || apnsEnv) {
-    if(!/^[A-Z0-9]{10}$/.test(keyId??'') || !/^[A-Z0-9]{10}$/.test(teamId??'') ||
-      !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9_-]+)+$/.test(topic??'') || topic.length>200 || !['sandbox','production'].includes(apnsEnv)) throw new Error('PUSH_CONFIG_INVALID');
-    const keyBytes=pkcs8(apnsKey);let signingKey=null,cached=null,pending=null;
-    async function apnsToken() {
-      if(cached && now()>=cached.issued && now()-cached.issued<50*60*1000) return cached.token;
-      if(pending) return pending;
-      pending=(async()=>{
-        signingKey??=await cryptoApi.subtle.importKey('pkcs8',keyBytes,{name:'ECDSA',namedCurve:'P-256'},false,['sign']);
-        const issued=now();const content=`${json64({alg:'ES256',kid:keyId})}.${json64({iss:teamId,iat:Math.floor(issued/1000)})}`;
-        const signature=new Uint8Array(await cryptoApi.subtle.sign({name:'ECDSA',hash:'SHA-256'},signingKey,encoder.encode(content)));
-        cached={token:`${content}.${base64url(signature)}`,issued};return cached.token;
-      })();
-      try {return await pending;} finally {pending=null;}
-    }
-    const origin=apnsEnv==='sandbox'?'https://api.sandbox.push.apple.com':'https://api.push.apple.com';
-    transports.apns=async value=>{
-      try {
-        const access=await apnsToken();if(!validParentPush(value,now())) return 'rejected';
-        return await jsonPost(`${origin}/3/device/${value.registration_token}`,{aps:{'content-available':1},...value.data},{
-          authorization:`bearer ${access}`,'apns-topic':topic,'apns-push-type':'background','apns-priority':'5',
-          'apns-expiration':'0','apns-collapse-id':`parent-${value.data.kind}`,'apns-id':value.data.message_id,
-        },async response=>{
-          if(response.status===200) {await response.body?.cancel();return 'accepted';}
-          const result=await readJson(response);
-          if(response.status===410 && result.reason==='Unregistered' || response.status===400 && result.reason==='BadDeviceToken') return 'invalid_token';
-          if(response.status===403 && result.reason==='ExpiredProviderToken') {cached=null;return 'retry';}
-          if(response.status===429 || response.status>=500 || response.status===403) return 'retry';
-          return 'rejected';
-        });
-      } catch {return 'retry';}
-    };
-  }
+  const apns=createApnsPushTransport(env,{prefix:'PARENT_PUSH',validate:validParentPush,
+    collapse:data=>`parent-${data.kind}`,fetcher,now,cryptoApi,timeoutMs});
+  if(apns) transports.apns=apns;
   const gatewayUrl=env('PARENT_PUSH_GATEWAY_URL'),gatewayKey=env('PARENT_PUSH_GATEWAY_KEY');
   if(gatewayUrl || gatewayKey) {
     let url;try {url=new URL(gatewayUrl);} catch {throw new Error('PUSH_CONFIG_INVALID');}

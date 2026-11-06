@@ -15,8 +15,14 @@ if (kind === 'parent-push') {
     : url==='https://push-api.cloud.huawei.com/v1/123456789/messages:send'
       ? `${Deno.env.get('SUPABASE_URL')}/push-send` : url,options);
 }
+if (kind === 'task-push') {
+  const fetcher=globalThis.fetch;
+  globalThis.fetch=(url,options)=>fetcher(typeof url==='string' && url.startsWith('https://api.sandbox.push.apple.com/3/device/')
+    ? `${Deno.env.get('SUPABASE_URL')}/task-push-send` : url,options);
+}
 await import(new URL(kind === 'account' ? '../../supabase/functions/account-deletion/index.ts'
   : kind === 'ai' ? '../../supabase/functions/ai-analysis/index.ts'
   : kind === 'cleanup' ? '../../supabase/functions/permanent-cleanup/index.ts'
   : kind === 'parent-push' ? '../../supabase/functions/parent-push/index.ts'
+  : kind === 'task-push' ? '../../supabase/functions/task-push/index.ts'
   : '../../supabase/functions/worksheet-render/index.ts', import.meta.url));

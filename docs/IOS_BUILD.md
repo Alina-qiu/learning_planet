@@ -1,5 +1,7 @@
 # iPhone 工程与构建验证
 
+最新：`60d8ff4`的[CI 42151905737](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)八项全通过，iPhone SE第三代/iOS18.5模拟器完整执行Keychain、加密SQLite、千任务滚动、大字体及重开恢复，报告/两张截图已复核；Debug结果不属于性能验收。本次[任务推送接收与纯Swift策略](TASK_REMOTE_PUSH.md)为后续新改动，需要新CI编译和运行，尚未签名或真机验证。
+
 更新于2026-11-06。通过[草稿PR #1](https://github.com/Alina-qiu/learning_planet/pull/1)运行实际macOS构建，提交`6722047`的[Debug和Release任务](https://github.com/Alina-qiu/learning_planet/actions/runs/42139724907)均通过Xcode编译及打包资源检查。首轮发现的Swift生命周期注册方法名已修正为`add(parentPush)`。**产物未签名，尚未完成安装和iPhone运行验证**；业务Dart/SQL与Android本机包未变。
 
 ## 工程配置
@@ -7,7 +9,7 @@
 - Flutter与CI固定3.47.4；Dart版本随该Flutter发行版。iOS最低部署版本15.5，与现有ML Kit插件要求一致；PRD的当前及前两个iOS主版本仍需分别验收。
 - Runner Bundle ID为`com.learningplanet.learningPlanet`，邮箱回调scheme为`io.learningplanet.app`。尚未填写开发团队或配置分发签名。
 - `Podfile`包含Flutter插件和`GoogleMLKit/TextRecognitionChinese ~> 9.0.0`。Debug/Release显式引用对应`Pods-Runner`配置，再引用`Generated.xcconfig`；Profile沿用Release配置。Flutter在有Xcode的主机也会自动补这些引用，本次固定到源码方便直接打开工作区，并非已复现的Flutter构建故障修复。
-- AppDelegate、SceneDelegate、ParentPush及NativeDiagnostics均在Runner Sources中。原生通道在隐式Flutter引擎初始化时注册。
+- AppDelegate、SceneDelegate、ParentPush、PushDeliveryPolicy及NativeDiagnostics均在Runner Sources中。原生通道在隐式Flutter引擎初始化时注册。
 - 相机/相册使用说明、远程通知后台模式和`aps-environment`已在工程中；Debug使用development，Release/Profile使用production。实际签名的APNs环境还须与描述文件、服务端配置匹配，见[远程通知](PARENT_REMOTE_PUSH.md)。
 
 ## 应用隐私清单
@@ -29,7 +31,7 @@
 | Name | 用户填写的家庭/孩子名称、昵称；不要求真实姓名 |
 | EmailAddress | 登录和家庭邀请邮箱 |
 | UserID | Auth账号、家庭成员与孩子记录标识 |
-| DeviceID | 可选家长推送的设备注册ID及APNs token |
+| DeviceID | 可选任务/家长推送的设备注册ID及APNs token |
 | PhotosorVideos | 用户同意上传的错题图片；当前没有录像功能 |
 | OtherUserContent | 题干、答案、批注、任务说明、家长调整原因与AI学习输入 |
 | GameplayContent | 游戏化成长、金币/XP、角色/徽章/伙伴及兑换记录 |

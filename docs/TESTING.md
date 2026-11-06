@@ -1,5 +1,7 @@
 # 测试与覆盖率门槛
 
+2026-11-06：[iPhone任务远程提醒](TASK_REMOTE_PUSH.md)按用户“优先安静”选择接入。迁移067/068新增独立设备范围、短时队列与发送前复查，APNs data-only收到后原生检查安静区间、离线有效时点、期限和范围；iOS不再使用本地定时回退。403项数据库、14项升级及817项完整Flutter、本地发送/Edge/HTTP2检查通过；新增Swift需本轮macOS CI执行，真实推送与手机验收未完成。此前`60d8ff4`的[CI八项全通过](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)也确认了iOS模拟器千任务流程，但不覆盖本轮改动。
+
 ## 本机验证记录（更新至2026-11-06）
 
 - 最新[远程CI及跨平台测试修复](REVIEW_CANDIDATE.md)：`6722047`的iOS Debug/Release编译与16份打包隐私清单检查通过，Flutter/Android、两组HTTP与Storage任务通过。启动诊断的250ms网络断言已改为确定的响应输入；数据库任务发现测试并发连接漏传密码，Windows改用SCRAM后复现，再统一复用连接参数。本机388项数据库通过，新增无效密码拒绝检查；实际Auth/Storage备份恢复9项通过。首次Storage启动超时和仅启动探测的流量断言失败均保留，最终完整重跑日志为`tmp/ci-backup-auth-retry.log`；Linux数据库修复尚待新CI验证，不以其他任务通过代表整轮成功。

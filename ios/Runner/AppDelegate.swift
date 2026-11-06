@@ -5,8 +5,9 @@ import UserNotifications
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let parentPush = ParentPush()
+  private let taskPush = ParentPush(taskReminders: true)
   private let nativeDiagnostics = NativeDiagnostics()
-  private lazy var taskNotifications = TaskNotificationDelegate(forward: self)
+  private lazy var taskNotifications = TaskNotificationDelegate(forward: self, taskPush: taskPush)
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -15,6 +16,7 @@ import UserNotifications
     // optional UIApplication callback dynamically through lifecycle delegates.
     // Swift imports addApplicationLifeCycleDelegate: as add(_:).
     add(parentPush)
+    add(taskPush)
     nativeDiagnostics.start()
     UNUserNotificationCenter.current().delegate = taskNotifications
     // A terminated document picker can leave its staging ZIP behind. Only our
@@ -34,6 +36,11 @@ import UserNotifications
       binaryMessenger: engineBridge.applicationRegistrar.messenger())
     pushChannel.setMethodCallHandler { [weak self] call, result in
       self?.parentPush.handle(call, result: result)
+    }
+    let taskPushChannel = FlutterMethodChannel(name: "learning_planet/task_push",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger())
+    taskPushChannel.setMethodCallHandler { [weak self] call, result in
+      self?.taskPush.handle(call, result: result)
     }
     let exportChannel = FlutterMethodChannel(
       name: "learning_planet/export_temporary_files",
@@ -119,13 +126,19 @@ import UserNotifications
 // Background local presentation remains owned by the operating system.
 private final class TaskNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
   private weak var forward: UNUserNotificationCenterDelegate?
-  init(forward: UNUserNotificationCenterDelegate) {
+  private let taskPush: ParentPush
+  init(forward: UNUserNotificationCenterDelegate, taskPush: ParentPush) {
     self.forward = forward
+    self.taskPush = taskPush
     super.init()
   }
   func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
     let content = notification.request.content
+    if content.userInfo["task_push"] != nil {
+      completionHandler(taskPush.canPresent(content) ? [.banner, .sound] : [])
+      return
+    }
     let text = content.userInfo["payload"] as? String
     let data = text?.data(using: .utf8)
     let payload = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }

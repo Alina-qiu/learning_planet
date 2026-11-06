@@ -24,6 +24,7 @@ import 'review_reminder_test.dart' show NoTaskRemote, FakeScheduler;
 import 'scheduling_and_notifications_test.dart'
     show FakeNotifications, schedulerFor, reminder;
 import 'support/mock_supabase.dart';
+import 'support/task_push.dart' as task_push;
 import 'widget_test.dart' show FakeTaskRepository;
 
 class CacheTasks extends OfflineTaskRepository {
@@ -172,38 +173,46 @@ void main() {
       () async {
         final plugin = FakeNotifications();
         final scopes = <String?>[];
+        final tasks = task_push.Harness();
+        await tasks.push.initialize();
         // Reuse the iOS adapter so the test exercises the production scope queue.
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
         final scheduler = LocalNotificationScheduler(
           plugin: plugin,
+          remoteTaskPush: () => tasks.push,
           onScopeChanged: (scope) async {
             scopes.add(scope);
+            await tasks.push.setScope(scope);
           },
         );
-        await scheduler.setScope('other');
-        await scheduler.synchronize('other', [reminder('other', 60)]);
-        await scheduler.cancelTaskReminders('child');
-        expect(plugin.pending, hasLength(1));
+        await scheduler.setScope(task_push.sibling);
+        await scheduler.synchronize(task_push.sibling, [
+          reminder(task_push.sibling, 60),
+        ]);
+        await scheduler.cancelTaskReminders(task_push.child);
+        expect(tasks.native.slots, hasLength(1));
         await scheduler.setScope('parent:owner:family');
         await scheduler.showParentMessages('parent:owner:family', {'weekly'});
         final oldScopes = [...scopes];
-        await scheduler.cancelTaskReminders('child');
+        await scheduler.cancelTaskReminders(task_push.child);
         expect(plugin.pending, hasLength(1));
         expect(scopes, oldScopes);
-        await scheduler.setScope('child');
-        final stale = scheduler.synchronize('child', [reminder('old', 60)]);
-        await scheduler.cancelTaskReminders('child');
+        await scheduler.setScope(task_push.child);
+        final stale = scheduler.synchronize(task_push.child, [
+          reminder('old', 60),
+        ]);
+        await scheduler.cancelTaskReminders(task_push.child);
         await stale;
         expect(plugin.pending, isEmpty);
-        await scheduler.setScope('child');
-        await scheduler.synchronize('child', [reminder('retry', 60)]);
+        await scheduler.setScope(task_push.child);
+        await scheduler.synchronize(task_push.child, [reminder('retry', 60)]);
         plugin.failNextClear = true;
         await expectLater(
-          scheduler.cancelTaskReminders('child'),
+          scheduler.cancelTaskReminders(task_push.child),
           throwsStateError,
         );
-        expect(plugin.pending, hasLength(1));
-        await scheduler.cancelTaskReminders('child');
+        expect(tasks.native.slots, isEmpty);
+        await scheduler.cancelTaskReminders(task_push.child);
         expect(plugin.pending, isEmpty);
       },
     );

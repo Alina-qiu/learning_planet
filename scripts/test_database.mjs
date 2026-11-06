@@ -29,6 +29,8 @@ import { familyRetentionCases } from './test_family_retention_cases.mjs';
 import { configurationTimeCases } from './test_configuration_time_cases.mjs';
 import { parentPushCases } from './test_parent_push_cases.mjs';
 import { taskReminderPolicyCases } from './test_task_reminder_policy_cases.mjs';
+import { taskPushCases } from './test_task_push_cases.mjs';
+import { taskPushQueueCases } from './test_task_push_queue_cases.mjs';
 import { reviewSnoozeCases } from './test_review_snooze_cases.mjs';
 import { familyInvitationCases } from './test_family_invitation_cases.mjs';
 import { familyMemberRemovalCases } from './test_family_member_removal_cases.mjs';
@@ -1187,6 +1189,8 @@ try {
   await configurationTimeCases({client,scalar,login,denied,check});
   await parentPushCases({client,scalar,login,denied,check});
   await taskReminderPolicyCases({client,scalar,login,denied,check});
+  await taskPushCases({client,scalar,login,denied,check});
+  await taskPushQueueCases({client,scalar,login,denied,check});
   await reviewSnoozeCases({client,scalar,login,denied,check});
   await familyInvitationCases({client,scalar,login,denied,check});
   await familyMemberRemovalCases({client,scalar,login,denied,check});

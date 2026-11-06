@@ -7,10 +7,13 @@ import CoreFoundation
 // Native-only background delivery: never opens Flutter's account database or
 // stores a session/token in UserDefaults. All state transitions run on main.
 final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
+  private let taskReminders: Bool
+  init(taskReminders: Bool = false) { self.taskReminders = taskReminders; super.init() }
   private let store = UserDefaults.standard
-  private let key = "parent_push_gate_v1"
-  private let revisionKey = "parent_push_revision_v1"
-  private let ids = ["parent-remote-v1-redemption", "parent-remote-v1-weekly"]
+  private var key: String { taskReminders ? "task_push_gate_v1" : "parent_push_gate_v1" }
+  private var revisionKey: String { taskReminders ? "task_push_revision_v1" : "parent_push_revision_v1" }
+  private let planKey = "task_push_plan_v1"
+  private var ids: [String] { taskReminders ? ["task-remote-v1"] : ["parent-remote-v1-redemption", "parent-remote-v1-weekly"] }
   private var pendingTokens: [(Int64, FlutterResult)] = []
   private var pendingAdds = 0
   private var disabledCallbacks: [(Int64, FlutterResult)] = []
@@ -24,7 +27,7 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
   }
   func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) -> Bool {
-    guard userInfo["version"] as? String == "parent-push-v1" else { return false }
+    guard userInfo["version"] as? String == (taskReminders ? "task-push-v1" : "parent-push-v1") else { return false }
     receive(userInfo, completion: completionHandler)
     return true
   }
@@ -54,6 +57,16 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
     case "startup" where UIApplication.shared.applicationState == .background: result(revision)
     case "startup", "disable": disable(result)
     case "enable": enable(call.arguments as? [String: Any] ?? [:], result)
+    case "plan" where taskReminders:
+      let input = call.arguments as? [String: Any] ?? [:]
+      guard number(input, "revision") == revision else { result(false); return }
+      guard let plan = PushDeliveryPolicy.plan(input["slots"]) else {
+        store.removeObject(forKey: planKey)
+        if store.synchronize() { result(false) } else { error(result) }
+        return
+      }
+      store.set(plan, forKey: planKey)
+      if store.synchronize() { result(true) } else { store.removeObject(forKey: planKey); error(result) }
     case "token": token(call.arguments as? [String: Any] ?? [:], result)
     default: result(FlutterMethodNotImplemented)
     }
@@ -63,6 +76,7 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
     guard next > 0 && next <= 9_007_199_254_740_991 else { error(result); return }
     store.set(next, forKey: revisionKey)
     store.removeObject(forKey: key)
+    if taskReminders { store.removeObject(forKey: planKey) }
     let saved = store.synchronize()
     cancelVisible()
     let tokens = pendingTokens
@@ -128,39 +142,15 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
     pendingTokens.removeAll()
     waiting.forEach { $0.1($0.0 == revision ? value : nil) }
   }
-  private func allowed(_ data: [String: String], _ row: [String: Any]) -> Bool {
-    let fields: Set<String> = ["version", "message_id", "scope_nonce", "kind", "issued_ms", "expires_ms", "timezone", "quiet_start", "quiet_end", "settings_version"]
-    guard Set(data.keys) == fields, data["version"] == "parent-push-v1",
-      let nonce = row["nonce"] as? String, nonce == data["scope_nonce"], matches(nonce, uuid),
-      let id = data["message_id"], matches(id, uuid), let seen = row["seen"] as? [String],
-      seen.count <= 1000, !seen.contains(id), ["redemption", "weekly"].contains(data["kind"] ?? ""),
-      let rawVersion = data["settings_version"], matches(rawVersion, "[1-9][0-9]{0,15}"),
-      let version = Int64(rawVersion), version <= 9_007_199_254_740_991,
-      let minimum = number(row, "settings"), version >= minimum,
-      let rawIssued = data["issued_ms"], matches(rawIssued, "[0-9]{13}"), let issued = Int64(rawIssued),
-      let rawExpires = data["expires_ms"], matches(rawExpires, "[0-9]{13}"), let expires = Int64(rawExpires),
-      let server = number(row, "server"), let until = number(row, "expires"), let rtt = number(row, "rtt"),
-      let wall = number(row, "wall"), let elapsed = number(row, "elapsed"), let boot = row["boot"] as? String else { return false }
-    let now = clock()
-    let delta = now.elapsed - elapsed
-    guard !boot.isEmpty, now.boot == boot, delta >= 0, (0...10000).contains(rtt), minimum > 0,
-      (1_000_000_000_000...9_999_999_999_999).contains(server), (1...2_592_001_000).contains(until - server),
-      abs((now.wall - wall) - delta) <= 30000 else { return false }
-    let low = server + delta, high = low + rtt + 1000
-    guard issued <= low + 30000, (1...60000).contains(expires - issued), expires > high, expires <= until, high < until,
-      let start = data["quiet_start"], let end = data["quiet_end"],
-      matches(start, "([01][0-9]|2[0-3]):[0-5][0-9]:00"), matches(end, "([01][0-9]|2[0-3]):[0-5][0-9]:00"),
-      let zoneName = data["timezone"], zoneName.count <= 100, let zone = TimeZone(identifier: zoneName) else { return false }
-    func seconds(_ text: String) -> Int { let parts = text.split(separator: ":").map { Int($0)! }; return parts[0] * 3600 + parts[1] * 60 }
-    func quiet(_ millis: Int64) -> Bool {
-      if start == end { return false }
-      var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
-      let parts = calendar.dateComponents([.hour, .minute, .second], from: Date(timeIntervalSince1970: Double(millis) / 1000))
-      let local = parts.hour! * 3600 + parts.minute! * 60 + parts.second!
-      let a = seconds(start), b = seconds(end)
-      return a < b ? (local >= a && local < b) : (local >= a || local < b)
-    }
-    return !quiet(low) && !quiet(high)
+  private func allowed(_ data: [String: String], _ row: [String: Any], allowSeen: Bool = false) -> Bool {
+    PushDeliveryPolicy.allows(data, gate: row, clock: clock(), task: taskReminders,
+      plan: store.dictionary(forKey: planKey) as? [String: [String: String]] ?? [:], allowSeen: allowSeen)
+  }
+  func canPresent(_ content: UNNotificationContent) -> Bool {
+    guard taskReminders, let data = content.userInfo["task_push"] as? [String: String],
+      let expected = content.userInfo["revision"] as? NSNumber, expected.int64Value == revision,
+      let row = store.dictionary(forKey: key) else { return false }
+    return allowed(data, row, allowSeen: true)
   }
   func receive(_ userInfo: [AnyHashable: Any], completion: @escaping (UIBackgroundFetchResult) -> Void) {
     var data: [String: String] = [:]
@@ -185,9 +175,10 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
         guard self.store.synchronize() else { completion(.failed); return }
         let content = UNMutableNotificationContent()
         content.title = "学习星球"
-        content.body = copied["kind"] == "weekly" ? "上一周学习报告已更新" : "有兑换申请待审批"
+        content.body = self.taskReminders ? "有学习任务需要关注，请打开应用查看。" : copied["kind"] == "weekly" ? "上一周学习报告已更新" : "有兑换申请待审批"
         content.sound = .default
-        let request = UNNotificationRequest(identifier: "parent-remote-v1-\(copied["kind"]!)", content: content, trigger: nil)
+        if self.taskReminders { content.userInfo = ["task_push": copied, "revision": expected] }
+        let request = UNNotificationRequest(identifier: self.taskReminders ? "task-remote-v1" : "parent-remote-v1-\(copied["kind"]!)", content: content, trigger: nil)
         self.pendingAdds += 1
         UNUserNotificationCenter.current().add(request) { failure in
           DispatchQueue.main.async {

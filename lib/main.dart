@@ -26,6 +26,7 @@ import 'features/auth_family/data/family_repository.dart';
 import 'features/tasks/data/task_repository.dart';
 import 'features/tasks/data/notification_scheduler.dart';
 import 'features/notifications/data/remote_parent_push.dart';
+import 'features/tasks/data/remote_task_push.dart';
 
 Future<void> main() async {
   startStartupMeasurement();
@@ -65,9 +66,16 @@ Future<Widget> initializeApp() async {
   final TaskRepository taskRepository;
   const nativePush = MethodChannelParentPush();
   RemoteParentPush? remotePush;
+  RemoteTaskPush? remoteTasks;
+  const nativeTasks = MethodChannelTaskPush();
   final notifications = LocalNotificationScheduler(
-    onScopeChanged: (scope) =>
+    remoteTaskPush: () => remoteTasks,
+    onScopeChanged: (scope) async {
+      await Future.wait([
         remotePush?.setScope(scope) ?? Future<void>.value(),
+        remoteTasks?.setScope(scope) ?? Future<void>.value(),
+      ]);
+    },
   );
   // Clear the previous process's local alerts before restoring credentials or
   // opening a family. This also applies to an unconfigured debug installation.
@@ -150,6 +158,23 @@ Future<Widget> initializeApp() async {
     );
     try {
       await measureStartup(StartupPhase.push, remotePush.initialize);
+      remoteTasks = RemoteTaskPush(
+        native: nativeTasks,
+        remote: SupabaseTaskPushRemote(
+          client,
+          SupabaseClient(
+            config.supabaseUrl,
+            config.supabaseAnonKey,
+            authOptions: const AuthClientOptions(autoRefreshToken: false),
+          ),
+        ),
+        secrets: const NativeDeviceSecrets(),
+        backendUrl: config.supabaseUrl,
+        accountId: accountId,
+        privacyGeneration: () => store.privacyGeneration,
+        configured: config.taskRemotePush,
+      );
+      await remoteTasks.initialize();
     } catch (_) {
       await Supabase.instance.dispose();
       transport.close();
@@ -159,7 +184,12 @@ Future<Widget> initializeApp() async {
     authRepository = SupabaseAuthRepository(
       client,
       sessionStorage: sessionStorage,
-      beforeSignOut: remotePush.disable,
+      beforeSignOut: () async {
+        await Future.wait([
+          remoteTasks?.disable() ?? Future<void>.value(),
+          remotePush?.disable() ?? Future<void>.value(),
+        ]);
+      },
       emailOtp: EmailOtpTransport(
         () => GoTrueClient(
           url: '${config.supabaseUrl}/auth/v1',
@@ -229,6 +259,7 @@ Future<Widget> initializeApp() async {
           .then<void>((_) {}, onError: (Object _) {}),
     );
     await measureStartup(StartupPhase.push, nativePush.disable);
+    await nativeTasks.disable();
     authRepository = const UnconfiguredAuthRepository();
     familyRepository = const UnconfiguredFamilyRepository();
     taskRepository = const UnconfiguredTaskRepository();
