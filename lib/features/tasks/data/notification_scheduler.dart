@@ -28,6 +28,10 @@ abstract interface class ParentMessageScheduler {
   Future<bool> showParentMessages(String scope, Set<String> kinds);
 }
 
+abstract interface class TaskReminderLifecycle {
+  void resumed();
+}
+
 abstract interface class TaskReminderCancellation {
   /// Retire only the active child's plan; preserve another child's or the
   /// parent's notification scope, including its remote registration.
@@ -67,6 +71,7 @@ class LocalNotificationScheduler
     implements
         NotificationScheduler,
         ParentMessageScheduler,
+        TaskReminderLifecycle,
         TaskReminderCancellation,
         FamilyReminderCancellation {
   LocalNotificationScheduler({
@@ -80,6 +85,8 @@ class LocalNotificationScheduler
   final Future<void> Function(String?)? onScopeChanged;
   final RemoteTaskPush? Function()? remoteTaskPush;
   final FlutterLocalNotificationsPlugin _plugin;
+  @override
+  void resumed() => remoteTaskPush?.call()?.resumed();
   Future<void>? _initialization;
   Future<void> _queue = Future.value();
   String? _scope;

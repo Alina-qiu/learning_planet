@@ -256,6 +256,11 @@ class RemoteTaskPush {
     }
   }
 
+  void resumed() {
+    _nextRefresh = 0;
+    unawaited(flushRevocation());
+  }
+
   Future<void> synchronize(String child, List<Map<String, Object>> slots) {
     final generation = _generation;
     final result = _syncQueue.then((_) async {

@@ -154,6 +154,10 @@ class _ReminderCoordinatorState extends ConsumerState<ReminderCoordinator>
       }
     }
     if (state == AppLifecycleState.resumed) {
+      final scheduler = ref.read(notificationSchedulerProvider);
+      if (scheduler is TaskReminderLifecycle) {
+        (scheduler as TaskReminderLifecycle).resumed();
+      }
       ref.invalidate(familyTodayProvider(widget.childId));
       ref.invalidate(tasksProvider(widget.childId));
       unawaited(_synchronize());

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 
@@ -158,23 +159,25 @@ Future<Widget> initializeApp() async {
     );
     try {
       await measureStartup(StartupPhase.push, remotePush.initialize);
-      remoteTasks = RemoteTaskPush(
-        native: nativeTasks,
-        remote: SupabaseTaskPushRemote(
-          client,
-          SupabaseClient(
-            config.supabaseUrl,
-            config.supabaseAnonKey,
-            authOptions: const AuthClientOptions(autoRefreshToken: false),
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        remoteTasks = RemoteTaskPush(
+          native: nativeTasks,
+          remote: SupabaseTaskPushRemote(
+            client,
+            SupabaseClient(
+              config.supabaseUrl,
+              config.supabaseAnonKey,
+              authOptions: const AuthClientOptions(autoRefreshToken: false),
+            ),
           ),
-        ),
-        secrets: const NativeDeviceSecrets(),
-        backendUrl: config.supabaseUrl,
-        accountId: accountId,
-        privacyGeneration: () => store.privacyGeneration,
-        configured: config.taskRemotePush,
-      );
-      await remoteTasks.initialize();
+          secrets: const NativeDeviceSecrets(),
+          backendUrl: config.supabaseUrl,
+          accountId: accountId,
+          privacyGeneration: () => store.privacyGeneration,
+          configured: config.taskRemotePush,
+        );
+        await remoteTasks.initialize();
+      }
     } catch (_) {
       await Supabase.instance.dispose();
       transport.close();

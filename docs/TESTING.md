@@ -1,6 +1,6 @@
 # 测试与覆盖率门槛
 
-2026-11-06：[iPhone任务远程提醒](TASK_REMOTE_PUSH.md)按用户“优先安静”选择接入。迁移067/068新增独立设备范围、短时队列与发送前复查，APNs data-only收到后原生检查安静区间、离线有效时点、期限和范围；iOS不再使用本地定时回退。403项数据库、14项升级及817项完整Flutter、本地发送/Edge/HTTP2检查通过；新增Swift需本轮macOS CI执行，真实推送与手机验收未完成。此前`60d8ff4`的[CI八项全通过](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)也确认了iOS模拟器千任务流程，但不覆盖本轮改动。
+2026-11-06：[iPhone任务远程提醒](TASK_REMOTE_PUSH.md)按用户“优先安静”选择接入。迁移067/068新增独立设备范围、短时队列与发送前复查，APNs data-only收到后原生检查安静区间、离线有效时点、期限和范围；iOS不再使用本地定时回退。403项数据库、14项升级及818项完整Flutter、本地发送/Edge/HTTP2检查通过；新增Swift需本轮macOS CI执行，真实推送与手机验收未完成。此前`60d8ff4`的[CI八项全通过](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)也确认了iOS模拟器千任务流程，但不覆盖本轮改动。
 
 ## 本机验证记录（更新至2026-11-06）
 

@@ -5,6 +5,20 @@ import 'support/task_push.dart';
 
 void main() {
   test(
+    'foreground resume renews the native clock and device token before the twelve-hour lease refresh',
+    () async {
+      final h = Harness();
+      await h.enable();
+      await h.push.synchronize(child, slots);
+      expect(h.remote.calls.length, 2);
+      h.push.resumed();
+      await h.push.synchronize(child, slots);
+      expect(h.remote.calls.last, 'renew_task_push_device');
+      expect(h.remote.calls.length, 3);
+      expect(h.native.enabled, isTrue);
+    },
+  );
+  test(
     'background startup with no matching secure capability closes an old native gate',
     () async {
       final h = Harness();

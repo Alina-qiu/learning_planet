@@ -1,5 +1,14 @@
 # Android 调试构建
 
+2026-11-06更新：[iPhone收到后校验的任务提醒](TASK_REMOTE_PUSH.md)接入后重新构建两种Android调试包。iOS控制器仅在iOS创建，Android保留既有本地闹钟；两种包均通过资源、三ABI加密SQLite映射、生产入口及v2签名检查。本轮未重新安装手机或模拟器，不沿用旧安装场景作为本轮运行结果。
+
+| 当前文件 | 应用ID | 字节 / SHA256 |
+|---|---|---|
+| `build/app/outputs/flutter-apk/app-debug.apk` | `com.learningplanet.learning_planet` | 216002311；`bbdfec62b6c17f1b8d39d70baa0669fe089b089728b0c20be5dd425840ced28a` |
+| `build/app/outputs/flutter-apk/app-local-debug.apk` | `com.learningplanet.learning_planet.local` | 216002519；`5c441bfb13b36e4b6601a441b8513366250fe9745418cc8fb6e6064cbae6697f` |
+
+普通包仍为未配置后端的启动包，本机包须按[本机联调](LOCAL_DEBUG.md)连接电脑临时服务。日志为`tmp/task-push-android-build-final.log`、`tmp/task-push-local-android-build-final.log`及两份`task-push-*-signature-final.log`。首次Storage冷启动60秒超时已保留；独立重试成功，构建后已请求正常关闭服务。该启动检查不算完整业务联调。下面保留此前产物摘要和运行记录。
+
 ## 2026-11-06 首页与任务列表适配（当前产物）
 
 修复长同步说明在横屏双倍字号下挤占任务列表，以及首页内容进入系统侧边区域。同步提示与任务共用可滚动区域，首页/任务页避开系统边缘。新增4项、相关82项、完整804项Flutter通过，核心覆盖率90.93%，完整分析31.8秒及274文件格式通过；五张中文截图已复核，见[实现与验证范围](TASK_ACCESSIBILITY.md)。
