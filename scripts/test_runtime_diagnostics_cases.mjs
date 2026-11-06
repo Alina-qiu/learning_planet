@@ -33,7 +33,7 @@ export async function runtimeDiagnosticsCases({client,scalar,login,denied,check}
     assert.deepEqual(stored,first);assert.equal(JSON.stringify(stored).includes(owner),false);
   });
   await check('concurrent runtime uploads keep a single receipt and one counter increment',async()=>{
-    const connections=[new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'}),new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'})];
+    const connections=[new pg.Client(client.connectionParameters),new pg.Client(client.connectionParameters)];
     const sample=event({operation:'edge',outcome:'timeout',bucket:6});
     await admin();const countBefore=Number(await scalar("select coalesce(sum(events),0) from public.runtime_diagnostic_daily where origin='client' and operation='edge' and outcome='timeout'"));
     try {

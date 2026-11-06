@@ -82,7 +82,7 @@ export async function reviewAutoCompletionCases({client,scalar,login,denied,chec
     assert.equal((await apply(conflicting)).outcome,'conflict');
   });
   await check('two connections submitting the final answer simultaneously finish and award once',async()=>{
-    const f=await fixture();await start(f);const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const f=await fixture();await start(f);const peer=new pg.Client(client.connectionParameters);
     try {
       await peer.connect();await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'auto-other-device'})]);await peer.query('set role authenticated');
       const [a,b]=await Promise.all([answer(f),peer.query('select public.submit_review_answer($1,$2,$3,$4) as result',[f.task.id,f.questions[0],'4',randomUUID()])]);
@@ -108,7 +108,7 @@ export async function reviewAutoCompletionCases({client,scalar,login,denied,chec
     const member=randomUUID(),f=await fixture();await start(f);await client.query('reset role');
     await client.query('insert into auth.users values($1,$2)',[member,'auto-member@example.test']);
     await client.query("insert into public.family_members(family_id,user_id,role) values($1,$2,'parent')",[family,member]);await auth();
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const peer=new pg.Client(client.connectionParameters);
     const sql='select public.resolve_family_member_removal($1,$2,$3,$4)',key=randomUUID(),payload={kind:'remove',user_id:member,version:1};
     try {
       await peer.connect();await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:member,role:'authenticated',session_id:'auto-member'})]);await peer.query('set role authenticated');await peer.query('begin');

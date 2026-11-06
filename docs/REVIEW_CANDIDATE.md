@@ -24,6 +24,10 @@
 
 原仓库为公开的[Alina-qiu/learning_planet](https://github.com/Alina-qiu/learning_planet)。旧[成功CI](https://github.com/Alina-qiu/learning_planet/actions/runs/35095053736)只覆盖基线`2a476d6`。当前源码的[首轮CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42138320338)已实际运行：两组HTTP集成和Storage/隐私/PDF/备份恢复通过；启动检查的一项250ms网络断言不稳定，iOS Debug/Release均在生命周期注册方法名处编译失败。
 
-修复将状态/隐私输出断言使用确定的503响应，保留其他真实HTTP重试、请求体超时和进程退出测试，本机7项通过。iOS使用Swift导入后的`add(_:)`名称，保留引擎创建前注册；实际CocoaPods解析出的Debug/Release锁文件一致，已保留`ios/Podfile.lock`。这些修复仍需新的远程编译验证，首轮失败不能记为iOS构建通过。
+修复将状态/隐私输出断言使用确定的503响应，保留其他真实HTTP重试、请求体超时和进程退出测试，本机7项通过。iOS使用Swift导入后的`add(_:)`名称，保留引擎创建前注册；实际CocoaPods解析出的Debug/Release锁文件一致，已保留`ios/Podfile.lock`。
+
+[第二轮CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42139724907)对应修复提交`6722047`：iOS Debug/Release编译与资源检查、Flutter/Android、两组HTTP和Storage集成均通过；数据库任务继续检出并发测试连接漏传密码。Windows原先使用trust认证，无法检出该问题。现将35处显式连接改为复用当前测试连接参数，Windows临时库改用SCRAM认证，并增加无效密码拒绝检查。本机完整388项数据库及9项实际备份恢复通过，修复后的Linux数据库任务仍需下一轮CI验证。
+
+本机备份复验第一次Storage启动超过60秒，已保存失败记录；随后独立启动探测确认SCRAM下可启动，完整重跑通过。未放宽超时，也未将只启动探测记为完整集成通过。详情见[备份恢复](BACKUP_RESTORE.md)。
 
 工作流由PR或`main`上的push触发，后续修复继续提交至草稿分支。签名安装、iPhone/鸿蒙4.2实机、云端配置、iOS后台安静边界、真实性能和家庭试用仍须单独完成。

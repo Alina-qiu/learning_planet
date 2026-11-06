@@ -69,7 +69,7 @@ export async function offlineReviewCases({client,scalar,login,denied,check,other
   await check('two connections competing for the same review version accept only one answer',async()=>{
     const f=await fixture(),start=await cmd(f,'start');await apply(start);
     const a=await answer(f,start),b=await answer(f,start,{answer:'wrong'});
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();
+    const peer=new pg.Client(client.connectionParameters);await peer.connect();
     try {
       await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'other-device'})]);
       await peer.query('set role authenticated');

@@ -49,7 +49,7 @@ export async function configurationTimeCases({client,scalar,login,denied,check})
     await admin();assert.equal(await scalar('select count(*)::integer from public.parent_configuration_intervals where child_id=$1',[sibling]),0);await auth();
   });
   await check('two devices uploading the same interval concurrently cannot double-count or replace its payload',async()=>{
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();
+    const peer=new pg.Client(client.connectionParameters);await peer.connect();
     try {
       await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,role:'authenticated',session_id:'configuration-session'})]);await peer.query('set role authenticated');
       const sample=event(-120000,-100000);

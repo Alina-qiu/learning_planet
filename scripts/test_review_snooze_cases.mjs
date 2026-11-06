@@ -40,7 +40,7 @@ export async function reviewSnoozeCases({client,scalar,login,denied,check}) {
     await assert.rejects(set(30,0),{code:'40001'});
     await denied('select public.set_review_reminder($1,30,$2,0)',[task,originalKey]);
     const peers=await Promise.all([1,2].map(async()=>{
-      const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+      const peer=new pg.Client(client.connectionParameters);
       await peer.connect();await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:randomUUID()})]);
       await peer.query('set role authenticated');return peer;
     }));

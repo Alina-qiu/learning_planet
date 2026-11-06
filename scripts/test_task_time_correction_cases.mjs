@@ -66,7 +66,7 @@ export async function taskTimeCorrectionCases({client,scalar,login,denied,check,
     assert.equal(await scalar('select count(*)::int from public.ledger_entries where child_id=$1',[child]),0);
   });
   await check('concurrent time corrections compare versions and same-request replays audit only once',async()=>{
-    const id=await make(),a=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'}),b=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const id=await make(),a=new pg.Client(client.connectionParameters),b=new pg.Client(client.connectionParameters);
     try {
       for(const peer of [a,b]) {await peer.connect();await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'time-corrections'})]);await peer.query('set role authenticated');}
       const races=await Promise.allSettled([a.query(sql,[id,randomUUID(),0,50,'First']),b.query(sql,[id,randomUUID(),0,70,'Second'])]);

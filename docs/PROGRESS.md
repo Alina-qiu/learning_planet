@@ -6,6 +6,8 @@
 
 ## 本次需求与代码核对
 
+2026-11-06，[第二轮CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42139724907)验证`6722047`的iOS Debug/Release、Flutter/Android、两组HTTP及Storage均通过，iOS实际资源报告解析16份隐私清单；签名和真机仍未验证。数据库任务检出并发测试密码缺失，Windows改用SCRAM后复现，35处连接统一复用测试连接参数，新增密码拒绝检查并通过本机全部388项；9项真实备份恢复也通过。修复后的Linux数据库任务仍待下一轮验证，PR保持草稿。
+
 2026-11-06获用户授权公开发布，已推送`0aa7b9a`并创建[草稿PR #1](https://github.com/Alina-qiu/learning_planet/pull/1)。[首轮CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42138320338)两组HTTP及Storage/隐私/PDF/备份恢复通过；发现一项250ms启动诊断断言的网络时序竞争，以及iOS Swift生命周期方法名编译错误。分别改用确定的503诊断输入和Swift的`add(_:)`方法，本机启动检查7项通过；保留两个macOS任务实际生成且一致的Podfile.lock。修复后的远程结果仍待验证，未合并、部署或宣称iPhone可安装。
 
 2026-11-06完成[本地审阅分支准备](REVIEW_CANDIDATE.md)：完整源码复制到独立`codex/app-implementation-20261106`工作树，逐文件摘要核对一致，依赖恢复及独立分析30.7秒通过。密钥扫描唯一命中已核对为PEM解析语法；排除需求原件、本机配置和生成产物。公开仓库已有旧基线macOS CI通过记录，但当前源码未上传；远程构建须在用户授权公开发布后继续，未将历史结果计为当前iOS验收。

@@ -4,16 +4,16 @@
 
 ## 项目状态
 
-截至2026-11-06，Android本地调试包可构建；任务、自动复习、金币/XP、兑换、错题/OCR、PDF、成长、报告和家庭管理已有实现及本机验证。**整个App尚未完成最终验收**，不能以本机测试通过代替云端、iOS和指定手机运行。
+截至2026-11-06，Android本地调试包可构建，iOS Debug/Release已通过macOS CI未签名编译与资源检查；任务、自动复习、金币/XP、兑换、错题/OCR、PDF、成长、报告和家庭管理已有实现及本机验证。**整个App尚未完成最终验收**，不能以构建和测试通过代替云端及指定手机运行。
 
 - [当前需求覆盖与逐项验收](docs/CURRENT_STATUS.md)：ACC、TSK、ERR、AC-01至AC-11、非功能要求及剩余依赖。
 - [当前Android安装包](docs/ANDROID_BUILD.md)与[本机联调方法](docs/LOCAL_DEBUG.md)：普通包只作启动验证；本机包需电脑服务及USB端口转发，临时后端重启为空库。
 - [测试记录](docs/TESTING.md)：最新804项Flutter通过，核心覆盖率90.93%，完整分析无问题；历史实际设备报告绑定各自APK和测试范围。
-- [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：已获授权发布并创建草稿PR；当前源码已进入Linux/macOS CI，首轮问题正在修复复验。
+- [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：草稿PR已公开；iOS和Android构建任务通过，数据库测试连接的跨平台修复正在复验。
 - [本机备份恢复演练](docs/BACKUP_RESTORE.md)：新环境恢复数据库与私有图片/PDF，9项检查通过；目标云端备份仍待验收。
 - [开发历史](docs/PROGRESS.md)、[技术架构](docs/ARCHITECTURE.md)与[完整计划](docs/DEVELOPMENT_PLAN.md)。
 
-主要剩余项为云端部署、Mac/Xcode编译签名、华为鸿蒙4.2/iPhone端到端验证、iOS后台本地通知安静边界、真实设备性能、模型评测和四周家庭试用。家长补签和计时纠正已实现，是否扩展为撤回误完成仍待确认。
+主要剩余项为云端部署、iOS签名安装、华为鸿蒙4.2/iPhone端到端验证、iOS后台本地通知安静边界、真实设备性能、模型评测和四周家庭试用。家长补签和计时纠正已实现，是否扩展为撤回误完成仍待确认。
 
 最近代码改动包括[首页与任务列表字号/安全区域](docs/TASK_ACCESSIBILITY.md)、[组卷适配与上传隐私提示](docs/WORKSHEET_ACCESSIBILITY.md)、[图片导入中断保护](docs/OCR_INTERRUPTION.md)和[更换图片后重新校对](docs/OCR_SOURCE_CHANGES.md)。原README的逐轮状态已保留到[历史记录](docs/README_STATUS_HISTORY.md)，以免旧测试数量和旧待办被误读为当前结论。
 

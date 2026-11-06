@@ -60,8 +60,8 @@ export async function economyCommandCases({client,scalar,login,denied,check}) {
     assert.ok(!JSON.stringify(saved).includes(change.reason)); await auth();
   });
   await check('two real sessions race economic submit and stop with exactly one durable outcome',async()=>{
-    const a=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
-    const b=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const a=new pg.Client(client.connectionParameters);
+    const b=new pg.Client(client.connectionParameters);
     try {
       for(const peer of [a,b]) { await peer.connect(); await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,role:'authenticated',session_id:'durable-wallet'})]); await peer.query('set role authenticated'); }
       const change={kind:'adjust',coins:7,xp_amount:0,reason:'Race'}, id=randomUUID();

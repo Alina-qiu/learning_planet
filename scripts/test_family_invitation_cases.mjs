@@ -18,7 +18,7 @@ export async function familyInvitationCases({client,scalar,login,denied,check}) 
   const invite={kind:'invite',email:'  INVITED-PARENT@example.test  '};
   const roster=()=>scalar('select public.load_family_members($1)',[family]);
   async function peer(user=admin,scope=session) {
-    const p=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const p=new pg.Client(client.connectionParameters);
     await p.connect();
     await p.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:scope,email:'stale@example.test'})]);
     await p.query('set role authenticated'); return p;

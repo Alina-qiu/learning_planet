@@ -14,7 +14,7 @@ export async function onboardingCases({client,scalar,login,denied,check,otherUid
   const configure=(id,keys=['cartoon','book'],preset='study20',limit=150)=>client.query('select public.configure_starter_rules($1,$2,$3,$4)',[id,preset,limit,keys]);
   const advance=(id,step,selection=null)=>scalar('select public.advance_child_guide($1,$2,$3)',[id,step,selection]);
   async function peerConnection(name) {
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const peer=new pg.Client(client.connectionParameters);
     await peer.connect();
     await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:name,iat:Math.floor(Date.now()/1000)})]);
     await peer.query('set role authenticated');

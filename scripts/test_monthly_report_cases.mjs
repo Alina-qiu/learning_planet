@@ -103,7 +103,7 @@ export async function monthlyReportCases({client,scalar,login,denied,check,other
     await client.query('reset role');await client.query(`select set_config('request.jwt.claims','{"role":"service_role"}',false)`);await client.query('set role service_role');
     await scalar('select public.generate_scheduled_tasks($1,$2)',[child,tomorrow]);await auth();
     const next=await scalar('select to_jsonb(t) from public.task_instances t where template_id=$1 and due_date=$2',[tid,tomorrow]);assert.equal(next.growth_category,'responsibility');assert.equal(next.coin_reward,10);assert.equal(next.xp_reward,20);
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();let edit;
+    const peer=new pg.Client(client.connectionParameters);await peer.connect();let edit;
     try {
       await peer.query('begin');await peer.query("update public.task_templates set growth_category='learning' where id=$1",[tid]);
       edit=client.query('select public.save_task_schedule($1,$2,$3)',[child,legacy,tid]);

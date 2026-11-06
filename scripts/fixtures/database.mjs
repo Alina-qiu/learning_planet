@@ -1,6 +1,6 @@
 // Disposable loopback PostgreSQL. Auth defaults to a stub; bootstrapAuth can install real GoTrue migrations.
 import EmbeddedPostgres from 'embedded-postgres';
-import {cp, mkdtemp, readFile, readdir} from 'node:fs/promises';
+import {cp, mkdtemp, readFile, readdir, unlink, writeFile} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
@@ -39,7 +39,16 @@ export async function startTestDatabase({port, users = [], onMigration = () => {
         throw result.error ?? new Error('Temporary PostgreSQL command failed: ' + name);
       }
     }
-    postgres.initialise = async () => command('initdb', ['-D', data, '-U', 'postgres', '--auth=trust', '--locale=C', '--encoding=UTF8']);
+    postgres.initialise = async () => {
+      // Require credentials on Windows too; trust authentication hides missing
+      // passwords in peer connections that fail on the Linux CI runner.
+      const passwordFile = join(directory, 'initdb-password');
+      await writeFile(passwordFile, 'local-test-only\n', {flag: 'wx', mode: 0o600});
+      try {
+        command('initdb', ['-D', data, '-U', 'postgres', '--auth=scram-sha-256',
+          '--pwfile=' + passwordFile, '--locale=C', '--encoding=UTF8']);
+      } finally { await unlink(passwordFile); }
+    };
     postgres.start = async () => command('pg_ctl', ['-D', data, '-o', `-h 127.0.0.1 -p ${port}`, '-l', join(directory, 'postgres.log'), '-w', 'start']);
     postgres.stop = async () => command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop']);
   }

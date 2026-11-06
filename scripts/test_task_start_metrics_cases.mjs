@@ -83,7 +83,7 @@ export async function taskStartMetricsCases({client,scalar,login,denied,check}) 
   });
   await check('two devices cannot replace the winning first-start source or increment version twice for a duplicate UUID',async()=>{
     const id=await task(),a=await command(id,'start',{start_origin:'child_mode'}),b={...a,command_id:randomUUID(),start_origin:'parent_assisted'};
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();
+    const peer=new pg.Client(client.connectionParameters);await peer.connect();
     try {
       await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,role:'authenticated',session_id:'start-metrics-session'})]);await peer.query('set role authenticated');
       const [left,right]=await Promise.all([apply(a),peer.query('select public.apply_task_command($1) result',[b]).then(r=>r.rows[0].result)]);

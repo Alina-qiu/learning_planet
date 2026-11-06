@@ -140,7 +140,7 @@ export async function childDeletionCases({client,scalar,login,denied,check,famil
     await login();
     const concurrent=await scalar("select public.create_child($1,'Concurrent deletion',1::smallint)",[family]);
     const counts=(await scalar('select public.preview_child_deletion($1)',[concurrent])).counts, id=randomUUID();
-    const other=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const other=new pg.Client(client.connectionParameters);
     await other.connect();
     try {
       await other.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:uid,role:'authenticated',session_id:'parallel-child-delete'})]);

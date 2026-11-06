@@ -120,7 +120,7 @@ export async function reviewMilestoneCases({client,scalar,login,denied,check,oth
     const f=await fixture([0,0]);await answer(f.task);
     const wrong=await backlog(f,{resetDue:true});await answer(wrong,'wrong');
     const retry=await backlog(f,{resetDue:true});assert.ok((await answer(retry)).items.every(i=>i.reward_status==='eligible'));
-    const peers=[0,1].map(()=>new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'}));
+    const peers=[0,1].map(()=>new pg.Client(client.connectionParameters));
     try {
       for(const peer of peers) {await peer.connect();await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'review-milestones'})]);await peer.query('set role authenticated');}
       const complete=(peer,id)=>peer.query('select to_jsonb(public.complete_task($1,$2)) as task',[id,'milestone:'+id]);

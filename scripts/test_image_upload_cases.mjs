@@ -35,7 +35,7 @@ export async function imageUploadCases({client,scalar,login,denied,check,otherUi
     assert.equal((await scalar('select to_jsonb(d) from public.question_ocr_drafts d where id=$1',[id])).client_payload_hash,undefined);
   });
   await check('two upload sessions cannot bind different image payloads to the same draft UUID',async()=>{
-    const draftId=randomUUID(),peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();
+    const draftId=randomUUID(),peer=new pg.Client(client.connectionParameters);await peer.connect();
     try{
       await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'image-session'})]);await peer.query('set role authenticated');
       const results=await Promise.allSettled([begin(draftId),peer.query('select public.begin_question_media_upload($1,$2,$3)',[child,draftId,otherHash])]);

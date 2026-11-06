@@ -94,7 +94,7 @@ export async function aiAnalysisCases({client,scalar,login,denied,check,otherUid
   });
   await check('AI concurrent claims reserve once and concurrent different requests cannot overspend the final slot',async()=>{
     await update({monthly_limit:5});
-    const p=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'}); await p.connect();
+    const p=new pg.Client(client.connectionParameters); await p.connect();
     try {
       await p.query(`select set_config('request.jwt.claims','{"role":"service_role"}',false)`); await p.query('set role service_role');
       await service(); const id=randomUUID(), args=[user,session,child,id,input];

@@ -98,7 +98,7 @@ export async function taskPreferencesCases({client,scalar,login,denied,check,oth
   const raceChild=await newChild('Race'),r=await one(raceChild);
   await client.query('select public.start_task($1)',[r.task]);
   await check('two devices completing and abandoning concurrently cannot both mutate the final state or duplicate rewards',async()=>{
-    const other=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await other.connect();
+    const other=new pg.Client(client.connectionParameters);await other.connect();
     try {
       await other.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'race-device'})]);
       await other.query('set role authenticated');

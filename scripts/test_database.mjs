@@ -75,6 +75,11 @@ try {
     users: [{id: uid, email: 'parent@example.test'}, {id: otherUid, email: 'other@example.test'}],
     onMigration: name => console.log('MIGRATED ' + name),
   }));
+  await check('fixture rejects invalid passwords on peer connections', async () => {
+    const peer = new pg.Client({...client.connectionParameters, password: 'invalid-fixture-password'});
+    try { await assert.rejects(peer.connect(), {code: '28P01'}); }
+    finally { await peer.end(); }
+  });
   await login();
   await client.query("select public.onboard_family('test','Asia/Shanghai','child',1::smallint)");
   const family = await scalar('select id from public.families limit 1');
@@ -262,8 +267,7 @@ try {
     const taskId = await scalar('select id from public.task_instances where template_id=$1', [tid]);
     await client.query('select public.start_task($1)', [taskId]);
     const before = await scalar('select coin_balance from public.wallets where child_id=$1', [child]);
-    const secondClient = new pg.Client({host: '127.0.0.1', port: 54339, user: 'postgres',
-      password: 'local-test-only', database: 'postgres'});
+    const secondClient = new pg.Client(client.connectionParameters);
     await secondClient.connect();
     try {
       const claims = await scalar("select current_setting('request.jwt.claims')");
@@ -285,8 +289,7 @@ try {
     const pid = await scalar('select id from public.long_plans where template_id=$1', [tid]);
     const taskId = await scalar('select id from public.task_instances where template_id=$1', [tid]);
     const before = await scalar('select coin_balance from public.wallets where child_id=$1', [child]);
-    const secondClient = new pg.Client({host: '127.0.0.1', port: 54339, user: 'postgres',
-      password: 'local-test-only', database: 'postgres'});
+    const secondClient = new pg.Client(client.connectionParameters);
     await secondClient.connect();
     let results;
     try {
@@ -399,8 +402,7 @@ try {
     const start = offlineCommand(fixture, 'start');
     assert.equal((await applyOffline(start)).outcome, 'applied');
     const complete = offlineCommand(fixture, 'complete', start);
-    const secondClient = new pg.Client({host: '127.0.0.1', port: 54339, user: 'postgres',
-      password: 'local-test-only', database: 'postgres'});
+    const secondClient = new pg.Client(client.connectionParameters);
     await secondClient.connect();
     try {
       await secondClient.query("select set_config('request.jwt.claims',$1,false)", [await scalar("select current_setting('request.jwt.claims')")]);
@@ -779,7 +781,7 @@ try {
     const raceChild=await scalar("select public.create_child($1,'redemption race',1::smallint)",[family]);
     await client.query("select public.adjust_wallet($1,300,0,'race funding',$2)",[raceChild,randomUUID()]);
     const raceReward=await scalar('select public.save_reward($1,$2)',[family,{...rewardConfig,cost:200}]);
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();
+    const peer=new pg.Client(client.connectionParameters);await peer.connect();
     try{
       const claims=await scalar("select current_setting('request.jwt.claims')");
       await peer.query("select set_config('request.jwt.claims',$1,false)",[claims]);await peer.query('set role authenticated');

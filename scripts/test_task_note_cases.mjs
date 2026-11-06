@@ -63,8 +63,8 @@ export async function taskNoteCases({client,scalar,login,denied,check}) {
     await denied(sql,[task,randomUUID(),'removed','submit']); await auth();
   });
   await check('two real sessions racing note submit and cancel converge without repeating the write',async()=>{
-    const a=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
-    const b=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const a=new pg.Client(client.connectionParameters);
+    const b=new pg.Client(client.connectionParameters);
     try {
       for(const peer of [a,b]) {
         await peer.connect();

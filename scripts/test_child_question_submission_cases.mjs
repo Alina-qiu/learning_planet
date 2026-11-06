@@ -70,7 +70,7 @@ export async function childQuestionSubmissionCases({client,scalar,login,denied,c
   });
   await check('concurrent parent confirmations admit one intent and exact request replay returns the same question',async()=>{
     await childLogin();const d=await upload();await submit(d,config,null);await parentLogin();
-    const a=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'}),b=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const a=new pg.Client(client.connectionParameters),b=new pg.Client(client.connectionParameters);
     await a.connect();await b.connect();
     try {
       for(const peer of [a,b]) {await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:parent,role:'authenticated',session_id:'submission-parent'})]);await peer.query('set role authenticated');}

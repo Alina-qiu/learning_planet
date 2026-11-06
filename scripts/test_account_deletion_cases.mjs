@@ -223,7 +223,7 @@ export async function accountDeletionCases({client,scalar,login,denied,check,oth
   await login(emptyUser);
   await check('two sessions can request self-deletion before onboarding with one stable job',async()=>{
     const preview=await scalar('select public.preview_account_deletion()');
-    const second=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const second=new pg.Client(client.connectionParameters);
     await second.connect();
     try {
       await second.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:emptyUser,session_id:'other-empty-session',role:'authenticated'})]);

@@ -1,6 +1,8 @@
 # 本机数据库与私有文件恢复演练
 
-2026-11-06，新增可重复运行的隔离恢复测试。最终9项检查通过，用时59.8秒，报告为[build/backup_restore/results.json](../build/backup_restore/results.json)，运行ID `68bfbf42-b3a5-4ef5-9170-573414963620`。源服务在目标恢复前退出，目标服务在测试结束后退出；本轮合成备份归档已移除，只保留不含登录令牌或数据库行明文的结果摘要。
+2026-11-06，新增可重复运行的隔离恢复测试；最新在Windows临时库改用SCRAM密码认证后复验9项通过，用时43.7秒，报告为[build/backup_restore/results.json](../build/backup_restore/results.json)，运行ID `c66fd180-2749-4ad9-a27f-63920aaca7a5`。源服务在目标恢复前退出，目标服务在测试结束后退出；合成备份归档已移除，只保留不含登录令牌或数据库行明文的结果摘要。
+
+此前59.8秒的运行`68bfbf42-b3a5-4ef5-9170-573414963620`另存于`build/review_candidate/backup-restore-before-auth.json`。密码认证复验首次遇到Storage启动60秒超时；独立探测确认7.6秒内完成Storage启动，但未发送业务流量，因此探测的整体流量断言失败，不能计为集成通过。最终保持60秒超时设置完整重跑通过，日志为`tmp/ci-backup-auth-retry.log`；首次失败和探测日志均保留，启动延迟的具体原因尚未确定。
 
 这是本机开发验收工具，不是面向家庭用户的新备份按钮，也没有改变现有本机调试后端“重启为空库”的约定。业务Dart、SQL迁移、原生代码及APK未改；用户尚未准备云端Supabase项目。
 
@@ -51,7 +53,7 @@ $env:PG_CLIENT_BIN = 'D:/learning-planet-tools/postgresql-15.19-5/pgsql/bin'
 
 本机客户端来自PostgreSQL官方Windows下载页所链接的[EDB二进制归档](https://www.enterprisedb.com/download-postgresql-binaries)：`postgresql-15.19-5-windows-x64-binaries.zip`，下载文件SHA256为`49e0690194d9fe2bb4d7d6587fdddaa85a3eaaafe2fd5480e0916fcb25d0143e`（本机计算的完整性记录，不声称为供应商公布校验值）。只解压独立目录，未安装系统数据库服务或修改系统PATH，四个客户端均输出15.19。
 
-[CI定义](../.github/workflows/flutter_ci.yml)已在Storage集成任务中加入PostgreSQL15客户端、恢复测试和报告上传，Ubuntu客户端安装方式依据[PostgreSQL官方仓库说明](https://www.postgresql.org/download/linux/ubuntu/)。本轮未推送或执行远程CI。
+[CI定义](../.github/workflows/flutter_ci.yml)在Storage集成任务中加入PostgreSQL15客户端、恢复测试和报告上传，Ubuntu客户端安装方式依据[PostgreSQL官方仓库说明](https://www.postgresql.org/download/linux/ubuntu/)。提交`6722047`的[远程Storage任务](https://github.com/Alina-qiu/learning_planet/actions/runs/42139724907)已通过；此后Windows认证夹具改动仍按新提交继续复验。
 
 收尾检查：六份变更JavaScript模块语法通过，工作流YAML解析及执行顺序/依赖/报告路径检查通过，涉及的六份文档共350个本地链接可定位，补丁空白检查通过。
 

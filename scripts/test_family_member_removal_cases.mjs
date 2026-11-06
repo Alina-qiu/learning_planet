@@ -26,7 +26,7 @@ export async function familyMemberRemovalCases({client,scalar,login,denied,check
   const roster=()=>scalar('select public.load_family_members($1)',[family]);
   const states=()=>scalar('select public.family_membership_access()');
   async function peer(user=parent,session='removal-parent') {
-    const p=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await p.connect();
+    const p=new pg.Client(client.connectionParameters);await p.connect();
     await p.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:session})]);
     await p.query('set role authenticated'); return p;
   }

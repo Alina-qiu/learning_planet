@@ -107,7 +107,7 @@ export async function rewardInventoryCases({client,scalar,login,denied,check,oth
     await change(y,'cancel');
   });
   await check('two real sessions racing for last stock or child quota freeze only the winning request',async()=>{
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();
+    const peer=new pg.Client(client.connectionParameters);await peer.connect();
     try {
       await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'peer'})]);await peer.query('set role authenticated');
       for(const [patch,kid] of [[{stock_total:1},b],[{quota_period:'day',quota_limit:1},a]]) {

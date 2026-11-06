@@ -37,7 +37,7 @@ export async function pinyinImportCases({client,scalar,login,denied,check,otherU
     const different=await run([word('银行','yín háng','银行今天开门')]);assert.equal(different.created.length,1);
   });
   await check('two independent sessions importing the same batch or word create only one set',async()=>{
-    const peer=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await peer.connect();
+    const peer=new pg.Client(client.connectionParameters);await peer.connect();
     try{
       await peer.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:'import-peer',iat:Math.floor(Date.now()/1000)})]);
       await peer.query('set role authenticated');await peer.query("select public.verify_parent_pin($1,'3579')",[family]);

@@ -182,7 +182,7 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
     const f=await fixture();await f.prepare();await f.activate();await admin();
     await client.query("insert into public.redemptions(child_id,reward_id,frozen_amount,expires_at) select $1,$2,10,now()+interval '7 days' from generate_series(1,11)",[f.child,f.reward]);
     assert.equal(await f.enqueue(),12);
-    const workers=Array.from({length:2},()=>new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'}));
+    const workers=Array.from({length:2},()=>new pg.Client(client.connectionParameters));
     try {
       for(const worker of workers) {await worker.connect();await worker.query('set role service_role');await worker.query('begin');}
       const results=await Promise.all(workers.map(worker=>worker.query('select public.claim_parent_push_jobs(6,\'["hms"]\') as claims')));
@@ -193,7 +193,7 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
   });
   await check('enqueue waiting on child deletion rechecks its source after the deletion commits',async()=>{
     const f=await fixture();await f.prepare();await f.activate();
-    const worker=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});await worker.connect();
+    const worker=new pg.Client(client.connectionParameters);await worker.connect();
     try {
       await worker.query("set statement_timeout='5s'");await worker.query('set role service_role');
       const pid=(await worker.query('select pg_backend_pid() as pid')).rows[0].pid;

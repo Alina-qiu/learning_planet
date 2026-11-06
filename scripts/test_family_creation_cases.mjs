@@ -13,7 +13,7 @@ export async function familyCreationCases({client,scalar,login,denied,check,othe
   const original=command(), id=randomUUID(), sql='select public.resolve_family_creation($1,$2,$3)';
   const run=(request=id,payload=original,op='submit')=>scalar(sql,[request,payload,op]);
   async function peer() {
-    const p=new pg.Client({host:'127.0.0.1',port:54339,user:'postgres',database:'postgres'});
+    const p=new pg.Client(client.connectionParameters);
     await p.connect();
     await p.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:user,role:'authenticated',session_id:session,iat:Math.floor(Date.now()/1000)})]);
     await p.query('set role authenticated'); return p;
