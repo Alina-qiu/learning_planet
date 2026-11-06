@@ -66,4 +66,16 @@ class TaskStateMachine {
       accumulated: state.elapsedAt(now),
     );
   }
+
+  TaskTimingState abandon(TaskTimingState state, DateTime now) {
+    if (state.status == TaskStatus.abandoned) return state;
+    if (state.status == TaskStatus.completed ||
+        state.status == TaskStatus.skipped) {
+      throw StateError('An ended task cannot be abandoned.');
+    }
+    return TaskTimingState(
+      status: TaskStatus.abandoned,
+      accumulated: state.elapsedAt(now),
+    );
+  }
 }

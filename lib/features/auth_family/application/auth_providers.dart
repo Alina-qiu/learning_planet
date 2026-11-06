@@ -10,3 +10,5 @@ final authRepositoryProvider = Provider<AuthRepository>(
 final authSessionProvider = StreamProvider<AuthSession?>((ref) {
   return ref.watch(authRepositoryProvider).watchSession();
 });
+
+final signingOutProvider = StateProvider<bool>((ref) => false);

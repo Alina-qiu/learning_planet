@@ -1,9 +1,9 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../domain/task.dart';
 import '../domain/task_item.dart';
 import '../domain/wallet_summary.dart';
+import '../domain/task_start_origin.dart';
 
 abstract interface class TaskRepository {
   Future<WalletSummary> loadWallet(String childId);
@@ -21,10 +21,19 @@ abstract interface class TaskRepository {
   Future<void> pause(String taskId);
   Future<void> resume(String taskId);
   Future<void> complete(String taskId);
+  Future<void> abandon(String taskId);
   Future<void> manualComplete(String taskId, String reason);
 }
 
-class SupabaseTaskRepository implements TaskRepository {
+Future<void> startTaskWithOrigin(
+  TaskRepository repository,
+  String taskId,
+  TaskStartOrigin origin,
+) => repository is AttributedTaskStarter
+    ? (repository as AttributedTaskStarter).startWithOrigin(taskId, origin)
+    : repository.start(taskId);
+
+class SupabaseTaskRepository implements TaskRepository, AttributedTaskStarter {
   SupabaseTaskRepository(this._client);
 
   final SupabaseClient _client;
@@ -47,6 +56,10 @@ class SupabaseTaskRepository implements TaskRepository {
 
   @override
   Future<List<TaskItem>> loadTasks(String childId) async {
+    await _client.rpc<dynamic>(
+      'generate_daily_wrong_review_task',
+      params: {'target_child_id': childId},
+    );
     await _client.rpc<int>(
       'generate_scheduled_tasks',
       params: {'target_child_id': childId},
@@ -55,12 +68,13 @@ class SupabaseTaskRepository implements TaskRepository {
         .from('task_instances')
         .select(
           'id, child_id, title, status, coin_reward, xp_reward, '
-          'due_date, accumulated_seconds, active_started_at, minimum_seconds',
+          'due_date, accumulated_seconds, active_started_at, minimum_seconds, source_type, sync_version, task_kind, '
+          'task_priority, growth_category, expected_minutes, template_id, scheduled_at, due_at, abandoned_at',
         )
         .eq('child_id', childId)
         .order('due_date')
         .order('created_at');
-    return [for (final row in rows) _mapTask(row)];
+    return TaskItem.ordered(rows.map(TaskItem.fromJson));
   }
 
   @override
@@ -95,12 +109,23 @@ class SupabaseTaskRepository implements TaskRepository {
       _client.rpc<void>('start_task', params: {'target_task_id': taskId});
 
   @override
+  Future<void> startWithOrigin(String taskId, TaskStartOrigin origin) =>
+      _client.rpc<void>(
+        'start_task_with_origin',
+        params: {'target_task_id': taskId, 'requested_origin': origin.wire},
+      );
+
+  @override
   Future<void> pause(String taskId) =>
       _client.rpc<void>('pause_task', params: {'target_task_id': taskId});
 
   @override
   Future<void> resume(String taskId) =>
       _client.rpc<void>('resume_task', params: {'target_task_id': taskId});
+
+  @override
+  Future<void> abandon(String taskId) =>
+      _client.rpc<void>('abandon_task', params: {'target_task_id': taskId});
 
   @override
   Future<void> complete(String taskId) => _client.rpc<void>(
@@ -121,31 +146,6 @@ class SupabaseTaskRepository implements TaskRepository {
           'parent_reason': reason,
         },
       );
-
-  static TaskItem _mapTask(Map<String, dynamic> row) => TaskItem(
-    id: row['id'] as String,
-    childId: row['child_id'] as String,
-    title: row['title'] as String,
-    status: _mapStatus(row['status'] as String),
-    coinReward: row['coin_reward'] as int,
-    xpReward: row['xp_reward'] as int,
-    dueDate: DateTime.parse(row['due_date'] as String),
-    accumulatedSeconds: row['accumulated_seconds'] as int,
-    minimumSeconds: row['minimum_seconds'] as int,
-    activeStartedAt: row['active_started_at'] == null
-        ? null
-        : DateTime.parse(row['active_started_at'] as String),
-  );
-
-  static TaskStatus _mapStatus(String value) => switch (value) {
-    'scheduled' => TaskStatus.scheduled,
-    'ready' => TaskStatus.ready,
-    'in_progress' => TaskStatus.inProgress,
-    'paused' => TaskStatus.paused,
-    'completed' => TaskStatus.completed,
-    'skipped' || 'expired' => TaskStatus.skipped,
-    _ => throw StateError('Unknown task status: $value'),
-  };
 
   static String _dateOnly(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-'
@@ -179,6 +179,8 @@ class UnconfiguredTaskRepository implements TaskRepository {
   Future<void> resume(String taskId) => _fail();
   @override
   Future<void> complete(String taskId) => _fail();
+  @override
+  Future<void> abandon(String taskId) => _fail();
   @override
   Future<void> manualComplete(String taskId, String reason) => _fail();
 }

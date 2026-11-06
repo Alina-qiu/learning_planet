@@ -14,12 +14,186 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:local-startup
+      - run: npm run test:db-version
       - run: npm run test:db
+      - run: npm run test:db-upgrade
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: database-upgrade
+          path: build/database_upgrade/results.json
+      - run: npm run test:cleanup
+      - run: npm run test:account-worker
+      - run: npm run test:parent-push
+      - run: npm run test:task-push
+      - run: npm run test:pdf-worker
+      - run: node scripts/test_ai_analysis.mjs
+      - run: node scripts/test_ai_similar.mjs
+      - run: node scripts/test_ai_weekly_report.mjs
+      - run: npm run check:edge
+      - run: npm run test:pdf
+      - run: npm run test:pinyin-pdf
+      - run: npm run test:edge
+
+  http-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgrest: '16.2'
+            sha256: 4712595baae0f5d84a527d55a11166d6bf4d9b0f1d102505c5e9d59219787f08
+          - postgrest: '16.5'
+            sha256: 5099e7ada38f9f6846cd87c14c5f158b7c165f1e9959665ad412e61f4dceba95
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.4'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install pinned PostgREST
+        shell: bash
+        env:
+          POSTGREST_VERSION: ${{ matrix.postgrest }}
+          POSTGREST_SHA256: ${{ matrix.sha256 }}
+        run: |
+          curl --fail --location --retry 3 "https://github.com/PostgREST/postgrest/releases/download/v${POSTGREST_VERSION}/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" --output "$RUNNER_TEMP/postgrest.tar.xz"
+          printf '%s  %s\n' "$POSTGREST_SHA256" "$RUNNER_TEMP/postgrest.tar.xz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/postgrest"
+          tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP/postgrest"
+      - run: npm ci
+      - run: flutter pub get
+      - run: npm run test:http
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+      - name: Install pinned Supabase Auth
+        if: matrix.postgrest == '16.2'
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 https://github.com/supabase/auth/releases/download/v2.196.0/auth-v2.196.0-amd64.tar.xz --output "$RUNNER_TEMP/auth.tar.xz"
+          printf '0d35d4c06a9ae673d06bc8579aeef6bba6f7551fa7842f9fcdac33ec926e360c  %s\n' "$RUNNER_TEMP/auth.tar.xz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/gotrue"
+          tar -xJf "$RUNNER_TEMP/auth.tar.xz" -C "$RUNNER_TEMP/gotrue"
+      - run: npm run test:auth
+        if: matrix.postgrest == '16.2'
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth
+      - run: npm run test:economy-http
+        if: matrix.postgrest == '16.2'
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth
+      - run: npm run test:concurrency
+        if: matrix.postgrest == '16.2'
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth
+
+  storage-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.4'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - run: npm install --global npm@11.12.1
+      - run: npm ci
+      - run: flutter pub get
+      - name: Prepare pinned local services
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 https://github.com/PostgREST/postgrest/releases/download/v16.2/postgrest-v16.2-linux-static-x86-64.tar.xz --output "$RUNNER_TEMP/postgrest.tar.xz"
+          printf '4712595baae0f5d84a527d55a11166d6bf4d9b0f1d102505c5e9d59219787f08  %s\n' "$RUNNER_TEMP/postgrest.tar.xz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/postgrest" "$RUNNER_TEMP/gotrue"
+          tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP/postgrest"
+          curl --fail --location --retry 3 https://github.com/supabase/auth/releases/download/v2.196.0/auth-v2.196.0-amd64.tar.xz --output "$RUNNER_TEMP/auth.tar.xz"
+          printf '0d35d4c06a9ae673d06bc8579aeef6bba6f7551fa7842f9fcdac33ec926e360c  %s\n' "$RUNNER_TEMP/auth.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/auth.tar.xz" -C "$RUNNER_TEMP/gotrue"
+          curl --fail --location --retry 3 https://codeload.github.com/supabase/storage/zip/refs/tags/v1.72.1 --output "$RUNNER_TEMP/storage.zip"
+          printf 'be2e02f7f85eaf60173cca06e6a8afca89282cf762f0d245586045a4ae9241da  %s\n' "$RUNNER_TEMP/storage.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/storage.zip" -d "$RUNNER_TEMP"
+          npm ci --prefix "$RUNNER_TEMP/storage-1.72.1" --no-audit --no-fund
+          npm run build --prefix "$RUNNER_TEMP/storage-1.72.1"
+          curl --fail --location --retry 3 https://codeload.github.com/minio/minio/zip/refs/tags/RELEASE.2025-09-07T16-13-09Z --output "$RUNNER_TEMP/minio.zip"
+          printf '91ff05ab9a16274ae07b364eb0f4e27a1bc904d4f45d7386d9910cbe8635875d  %s\n' "$RUNNER_TEMP/minio.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/minio.zip" -d "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/minio-RELEASE.2025-09-07T16-13-09Z"
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/minio" .
+      - run: npm run test:storage
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth
+          STORAGE_SOURCE: ${{ runner.temp }}/storage-1.72.1
+          MINIO_BIN: ${{ runner.temp }}/minio
+      - name: Cache and check Edge entrypoints
+        run: npm run check:edge
+      - run: npm run test:privacy
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth
+          STORAGE_SOURCE: ${{ runner.temp }}/storage-1.72.1
+          MINIO_BIN: ${{ runner.temp }}/minio
+      - run: npm run test:pdf-integration
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth
+          STORAGE_SOURCE: ${{ runner.temp }}/storage-1.72.1
+          MINIO_BIN: ${{ runner.temp }}/minio
+      - name: Install PostgreSQL 15 backup clients
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --yes postgresql-client-15
+      - run: npm run test:backup-restore
+        env:
+          PG_CLIENT_BIN: /usr/lib/postgresql/15/bin
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth
+          STORAGE_SOURCE: ${{ runner.temp }}/storage-1.72.1
+          MINIO_BIN: ${{ runner.temp }}/minio
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-backup-restore-report
+          path: build/backup_restore/results.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worksheet-pdf-samples
+          path: |
+            output/pdf/local-service-*.pdf
+            output/pdf/local-service-pdf-validation.json
+          if-no-files-found: error
 
   quality:
     runs-on: ubuntu-latest
@@ -30,22 +204,199 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.4'
           cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: dart format --output=none --set-exit-if-changed lib test integration_test test_driver scripts/fixtures
       - run: flutter analyze
       - run: flutter test --coverage
+      - run: flutter test --dart-define=MEASURE_STARTUP=true test/startup_timings_test.dart
+      - run: node scripts/test_coverage_gate.mjs
+      - run: node scripts/check_coverage.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-coverage
+          path: |
+            coverage/lcov.info
+            coverage/core-summary.json
       - run: flutter build apk --debug
+      - run: pwsh -File scripts/verify_android_apk.ps1
+      - run: ./gradlew :app:testDebugUnitTest
+        working-directory: android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
+
+  ios-simulator:
+    # MLImage's arm64 slice targets devices, not Apple Silicon simulators.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check native push delivery policy
+        run: |
+          mkdir -p build/ios-push-policy
+          xcrun swiftc ios/Runner/PushDeliveryPolicy.swift scripts/fixtures/push_delivery_policy.swift -o build/ios-push-policy/checks
+          build/ios-push-policy/checks
+      - name: Check native diagnostic journal
+        run: |
+          mkdir -p build/ios-diagnostic-journal
+          xcrun swiftc ios/Runner/NativeDiagnosticJournal.swift scripts/fixtures/native_diagnostic_journal.swift -o build/ios-diagnostic-journal/checks
+          build/ios-diagnostic-journal/checks
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.4'
+          cache: true
+      - run: flutter pub get
+      - name: Select an available iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          mkdir -p build/ios-simulator
+          xcodebuild -version | tee build/ios-simulator/xcode.txt
+          xcrun simctl list devices available --json > build/ios-simulator/devices.json
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          report = pathlib.Path('build/ios-simulator')
+          devices = json.loads((report / 'devices.json').read_text())['devices']
+          candidates = [
+              (tuple(map(int, re.findall(r'\d+', runtime))), runtime, device)
+              for runtime, entries in devices.items() if runtime.endswith('.iOS-18-5')
+              for device in entries
+              if device.get('isAvailable') and device['name'].startswith('iPhone')
+          ]
+          if not candidates:
+              raise SystemExit('No available iOS 18.5 iPhone simulator in this runner image')
+          _, runtime, device = max(candidates, key=lambda item: (item[0], item[2]['name']))
+          selected = {**device, 'runtime': runtime, 'scope': 'Simulator; synthetic tasks; no cloud or physical-device acceptance'}
+          (report / 'selected.json').write_text(json.dumps(selected, indent=2) + '\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"id={device['udid']}\nstate={device['state']}\n")
+          print(device['name'], runtime, device['state'])
+          PY
+      - name: Build simulator test app
+        timeout-minutes: 12
+        shell: bash
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          set -o pipefail
+          flutter build ios --simulator --debug --no-pub --publish-port \
+            --target=integration_test/task_flow_test.dart \
+            --dart-define=TEST_DEVICE_LABEL=github-ios-simulator \
+            -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
+      - name: Boot simulator
+        id: boot
+        timeout-minutes: 5
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+          SIMULATOR_STATE: ${{ steps.simulator.outputs.state }}
+        run: |
+          if [ "$SIMULATOR_STATE" != Booted ]; then
+            xcrun simctl boot "$SIMULATOR_ID"
+          fi
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+      - name: Run native encrypted offline task flow
+        timeout-minutes: 8
+        shell: bash
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          set -o pipefail
+          flutter drive --no-pub --debug --verbose \
+            --use-application-binary=build/ios/iphonesimulator/Runner.app \
+            --driver=test_driver/task_flow_driver.dart \
+            --target=integration_test/task_flow_test.dart \
+            --dart-define=TEST_DEVICE_LABEL=github-ios-simulator \
+            -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/task-flow.log
+      - name: Collect simulator launch diagnostics
+        if: always() && steps.boot.outcome == 'success'
+        timeout-minutes: 2
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          report = pathlib.Path('build/ios-simulator')
+          device = os.environ['SIMULATOR_ID']
+          commands = {
+              'installed-app.txt': ['get_app_container', device, 'com.learningplanet.learningPlanet', 'app'],
+              'runner.log': ['spawn', device, 'log', 'show', '--last', '15m', '--style', 'compact', '--predicate', 'process == "Runner"'],
+              'screenshot.log': ['io', device, 'screenshot', str(report / 'simulator-final.png')],
+          }
+          for name, arguments in commands.items():
+              with (report / name).open('wb') as output:
+                  try:
+                      result = subprocess.run(['xcrun', 'simctl', *arguments], stdout=output, stderr=subprocess.STDOUT, timeout=30)
+                      print(name, 'exit', result.returncode)
+                  except subprocess.TimeoutExpired:
+                      output.write(b'\nDiagnostic command exceeded 30 seconds\n')
+                      print(name, 'timeout')
+          PY
+      - name: Stop simulator
+        if: always() && steps.simulator.outputs.id != ''
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: xcrun simctl shutdown "$SIMULATOR_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-simulator-task-flow
+          path: |
+            build/ios-simulator/
+            build/integration_results/
+          if-no-files-found: error
 
   ios-build:
     runs-on: macos-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [debug, release]
 
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.4'
           cache: true
       - run: flutter pub get
-      - run: flutter build ios --debug --no-codesign
+      - name: Validate iOS property lists and project
+        run: plutil -lint ios/Runner/Info.plist ios/Runner/Runner.entitlements ios/Runner/PrivacyInfo.xcprivacy ios/Runner.xcodeproj/project.pbxproj
+      - name: Record Apple build tools
+        run: |
+          xcodebuild -version
+          pod --version
+          flutter --version
+      - name: Build unsigned iOS app
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/ios-validation
+          flutter build ios --${{ matrix.mode }} --no-codesign 2>&1 | tee build/ios-validation/build.log
+      - name: Verify bundled resources
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/verify_ios_bundle.py build/ios/iphoneos/Runner.app | tee build/ios-validation/resources.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-validation-${{ matrix.mode }}
+          path: |
+            build/ios-validation/
+            ios/Podfile.lock

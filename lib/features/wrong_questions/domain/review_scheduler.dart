@@ -38,13 +38,24 @@ class ReviewScheduler {
             final dueOrder = a.reviewDueAt.compareTo(b.reviewDueAt);
             return dueOrder != 0
                 ? dueOrder
-                : b.wrongCount.compareTo(a.wrongCount);
+                : b.wrongCount != a.wrongCount
+                ? b.wrongCount.compareTo(a.wrongCount)
+                : a.id.compareTo(b.id);
           });
 
     if (due.isEmpty) return null;
     return DailyReviewTaskDraft(
       date: dayStart,
-      questionIds: due.take(maxQuestionsPerDay).map((item) => item.id).toList(),
+      questionIds: due
+          .take(
+            maxQuestionsPerDay < 1
+                ? 1
+                : maxQuestionsPerDay > 10
+                ? 10
+                : maxQuestionsPerDay,
+          )
+          .map((item) => item.id)
+          .toList(),
     );
   }
 }

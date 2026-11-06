@@ -1,0 +1,24 @@
+{
+  "flutterVersion": "3.47.4",
+  "jdk": {
+    "version": "17.0.21+9",
+    "url": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.21%2B9/OpenJDK17U-jdk_x64_windows_hotspot_17.0.21_9.zip",
+    "sha256": "98518ecf554465057ee5509462631deeee374bc368c12a411d225cd29381f84b"
+  },
+  "commandLineTools": {
+    "version": "23.0",
+    "url": "https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip",
+    "sha1": "57d04f2d75eb8e8fffc5000a987e5de4b5a63e9d"
+  },
+  "packages": ["platform-tools", "platforms;android-36", "platforms;android-35", "platforms;android-34", "build-tools;36.0.0", "ndk;28.2.13676358"],
+  "optionalIntegrationTest": {
+    "packages": ["emulator", "system-images;android-36;default;x86_64"],
+    "installedEmulatorVersion": "37.2.13",
+    "avd": "learning_planet_api36"
+  },
+  "optionalLegacyDiagnosticTest": {
+    "packages": ["system-images;android-29;default;x86_64"],
+    "avd": "learning_planet_api29",
+    "port": 5582
+  }
+}

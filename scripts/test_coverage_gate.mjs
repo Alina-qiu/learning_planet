@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,writeFile,utimes,rm,copyFile,symlink,unlink} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {tmpdir} from 'node:os';
+import {resolve,join,sep,relative} from 'node:path';
+import {checkCoverage,parseLcov} from './check_coverage.mjs';
+const tempRoot=resolve(tmpdir()),root=await mkdtemp(join(tempRoot,'learning-planet-coverage-'));
+const alias=root+'-alias';let linked=false;
+try{
+  await mkdir(join(root,'lib/core'),{recursive:true});await mkdir(join(root,'coverage'));
+  await writeFile(join(root,'policy.json'),JSON.stringify({minimumLinePercent:80,include:['^lib/core/.*\\.dart$'],exclude:[],requireAllSourceRecords:true}));
+  await writeFile(join(root,'lib/core/example.dart'),'int first() => 1;\nint second() => 2;\n');
+  const check=()=>checkCoverage({root,policyFile:'policy.json'});
+  const save=text=>writeFile(join(root,'coverage/lcov.info'),text);
+  await save('SF:lib\\core\\example.dart\nDA:1,1\nDA:2,0\nend_of_record\n');
+  let report=await check();assert.equal(report.percent,50);assert.equal(report.passed,false);
+  await save('SF:lib/core/example.dart\nDA:1,1\nDA:2,0\nend_of_record\nSF:lib\\core\\example.dart\nDA:1,0\nDA:2,2\nend_of_record\n');
+  report=await check();assert.equal(report.total,2);assert.equal(report.percent,100);assert.equal(report.passed,true);
+  await writeFile(join(root,'lib/core/missing.dart'),'int untested() => 0;\n');
+  report=await check();assert.deepEqual(report.missing,['lib/core/missing.dart']);assert.equal(report.passed,false);
+  const missing=resolve(root,'lib/core/missing.dart');assert.ok(missing.startsWith(root+sep));await rm(missing);
+  const future=new Date(Date.now()+5000);await utimes(join(root,'lib/core/example.dart'),future,future);
+  report=await check();assert.equal(report.passed,false);assert.deepEqual(report.stale,['lib/core/example.dart']);
+  await save('SF:lib/core/example.dart\nDA:999,1\nend_of_record\n');await assert.rejects(check(),/source mismatch/);
+  assert.throws(()=>parseLcov('SF:lib/core/example.dart\nDA:-1,5\n',root),/Invalid LCOV/);
+  assert.throws(()=>parseLcov('',root),/no repository/);
+  const past=new Date(Date.now()-10000);await utimes(join(root,'lib/core/example.dart'),past,past);
+  await symlink(root,alias,process.platform==='win32'?'junction':'dir');linked=true;
+  await save(`SF:${relative(alias,join(root,'lib/core/example.dart'))}\nDA:1,1\nDA:2,0\nend_of_record\n`);
+  report=await checkCoverage({root:alias,policyFile:'policy.json'});
+  assert.equal(report.percent,50);assert.equal(report.passed,false);
+  await mkdir(join(root,'scripts'));await copyFile(join(root,'policy.json'),join(root,'scripts/coverage_policy.json'));
+  await copyFile(fileURLToPath(new URL('./check_coverage.mjs',import.meta.url)),join(root,'scripts/check_coverage.mjs'));
+  const cli=spawnSync(process.execPath,[join(alias,'scripts/check_coverage.mjs')],{cwd:alias,encoding:'utf8',windowsHide:true});
+  assert.equal(cli.status,1,cli.stderr);assert.match(cli.stdout,/Coverage gate failed/);
+  console.log('Coverage gate checks passed: threshold, Windows paths, duplicate-source union, missing files, stale coverage, invalid LCOV, directory aliases and CLI failure exit.');
+}finally{
+  if(linked)await unlink(alias);
+  const target=resolve(root);if(!target.startsWith(tempRoot+sep)||!target.slice(tempRoot.length+1).startsWith('learning-planet-coverage-'))throw new Error('Unsafe test cleanup path');
+  await rm(target,{recursive:true,force:true});
+}
