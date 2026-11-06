@@ -136,7 +136,11 @@ private final class TaskNotificationDelegate: NSObject, UNUserNotificationCenter
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
     let content = notification.request.content
     if content.userInfo["task_push"] != nil {
-      completionHandler(taskPush.canPresent(content) ? [.banner, .sound] : [])
+      // UN delegates may run off-main. Serialize the final gate check with
+      // scope/plan changes and native disable before choosing presentation.
+      DispatchQueue.main.async {
+        completionHandler(self.taskPush.canPresent(content) ? [.banner, .sound] : [])
+      }
       return
     }
     let text = content.userInfo["payload"] as? String
