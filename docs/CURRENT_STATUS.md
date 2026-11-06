@@ -6,7 +6,7 @@
 
 需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，SHA256 `4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`；本轮重新核对文件摘要，前一轮已重提正文并确认与读取内容一致。
 
-最新推进：用户确认iPhone采用“优先安静”的远程任务提醒。注册、队列、APNs发送和手机接收校验已接入；本机403项数据库、14项升级、818项完整Flutter及发送/Edge回归通过。此前`60d8ff4`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)通过，含iOS千任务原生模拟器流程；本次新增Swift策略和接收逻辑尚需新CI验证，不能沿用旧结果。详见[任务远程提醒](TASK_REMOTE_PUSH.md)。
+最新验证：提交`ce7015e`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42162003423)全部通过，含818项Flutter、403项数据库、24项Swift通知策略、iOS Debug/Release及千任务原生模拟器流程；iPhone“优先安静”提醒已有对应源码的编译与策略证据，真实APNs和手机验收仍未完成。本轮继续将iOS诊断日志策略提取为生产共用代码，增加账号边界、去重、容量、损坏数据及跨进程恢复检查，执行结果以[草稿PR](https://github.com/Alina-qiu/learning_planet/pull/1)当前提交的CI为准。详见[任务远程提醒](TASK_REMOTE_PUSH.md)和[原生诊断检查](RUNTIME_DIAGNOSTICS.md#ios诊断日志的原生策略检查)。
 
 ## 技术栈与交付方式
 
@@ -18,7 +18,7 @@
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
-| 通知 | Android自有任务闹钟、HMS；iOS收到后校验的APNs任务/家长消息 | [iPhone优先安静方案](TASK_REMOTE_PUSH.md)已接入；本轮Swift/CI、真实供应商和目标手机待验证 |
+| 通知 | Android自有任务闹钟、HMS；iOS收到后校验的APNs任务/家长消息 | [iPhone优先安静方案](TASK_REMOTE_PUSH.md)已接入；Swift通知策略已通过；真实供应商和目标手机待验证 |
 | AI | 可替换服务端网关、结构化输出、审核与预算/隐私控制 | 测试使用可控响应；没有真实模型质量、费用与保留策略验收 |
 
 依赖声明见[pubspec.yaml](../pubspec.yaml)、[package.json](../package.json)，架构细节见[ARCHITECTURE.md](ARCHITECTURE.md)。本机工具安装在`D:\learning-planet-tools`，未修改系统PATH。
@@ -52,7 +52,7 @@
 | TSK-03 三类优先级 | `lib/features/tasks/domain/task_priority.dart`、[完成反馈](TASK_COMPLETION_FEEDBACK.md) | 孩子理解与读屏试用 |
 | TSK-04 状态转换/禁止孩子撤销 | `lib/features/tasks/domain/task_state_machine.dart`、[实际任务流程](LOCAL_DEBUG.md) | 双端并发操作实机验收 |
 | TSK-05 家长补签或纠正 | 补签及[计时纠正](TASK_TIME_CORRECTIONS.md)有原因、审计和版本检查 | 是否还包含撤回误完成，用户尚未答复；不能把这一扩展视为已实现 |
-| TSK-06 智能提醒 | [本地通知](LOCAL_NOTIFICATIONS.md)、[原生授权场景](../build/integration_results/notifications-granted.json) | 用户选择[收到后复查的远程方案](TASK_REMOTE_PUSH.md)，已实现且待本轮Swift/CI与真机验证；可能漏提醒，不能保证系统最终展示时刻 |
+| TSK-06 智能提醒 | [本地通知](LOCAL_NOTIFICATIONS.md)、[原生授权场景](../build/integration_results/notifications-granted.json) | 用户选择[收到后复查的远程方案](TASK_REMOTE_PUSH.md)，已实现且Swift策略/构建通过，真实供应商与真机仍待验证；可能漏提醒，不能保证系统最终展示时刻 |
 | TSK-07 每日自动复习 | [自动完成](REVIEW_AUTO_COMPLETION.md)、[实际复习流程](../build/local_review_results/ui-flow.json)，唯一日期任务/冻结题目 | 托管00:05调度、两端及长期跨日验证 |
 | ERR-01 拍照/多图/裁剪 | [OCR管理](OCR_MANAGEMENT.md)、[原生多选报告](../build/integration_results/image-import-native.json)、[中断草稿](OCR_INTERRUPTION.md) | 真机相机权限、系统回收期间选择恢复及真实图片 |
 | ERR-02 逐字段校对 | [字段校对](OCR_FIELD_CORRECTION.md)、[源图片变更](OCR_SOURCE_CHANGES.md) | 真实教材复杂版式与识别质量，不能以合成图片代替 |
@@ -106,7 +106,7 @@
 | AC-06 调账明细可追溯 | [实际界面报告](../build/wallet_details_results/walkthrough-20261106.json)，金额/账本ID不变 | API36本机服务范围通过；两端待验收 |
 | AC-07 PDF顺序/答案开关/预览一致 | 真实PDF、原字节预览/下载和页面截图 | 本机服务范围通过；两端系统导出待验收 |
 | AC-08 多孩子隔离 | 两孩子四会话并发、RLS及缓存范围测试 | 本机范围通过；跨端真实切换待验收 |
-| AC-09 安静时段不推送、不扣分 | Android实际闹钟过滤、静默与奖励回归 | **未完成验收**：已按用户选择改为收到后校验，仍待本轮Swift/CI及真实供应商/目标手机 |
+| AC-09 安静时段不推送、不扣分 | Android实际闹钟过滤、静默与奖励回归 | **未完成验收**：已按用户选择改为收到后校验，Swift策略与构建已通过，仍待真实供应商/目标手机 |
 | AC-10 清楚说明并在承诺期限内注销 | 本机真实Auth/Storage/S3删除与失败恢复 | **未完成**：托管调度与真实承诺期限无证据 |
 | AC-11 三题唯一复习、全部作答自动结算 | 数据库规则及实际三题离线/重开/结算场景 | 本机范围通过；托管定时/跨端改时及真实周期待验收 |
 

@@ -117,3 +117,11 @@ pwsh -File scripts/test_android_legacy_anr.ps1 -UseChinaMirror
 2026-11-05在AOSP API29 x86_64、WHPX/SwiftShader通过，运行编号e98bf8e9-52a0-41ca-88e2-d497907a9f6c，两个进程3784/3953，系统确认1次ANR、两阶段完成。报告build/integration_results/native-anr-android29.json及同编号capture/verify.json仅为合成测试数据。此前注册Instrumentation的两次尝试没有完成全流程，失败日志保留且不计通过；最终脚本不注册测试runner。
 
 这是1条原生适配器跨进程场景，不是Flutter界面、图形性能、华为鸿蒙4.2或iPhone验收；既有6条Android应用场景及重启证据另计。当前无真实Supabase，普通包未登录时也不会绑定账号诊断范围。测试包结束后必须重建普通调试APK，不能交付故障测试安装。
+
+## iOS诊断日志的原生策略检查
+
+2026-11-06，将原有MetricKit回调中的日志状态转换提取到`ios/Runner/NativeDiagnosticJournal.swift`。应用仍使用相同的JSON结构、事件ID算法、串行队列、文件保护与排除备份设置；MethodChannel及服务端协议不变。回调只提取报告区间和两类条目数量，未加入原始诊断文本或堆栈采集。
+
+`scripts/fixtures/native_diagnostic_journal.swift`直接编译这份生产策略，覆盖未绑定、按UTC归日、重复投递和确认、旧账号迟到确认、账号切换、退出后同账号重登、跨账号报告区间、时钟回拨、过期/未来报告、容量与待传去重标记、损坏JSON/标识/日期/类别。另将合成日志写入独立临时文件，启动全新进程读取、重放并确认，检验序列化后的事件身份与去重行为。临时文件只包含合成范围和固定类别，完成后清理。
+
+检查接入macOS的`ios-simulator`任务，运行时直接编译上述两个Swift文件；执行结果见当前PR提交的`Check native diagnostic journal`步骤。它验证生产日志策略及普通文件跨进程恢复，不能证明MetricKit真实回调、iPhone锁屏文件保护、备份排除、故障送达或云端统计。此前Dart桥接、Android故障和iOS编译证据各保留原验证范围。
