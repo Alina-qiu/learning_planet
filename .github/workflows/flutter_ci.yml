@@ -319,6 +319,11 @@ jobs:
           fi
           set -o pipefail
           xcrun simctl bootstatus "$SIMULATOR_ID" -b 2>&1 | tee build/ios-simulator/boot.log
+      - name: Stop prepared simulator during compilation
+        timeout-minutes: 2
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: xcrun simctl shutdown "$SIMULATOR_ID"
       - name: Build simulator test app
         timeout-minutes: 12
         shell: bash
@@ -330,6 +335,14 @@ jobs:
             --target=integration_test/task_flow_test.dart \
             --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
             -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
+      - name: Boot prepared simulator
+        timeout-minutes: 3
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          set -o pipefail
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b 2>&1 | tee build/ios-simulator/resume-boot.log
       - name: Run native encrypted offline task flow
         timeout-minutes: 14
         env:
