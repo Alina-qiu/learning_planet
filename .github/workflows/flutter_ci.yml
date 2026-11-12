@@ -240,7 +240,7 @@ jobs:
     name: ios-simulator (${{ matrix.ios }}, ${{ matrix.family }})
     # MLImage's arm64 slice targets devices, not Apple Silicon simulators.
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -307,6 +307,18 @@ jobs:
               output.write(f"id={device['udid']}\nstate={device['state']}\n")
           print(device['name'], runtime, device['state'])
           PY
+      - name: Boot simulator
+        id: boot
+        timeout-minutes: 10
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+          SIMULATOR_STATE: ${{ steps.simulator.outputs.state }}
+        run: |
+          if [ "$SIMULATOR_STATE" != Booted ]; then
+            xcrun simctl boot "$SIMULATOR_ID"
+          fi
+          set -o pipefail
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b 2>&1 | tee build/ios-simulator/boot.log
       - name: Build simulator test app
         timeout-minutes: 12
         shell: bash
@@ -318,32 +330,13 @@ jobs:
             --target=integration_test/task_flow_test.dart \
             --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
             -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
-      - name: Boot simulator
-        id: boot
-        timeout-minutes: 5
-        env:
-          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
-          SIMULATOR_STATE: ${{ steps.simulator.outputs.state }}
-        run: |
-          if [ "$SIMULATOR_STATE" != Booted ]; then
-            xcrun simctl boot "$SIMULATOR_ID"
-          fi
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
       - name: Run native encrypted offline task flow
-        timeout-minutes: 8
-        shell: bash
+        timeout-minutes: 14
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
-        run: |
-          set -o pipefail
-          flutter drive --no-pub --debug --verbose \
-            --use-application-binary=build/ios/iphonesimulator/Runner.app \
-            --driver=test_driver/task_flow_driver.dart \
-            --target=integration_test/task_flow_test.dart \
-            --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
-            -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/task-flow.log
+        run: python3 scripts/run_ios_simulator_flow.py
       - name: Collect simulator launch diagnostics
-        if: always() && steps.boot.outcome == 'success'
+        if: always() && steps.simulator.outputs.id != ''
         timeout-minutes: 2
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
@@ -367,6 +360,7 @@ jobs:
                       print(name, 'timeout')
           PY
       - name: Stop simulator
+        timeout-minutes: 2
         if: always() && steps.simulator.outputs.id != ''
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}

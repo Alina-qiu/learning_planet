@@ -18,9 +18,15 @@ CI在同一份源码上执行以下独立任务，每项均使用真实Keychain�
 
 本轮只调整检查配置和文档，客户端及平台实现未变化，上一轮Android调试包继续对应当前应用代码。工作流语法已通过actionlint，实际清单演练确认三个选择及缺失版本拒绝；编译和运行是否通过，以对应提交的[PR Checks](https://github.com/Alina-qiu/learning_planet/pull/1)为准。
 
+## 启动与失败诊断
+
+首次矩阵运行[43188325308](https://github.com/Alina-qiu/learning_planet/actions/runs/43188325308)有三项失败：iPad在系统首次数据迁移期间超过5分钟；iOS26.2/iPhone的Dart VM已监听，但Flutter实时日志订阅遗漏了地址；iOS18.5/iPhone的首页状态等待失败。七项编译、质量和服务端检查通过，不能据此认定矩阵通过。
+
+工作流改为在编译前完成模拟器启动，保留最长10分钟的迁移等待及boot.log；随后从simctl启动时即绑定的控制台获取VM地址，用Flutter的`--use-existing-app`运行原有驱动。所有业务断言、20秒状态等待、渲染器和OCR插件均保留。退出前保存app-final.png，避免失败界面被卸载清除。每个阶段仍有上限，整体45分钟；不会无限等待或自动重试断言失败。修复后的运行结果以当前提交Checks为准。
+
 ## 仍未完成的要求
 
-- iOS27运行尚未覆盖。现有Intel镜像实际清单不含该版本；[Xcode27预览镜像](https://github.com/actions/runner-images/issues/14404)与OCR原生库的模拟器架构还需另行验证。
+- iOS27运行尚未覆盖。现有Intel镜像实际清单不含该版本；[Xcode27镜像（Apple Silicon）](https://github.blog/changelog/2026-10-15-xcode-27-runner-image-generally-available/)与OCR原生库的模拟器架构还需另行验证。
 - 18.5与26.2只是各主版本中的具体运行点，不代表所有补丁版本或所有设备通过。
 - iPad检查覆盖合成任务页和本机数据流程，不代表所有页面、分屏、相机、OCR、系统导出或读屏已验收。
 - 测试使用Debug和合成家庭，未经过生产登录、实际后端与推送；不能用于冷启动、完成反馈等PRD性能达标判断。
