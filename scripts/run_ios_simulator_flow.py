@@ -36,14 +36,21 @@ def wait_for_service(device, pid, report, timeout=120):
     while time.monotonic() < deadline:
         # Flutter emits the announcement via os_log on iOS; --console-pty does
         # not capture it. Query persisted entries instead of subscribing late.
-        result = subprocess.run(
-            ["xcrun", "simctl", "spawn", device, "log", "show", "--last", "5m",
-             "--style", "compact", "--predicate",
-             'process == "Runner" AND eventMessage CONTAINS "The Dart VM service is listening on"'],
-            capture_output=True, text=True, timeout=20, check=True,
-        )
-        (report / "vm-service.log").write_text(result.stdout + result.stderr, encoding="utf-8")
-        url = vm_service_url(result.stdout, pid)
+        path = report / "vm-service.log"
+        with path.open("wb") as log:
+            try:
+                subprocess.run(
+                    ["xcrun", "simctl", "spawn", device, "log", "show", "--last", "5m",
+                     "--style", "compact", "--predicate",
+                     'process == "Runner" AND eventMessage CONTAINS "The Dart VM service is listening on"'],
+                    stdout=log, stderr=subprocess.STDOUT,
+                    timeout=min(30, max(0.1, deadline - time.monotonic())), check=True,
+                )
+            except subprocess.TimeoutExpired:
+                # simctl/log can outlive its output. Keep already-written lines
+                # and allow another lookup within the original total deadline.
+                log.write(b"\nLog lookup timed out; retaining partial output\n")
+        url = vm_service_url(path.read_text(encoding="utf-8", errors="replace"), pid)
         if url:
             return url
         time.sleep(2)
