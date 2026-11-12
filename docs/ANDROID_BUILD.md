@@ -1,5 +1,20 @@
 # Android 调试构建
 
+## 2026-11-12 奖励页适配（当前产物）
+
+奖励商城、兑换记录及账本现在支持横屏窄窗口、两倍字号和安全区域；范围见[奖励页适配](ECONOMY_ACCESSIBILITY.md)。两个生产入口调试包已重建，通过资源、三ABI加密SQLite、测试入口排除及v2签名检查，没有安装真机。
+
+| 产物 | 包名 | 字节 / SHA256 |
+|---|---|---|
+| `build/app/outputs/flutter-apk/app-debug.apk` | `com.learningplanet.learning_planet` | 216000619；`61af17101e6f542a404ac78267955bbbfe1907d143830d967557ffec5276898d` |
+| `build/app/outputs/flutter-apk/app-local-debug.apk` | `com.learningplanet.learning_planet.local` | 216000731；`ec82b717d7a630006304d78830a6a7ef10d1e590ca176e1cb7e12d0772c7d3c6` |
+
+普通包仅用于未配置后台的启动验证。本机包依赖电脑临时后端和USB转发，不能作为独立离线演示；当前没有可连接的手机。普通构建135.8秒，本机构建32.0秒。本机包生成后已恢复普通包，两份摘要均已复核。
+
+日志为`tmp/economy-layout-ordinary-build-final.log`、`tmp/economy-layout-local-build-final.log`及两份`economy-layout-*-signature.log`。本机服务首次Storage冷启动超时，重试后发现Deno缓存缺少已声明依赖；补齐缓存后启动成功。构建完成后已正常停止服务，退出码0；本轮未重新进行后端业务联调。Flutter更新检查曾等待网络，最终构建只在子进程设置CI模式跳过更新检查，没有升级SDK。
+
+下方保留历史产物与验证记录，其摘要不对应当前文件。
+
 2026-11-06更新：[iPhone收到后校验的任务提醒](TASK_REMOTE_PUSH.md)接入后重新构建两种Android调试包。iOS控制器仅在iOS创建，Android保留既有本地闹钟；两种包均通过资源、三ABI加密SQLite映射、生产入口及v2签名检查。本轮未重新安装手机或模拟器，不沿用旧安装场景作为本轮运行结果。
 
 | 当前文件 | 应用ID | 字节 / SHA256 |
@@ -9,7 +24,7 @@
 
 普通包仍为未配置后端的启动包，本机包须按[本机联调](LOCAL_DEBUG.md)连接电脑临时服务。日志为`tmp/task-push-android-build-final.log`、`tmp/task-push-local-android-build-final.log`及两份`task-push-*-signature-final.log`。首次Storage冷启动60秒超时已保留；独立重试成功，构建后已请求正常关闭服务。该启动检查不算完整业务联调。下面保留此前产物摘要和运行记录。
 
-## 2026-11-06 首页与任务列表适配（当前产物）
+## 2026-11-06 首页与任务列表适配（历史产物）
 
 修复长同步说明在横屏双倍字号下挤占任务列表，以及首页内容进入系统侧边区域。同步提示与任务共用可滚动区域，首页/任务页避开系统边缘。新增4项、相关82项、完整804项Flutter通过，核心覆盖率90.93%，完整分析31.8秒及274文件格式通过；五张中文截图已复核，见[实现与验证范围](TASK_ACCESSIBILITY.md)。
 

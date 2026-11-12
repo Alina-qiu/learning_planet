@@ -611,6 +611,32 @@ class _EconomyScreenState extends ConsumerState<EconomyScreen> {
     final blocked =
         durable != null &&
         (pending.isLoading || pending.hasError || pending.valueOrNull != null);
+    final requestStatus = <Widget>[
+      if (durable != null)
+        pending.when(
+          data: (request) => request == null
+              ? const SizedBox.shrink()
+              : EconomyPendingCommand(
+                  request: request,
+                  busy: _busy,
+                  parent: parent,
+                  onAction: (action) => _recover(request, action),
+                ),
+          loading: () => const LinearProgressIndicator(),
+          error: (_, __) => Padding(
+            padding: const EdgeInsets.all(8),
+            child: Wrap(
+              children: [
+                const Text('本机待确认请求暂时无法读取，请重试。'),
+                TextButton(
+                  onPressed: _busy ? null : _refresh,
+                  child: const Text('重新读取请求'),
+                ),
+              ],
+            ),
+          ),
+        ),
+    ];
     return DefaultTabController(
       length: 3,
       initialIndex: widget.initialTab,
@@ -634,364 +660,330 @@ class _EconomyScreenState extends ConsumerState<EconomyScreen> {
             ],
           ),
         ),
-        body: Column(
-          children: [
-            if (durable != null)
-              pending.when(
-                data: (request) => request == null
-                    ? const SizedBox.shrink()
-                    : EconomyPendingCommand(
-                        request: request,
-                        busy: _busy,
-                        parent: parent,
-                        onAction: (action) => _recover(request, action),
-                      ),
-                loading: () => const LinearProgressIndicator(),
-                error: (_, __) => Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Wrap(
+        body: SafeArea(
+          top: false,
+          child: ref
+              .watch(economyDataProvider(_scope))
+              .when(
+                skipLoadingOnRefresh: false,
+                loading: () => ListView(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.paddingOf(context).bottom + 16,
+                  ),
+                  children: [
+                    ...requestStatus,
+                    const Center(child: CircularProgressIndicator()),
+                  ],
+                ),
+                error: (error, _) => SingleChildScrollView(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.paddingOf(context).bottom + 16,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text('本机待确认请求暂时无法读取，请重试。'),
-                      TextButton(
-                        onPressed: _busy ? null : _refresh,
-                        child: const Text('重新读取请求'),
+                      ...requestStatus,
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          isNetworkFailure(error)
+                              ? '暂时无法连接服务，且本机没有可用的奖励记录。请联网后重试。'
+                              : '奖励记录暂时无法读取，请刷新或重新登录。',
+                        ),
+                      ),
+                      FilledButton(
+                        onPressed: _refresh,
+                        child: const Text('重试'),
                       ),
                     ],
                   ),
                 ),
-              ),
-            Expanded(
-              child: ref
-                  .watch(economyDataProvider(_scope))
-                  .when(
-                    skipLoadingOnRefresh: false,
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, _) => Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              isNetworkFailure(error)
-                                  ? '暂时无法连接服务，且本机没有可用的奖励记录。请联网后重试。'
-                                  : '奖励记录暂时无法读取，请刷新或重新登录。',
-                            ),
-                          ),
-                          FilledButton(
-                            onPressed: _refresh,
-                            child: const Text('重试'),
-                          ),
-                        ],
+                data: (data) {
+                  if (_accessDenied) {
+                    return ListView(
+                      padding: EdgeInsets.only(
+                        bottom: MediaQuery.paddingOf(context).bottom + 16,
                       ),
-                    ),
-                    data: (data) {
-                      if (_accessDenied) {
-                        return const Center(
-                          child: Text('该孩子的数据暂不可访问，请重新登录或刷新核对权限。'),
-                        );
-                      }
-                      _bindPages(data);
-                      final readOnly = _busy || _offline;
-                      final overview = data['overview'] as Map<String, dynamic>;
-                      final progress = XpProgress(
-                        (overview['xp'] as num).toInt(),
-                      );
-                      final rewards = _rows['rewards']!;
-                      final redemptions = _rows['redemptions']!;
-                      return Column(
-                        children: [
-                          if (_busy)
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text('操作处理中，请完成确认或等待结果…'),
+                      children: [
+                        ...requestStatus,
+                        const Text('该孩子的数据暂不可访问，请重新登录或刷新核对权限。'),
+                      ],
+                    );
+                  }
+                  _bindPages(data);
+                  final readOnly = _busy || _offline;
+                  final overview = data['overview'] as Map<String, dynamic>;
+                  final progress = XpProgress((overview['xp'] as num).toInt());
+                  final rewards = _rows['rewards']!;
+                  final redemptions = _rows['redemptions']!;
+                  return NestedScrollView(
+                    headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                      SliverToBoxAdapter(
+                        child: Column(
+                          children: [
+                            ...requestStatus,
+                            if (_busy)
+                              const Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Text('操作处理中，请完成确认或等待结果…'),
+                              ),
+                            ListTile(
+                              title: Text(
+                                '${_offline ? '离线上次记录：' : ''}可用 ${overview['coin_balance']} · 冻结 ${overview['frozen_balance']} · 待确认 ${overview['pending_coins']} 金币',
+                              ),
+                              subtitle: Text(
+                                'Lv.${progress.level} · XP ${progress.total} · ${progress.level == 50 ? '最高等级' : '本级 ${progress.earnedInLevel}/${progress.nextRequired}'}\n金币用于兑换，XP只用于成长，永不兑换或扣减。',
+                              ),
                             ),
-                          ListTile(
-                            title: Text(
-                              '${_offline ? '离线上次记录：' : ''}可用 ${overview['coin_balance']} · 冻结 ${overview['frozen_balance']} · 待确认 ${overview['pending_coins']} 金币',
+                            LinearProgressIndicator(value: progress.fraction),
+                            if (overview['reconciled'] != true)
+                              const Text('钱包与账本不一致，请联系家长核查，勿继续兑换。'),
+                          ],
+                        ),
+                      ),
+                    ],
+                    body: TabBarView(
+                      children: [
+                        _lazyList('rewards', [
+                          if (parent)
+                            () => FilledButton.icon(
+                              onPressed: readOnly ? null : () => _edit(),
+                              icon: const Icon(Icons.add),
+                              label: const Text('新增奖励'),
                             ),
-                            subtitle: Text(
-                              'Lv.${progress.level} · XP ${progress.total} · ${progress.level == 50 ? '最高等级' : '本级 ${progress.earnedInLevel}/${progress.nextRequired}'}\n金币用于兑换，XP只用于成长，永不兑换或扣减。',
-                            ),
-                          ),
-                          LinearProgressIndicator(value: progress.fraction),
-                          if (overview['reconciled'] != true)
-                            const Text('钱包与账本不一致，请联系家长核查，勿继续兑换。'),
-                          Expanded(
-                            child: TabBarView(
-                              children: [
-                                _lazyList('rewards', [
-                                  if (parent)
-                                    () => FilledButton.icon(
-                                      onPressed: readOnly
-                                          ? null
-                                          : () => _edit(),
-                                      icon: const Icon(Icons.add),
-                                      label: const Text('新增奖励'),
+                          for (final row in rewards.where(
+                            (r) => parent || r['active'] == true,
+                          ))
+                            () => Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${row['title']} · ${row['cost']}金币${row['active'] == true ? '' : '（已下架）'}',
                                     ),
-                                  for (final row in rewards.where(
-                                    (r) => parent || r['active'] == true,
-                                  ))
-                                    () => Card(
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(16),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              '${row['title']} · ${row['cost']}金币${row['active'] == true ? '' : '（已下架）'}',
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              '${row['description'] ?? ''}\n${row['rules'] ?? ''}\nLv.${row['minimum_level']}解锁；可用 ${_time.format(row['available_from'], empty: '现在')} 至 ${_time.format(row['available_until'], empty: '不限')}\n${rewardCapacityDescription(row)}',
-                                            ),
-                                            if (row['blocked_reason'] != null)
-                                              Text(
-                                                row['blocked_reason'] as String,
-                                              ),
-                                            const SizedBox(height: 8),
-                                            Wrap(
-                                              children: [
-                                                if (parent)
-                                                  IconButton(
-                                                    onPressed: readOnly
-                                                        ? null
-                                                        : () => _edit(row),
-                                                    icon: const Icon(
-                                                      Icons.edit,
-                                                    ),
-                                                    tooltip: '编辑奖励',
-                                                  ),
-                                                FilledButton.tonal(
-                                                  onPressed:
-                                                      readOnly ||
-                                                          blocked ||
-                                                          (!_requests
-                                                                  .containsKey(
-                                                                    row['id'],
-                                                                  ) &&
-                                                              (row['active'] !=
-                                                                      true ||
-                                                                  row['can_request'] ==
-                                                                      false)) ||
-                                                          overview['reconciled'] !=
-                                                              true
-                                                      ? null
-                                                      : () => _request(row),
-                                                  child: Text(
-                                                    _requests.containsKey(
-                                                          row['id'],
-                                                        )
-                                                        ? '重试申请'
-                                                        : '申请',
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '${row['description'] ?? ''}\n${row['rules'] ?? ''}\nLv.${row['minimum_level']}解锁；可用 ${_time.format(row['available_from'], empty: '现在')} 至 ${_time.format(row['available_until'], empty: '不限')}\n${rewardCapacityDescription(row)}',
                                     ),
-                                  if (rewards.isEmpty)
-                                    () => const Text('暂无奖励，请家长验证PIN后创建。'),
-                                  () => _moreButton('rewards'),
-                                ]),
-                                _lazyList('redemptions', [
-                                  for (final row in redemptions)
-                                    () => Card(
-                                      child: Column(
-                                        children: [
-                                          ListTile(
-                                            title: Text(
-                                              '${row['reward_title'] ?? '历史奖励'} · ${redemptionLabels[row['status']] ?? row['status']}',
-                                            ),
-                                            subtitle: Text(
-                                              '冻结金额快照 ${row['frozen_amount']}金币\n${row['reward_rules'] ?? ''}'
-                                              '${row['reward_limits'] is Map && (row['reward_limits'] as Map).isNotEmpty ? '\n申请时：${rewardQuotaDescription((row['reward_limits'] as Map).cast<String, dynamic>())}' : ''}'
-                                              '\n到期 ${_time.format(row['expires_at'])}\n${row['decision_reason'] ?? ''}',
-                                            ),
-                                          ),
-                                          Wrap(
-                                            children: [
-                                              if (row['status'] == 'requested')
-                                                TextButton(
-                                                  onPressed: readOnly
-                                                      ? null
-                                                      : () => _transition(
-                                                          row['id'] as String,
-                                                          'cancel',
-                                                        ),
-                                                  child: const Text('取消申请'),
-                                                ),
-                                              if (parent &&
-                                                  row['status'] ==
-                                                      'requested') ...[
-                                                TextButton(
-                                                  onPressed: readOnly
-                                                      ? null
-                                                      : () => _transition(
-                                                          row['id'] as String,
-                                                          'approve',
-                                                        ),
-                                                  child: const Text('批准'),
-                                                ),
-                                                TextButton(
-                                                  onPressed: readOnly
-                                                      ? null
-                                                      : () => _transition(
-                                                          row['id'] as String,
-                                                          'reject',
-                                                        ),
-                                                  child: const Text('拒绝并退款'),
-                                                ),
-                                              ],
-                                              if (parent &&
-                                                  row['status'] == 'approved')
-                                                TextButton(
-                                                  onPressed: readOnly
-                                                      ? null
-                                                      : () => _transition(
-                                                          row['id'] as String,
-                                                          'fulfill',
-                                                        ),
-                                                  child: const Text('确认已履约'),
-                                                ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  if (redemptions.isEmpty)
-                                    () => const Text('暂无兑换记录。'),
-                                  () => _moreButton('redemptions'),
-                                ]),
-                                _lazyList('ledger', [
-                                  () => Text(
-                                    '本月收入 ${overview['month_income']} · 已履约消耗 ${overview['month_spent']}金币',
-                                  ),
-                                  () => Text(
-                                    '每日软上限 ${overview['daily_soft_limit']}，超额金币待家长确认，XP照常获得。',
-                                  ),
-                                  if (parent)
-                                    () => Wrap(
+                                    if (row['blocked_reason'] != null)
+                                      Text(row['blocked_reason'] as String),
+                                    const SizedBox(height: 8),
+                                    Wrap(
                                       children: [
-                                        TextButton(
-                                          onPressed: readOnly || blocked
-                                              ? null
-                                              : _adjust,
-                                          child: Text(
-                                            _adjustment == null
-                                                ? '家长调账'
-                                                : '重试同一笔调账',
+                                        if (parent)
+                                          IconButton(
+                                            onPressed: readOnly
+                                                ? null
+                                                : () => _edit(row),
+                                            icon: const Icon(Icons.edit),
+                                            tooltip: '编辑奖励',
                                           ),
-                                        ),
-                                        TextButton(
-                                          onPressed: readOnly
+                                        FilledButton.tonal(
+                                          onPressed:
+                                              readOnly ||
+                                                  blocked ||
+                                                  (!_requests.containsKey(
+                                                        row['id'],
+                                                      ) &&
+                                                      (row['active'] != true ||
+                                                          row['can_request'] ==
+                                                              false)) ||
+                                                  overview['reconciled'] != true
                                               ? null
-                                              : () => _limit(
-                                                  (overview['daily_soft_limit']
-                                                          as num)
-                                                      .toInt(),
-                                                ),
-                                          child: const Text('配置软上限'),
-                                        ),
-                                        TextButton(
-                                          onPressed: readOnly
-                                              ? null
-                                              : () => _run((repository) async {
-                                                  _parent();
-                                                  await repository.reconcile(
-                                                    widget.childId,
-                                                  );
-                                                }),
-                                          child: const Text('按账本重算钱包'),
+                                              : () => _request(row),
+                                          child: Text(
+                                            _requests.containsKey(row['id'])
+                                                ? '重试申请'
+                                                : '申请',
+                                          ),
                                         ),
                                       ],
                                     ),
-                                  for (final row in _rows['pending']!.where(
-                                    (r) => r['status'] == 'pending',
-                                  ))
-                                    () => Card(
-                                      child: ListTile(
-                                        title: Text(
-                                          '${row['amount']}金币待确认 · ${economySourceLabel(row['source_type'])}',
-                                        ),
-                                        subtitle: Text(
-                                          _time.format(row['created_at']),
-                                        ),
-                                        trailing: !parent
-                                            ? null
-                                            : Wrap(
-                                                children: [
-                                                  IconButton(
-                                                    onPressed: readOnly
-                                                        ? null
-                                                        : () => _decide(
-                                                            row['id'] as String,
-                                                            true,
-                                                          ),
-                                                    icon: const Icon(
-                                                      Icons.check,
-                                                    ),
-                                                    tooltip: '确认发放',
-                                                  ),
-                                                  IconButton(
-                                                    onPressed: readOnly
-                                                        ? null
-                                                        : () => _decide(
-                                                            row['id'] as String,
-                                                            false,
-                                                          ),
-                                                    icon: const Icon(
-                                                      Icons.close,
-                                                    ),
-                                                    tooltip: '拒绝超额',
-                                                  ),
-                                                ],
-                                              ),
-                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          if (rewards.isEmpty)
+                            () => const Text('暂无奖励，请家长验证PIN后创建。'),
+                          () => _moreButton('rewards'),
+                        ]),
+                        _lazyList('redemptions', [
+                          for (final row in redemptions)
+                            () => Card(
+                              child: Column(
+                                children: [
+                                  ListTile(
+                                    title: Text(
+                                      '${row['reward_title'] ?? '历史奖励'} · ${redemptionLabels[row['status']] ?? row['status']}',
                                     ),
-                                  () => _moreButton('pending'),
-                                  for (final row in _rows['ledger']!)
-                                    () => ListTile(
-                                      title: Text(ledgerChangeLabel(row)),
-                                      subtitle: Text(
-                                        '${economySourceLabel(row['source_type'])} · ${_time.format(row['created_at'])}'
-                                        '${row['source_type'] == 'parent_adjustment' ? '\n${parent && !_offline ? '点击查看操作人和原因' : '联网并验证家长PIN后可查看调账明细'}' : ''}',
-                                      ),
-                                      onTap:
-                                          row['source_type'] ==
-                                                  'parent_adjustment' &&
-                                              parent &&
-                                              !_offline
-                                          ? () => Navigator.of(context).push(
-                                              MaterialPageRoute<void>(
-                                                builder: (_) =>
-                                                    WalletAdjustmentScreen(
-                                                      scope: (
-                                                        child: widget.childId,
-                                                        family: widget.familyId,
-                                                        entryId:
-                                                            row['id'] as String,
-                                                      ),
-                                                    ),
-                                              ),
-                                            )
-                                          : null,
+                                    subtitle: Text(
+                                      '冻结金额快照 ${row['frozen_amount']}金币\n${row['reward_rules'] ?? ''}'
+                                      '${row['reward_limits'] is Map && (row['reward_limits'] as Map).isNotEmpty ? '\n申请时：${rewardQuotaDescription((row['reward_limits'] as Map).cast<String, dynamic>())}' : ''}'
+                                      '\n到期 ${_time.format(row['expires_at'])}\n${row['decision_reason'] ?? ''}',
                                     ),
-                                  () => _moreButton('ledger'),
-                                ]),
+                                  ),
+                                  Wrap(
+                                    children: [
+                                      if (row['status'] == 'requested')
+                                        TextButton(
+                                          onPressed: readOnly
+                                              ? null
+                                              : () => _transition(
+                                                  row['id'] as String,
+                                                  'cancel',
+                                                ),
+                                          child: const Text('取消申请'),
+                                        ),
+                                      if (parent &&
+                                          row['status'] == 'requested') ...[
+                                        TextButton(
+                                          onPressed: readOnly
+                                              ? null
+                                              : () => _transition(
+                                                  row['id'] as String,
+                                                  'approve',
+                                                ),
+                                          child: const Text('批准'),
+                                        ),
+                                        TextButton(
+                                          onPressed: readOnly
+                                              ? null
+                                              : () => _transition(
+                                                  row['id'] as String,
+                                                  'reject',
+                                                ),
+                                          child: const Text('拒绝并退款'),
+                                        ),
+                                      ],
+                                      if (parent && row['status'] == 'approved')
+                                        TextButton(
+                                          onPressed: readOnly
+                                              ? null
+                                              : () => _transition(
+                                                  row['id'] as String,
+                                                  'fulfill',
+                                                ),
+                                          child: const Text('确认已履约'),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (redemptions.isEmpty) () => const Text('暂无兑换记录。'),
+                          () => _moreButton('redemptions'),
+                        ]),
+                        _lazyList('ledger', [
+                          () => Text(
+                            '本月收入 ${overview['month_income']} · 已履约消耗 ${overview['month_spent']}金币',
+                          ),
+                          () => Text(
+                            '每日软上限 ${overview['daily_soft_limit']}，超额金币待家长确认，XP照常获得。',
+                          ),
+                          if (parent)
+                            () => Wrap(
+                              children: [
+                                TextButton(
+                                  onPressed: readOnly || blocked
+                                      ? null
+                                      : _adjust,
+                                  child: Text(
+                                    _adjustment == null ? '家长调账' : '重试同一笔调账',
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: readOnly
+                                      ? null
+                                      : () => _limit(
+                                          (overview['daily_soft_limit'] as num)
+                                              .toInt(),
+                                        ),
+                                  child: const Text('配置软上限'),
+                                ),
+                                TextButton(
+                                  onPressed: readOnly
+                                      ? null
+                                      : () => _run((repository) async {
+                                          _parent();
+                                          await repository.reconcile(
+                                            widget.childId,
+                                          );
+                                        }),
+                                  child: const Text('按账本重算钱包'),
+                                ),
                               ],
                             ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-            ),
-          ],
+                          for (final row in _rows['pending']!.where(
+                            (r) => r['status'] == 'pending',
+                          ))
+                            () => Card(
+                              child: ListTile(
+                                title: Text(
+                                  '${row['amount']}金币待确认 · ${economySourceLabel(row['source_type'])}',
+                                ),
+                                subtitle: Text(_time.format(row['created_at'])),
+                                trailing: !parent
+                                    ? null
+                                    : Wrap(
+                                        children: [
+                                          IconButton(
+                                            onPressed: readOnly
+                                                ? null
+                                                : () => _decide(
+                                                    row['id'] as String,
+                                                    true,
+                                                  ),
+                                            icon: const Icon(Icons.check),
+                                            tooltip: '确认发放',
+                                          ),
+                                          IconButton(
+                                            onPressed: readOnly
+                                                ? null
+                                                : () => _decide(
+                                                    row['id'] as String,
+                                                    false,
+                                                  ),
+                                            icon: const Icon(Icons.close),
+                                            tooltip: '拒绝超额',
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                          () => _moreButton('pending'),
+                          for (final row in _rows['ledger']!)
+                            () => ListTile(
+                              title: Text(ledgerChangeLabel(row)),
+                              subtitle: Text(
+                                '${economySourceLabel(row['source_type'])} · ${_time.format(row['created_at'])}'
+                                '${row['source_type'] == 'parent_adjustment' ? '\n${parent && !_offline ? '点击查看操作人和原因' : '联网并验证家长PIN后可查看调账明细'}' : ''}',
+                              ),
+                              onTap:
+                                  row['source_type'] == 'parent_adjustment' &&
+                                      parent &&
+                                      !_offline
+                                  ? () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => WalletAdjustmentScreen(
+                                          scope: (
+                                            child: widget.childId,
+                                            family: widget.familyId,
+                                            entryId: row['id'] as String,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                          () => _moreButton('ledger'),
+                        ]),
+                      ],
+                    ),
+                  );
+                },
+              ),
         ),
       ),
     );

@@ -1,12 +1,14 @@
 # 当前需求覆盖与验收状态
 
-核对日期：2026-11-06。本文汇总当前状态；[PROGRESS.md](PROGRESS.md)保留各轮历史，旧条目中的待办可能已在后续轮次处理，不能直接累计为当前缺口。
+核对日期：2026-11-12。本文汇总当前状态；[PROGRESS.md](PROGRESS.md)保留各轮历史，旧条目中的待办可能已在后续轮次处理，不能直接累计为当前缺口。
 
 **目前可交付Android本地调试包，尚不能认定整个App开发和验收完成。** 核心业务已有实现及本机测试，但云端、iOS、华为鸿蒙4.2/iPhone、完整性能和连续家庭使用尚未验收；另有下文列出的已知实现缺口与待决策范围。没有以测试数量推算功能完成百分比。
 
 需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，SHA256 `4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`；本轮重新核对文件摘要，前一轮已重提正文并确认与读取内容一致。
 
 最近完成的代码验证：提交`2aa445c`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)全部通过，含818项Flutter、403项数据库、24项Swift通知策略、30项诊断日志检查、iOS Debug/Release及千任务原生模拟器流程。诊断检查包含全新进程读取、重放和确认同一份合成日志；通知和诊断原生检查不能替代真实APNs、MetricKit回调、锁屏存储或手机验收。后续提交状态以[草稿PR](https://github.com/Alina-qiu/learning_planet/pull/1)对应的CI为准。详见[任务远程提醒](TASK_REMOTE_PUSH.md)和[原生诊断检查](RUNTIME_DIAGNOSTICS.md#ios诊断日志的原生策略检查)。
+
+本轮修复[奖励页大字号和窄窗口适配](ECONOMY_ACCESSIBILITY.md)：摘要与待确认请求随页面滚动，避开系统安全区域；新增5项，完整823项Flutter测试通过。用户已确认暂时没有可连接的测试手机，真机验收继续保留，未用窗口模拟结果替代。
 
 ## 技术栈与交付方式
 
@@ -23,7 +25,7 @@
 
 依赖声明见[pubspec.yaml](../pubspec.yaml)、[package.json](../package.json)，架构细节见[ARCHITECTURE.md](ARCHITECTURE.md)。本机工具安装在`D:\learning-planet-tools`，未修改系统PATH。
 
-普通`app-debug.apk`未连接后端，只用于启动验证。本机`app-local-debug.apk`连接电脑回环服务，需要USB端口转发；临时后端每次启动为空库，不能当作家庭日常持久后端。当前摘要、签名和资源检查见[ANDROID_BUILD.md](ANDROID_BUILD.md)，运行方法见[LOCAL_DEBUG.md](LOCAL_DEBUG.md)。本轮修复首页/任务列表适配并重建两个APK，未重新安装设备。
+普通`app-debug.apk`未连接后端，只用于启动验证。本机`app-local-debug.apk`连接电脑回环服务，需要USB端口转发；临时后端每次启动为空库，不能当作家庭日常持久后端。当前摘要、签名和资源检查见[ANDROID_BUILD.md](ANDROID_BUILD.md)，运行方法见[LOCAL_DEBUG.md](LOCAL_DEBUG.md)。本轮继续修复奖励页适配；当前APK摘要和构建状态以Android构建文档为准，没有重新安装设备。
 
 ## 已确认的产品规则
 

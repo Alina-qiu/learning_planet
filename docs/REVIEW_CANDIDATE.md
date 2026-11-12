@@ -1,5 +1,7 @@
 # 本地审阅分支与远程验证准备
 
+2026-11-12继续修复[奖励页横屏/平板与大字号](ECONOMY_ACCESSIBILITY.md)，完整823项Flutter、核心覆盖率90.75%、静态分析及两个Android调试包资源/签名检查通过。本轮源码和验证文档继续更新同一草稿PR；当前远程结果以PR Checks及本机`build/review_candidate/final-results.json`为准。用户暂无可连接手机，未进行真机验证。
+
 最近完成的代码验证为`2aa445c`的[CI 42165056276](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)，八项任务全部通过。818项Flutter、403项数据库、14项升级、24项通知策略、30项诊断日志检查及iOS模拟器流程有对应提交的运行证据；CI核心覆盖率90.73%。独立工作树的672个发布文件与原工作区逐字节一致，主工作区暂存区保持为空；当前清单见本机`build/review_candidate/final-results.json`，后续提交以PR Checks为准。任务/家长APNs共用传输模块中的PEM解析字面量不是私钥；测试缓存和构建产物不进入发布候选。
 
 此前`60d8ff4`的[CI 42151905737](https://github.com/Alina-qiu/learning_planet/actions/runs/42151905737)八项均通过，iOS模拟器千任务流程、加密库重开及双倍字体截图已取得且复核。这不替代本次新增通知代码的编译和目标手机验收。
