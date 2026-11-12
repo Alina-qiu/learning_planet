@@ -237,11 +237,30 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
 
   ios-simulator:
+    name: ios-simulator (${{ matrix.ios }}, ${{ matrix.family }})
     # MLImage's arm64 slice targets devices, not Apple Silicon simulators.
     runs-on: macos-15-intel
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ios: '18.5'
+            xcode: '16.4'
+            family: iPhone
+            artifact: ios18-iphone
+          - ios: '26.2'
+            xcode: '26.2'
+            family: iPhone
+            artifact: ios26-iphone
+          - ios: '26.2'
+            xcode: '26.2'
+            family: iPad
+            artifact: ios26-ipad
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
+      IOS_VERSION: ${{ matrix.ios }}
+      SIMULATOR_FAMILY: ${{ matrix.family }}
     steps:
       - uses: actions/checkout@v4
       - name: Check native push delivery policy
@@ -260,7 +279,7 @@ jobs:
           flutter-version: '3.47.4'
           cache: true
       - run: flutter pub get
-      - name: Select an available iPhone simulator
+      - name: Select the required simulator runtime and device family
         id: simulator
         shell: bash
         run: |
@@ -268,19 +287,21 @@ jobs:
           xcodebuild -version | tee build/ios-simulator/xcode.txt
           xcrun simctl list devices available --json > build/ios-simulator/devices.json
           python3 - <<'PY'
-          import json, os, pathlib, re
+          import json, os, pathlib
           report = pathlib.Path('build/ios-simulator')
           devices = json.loads((report / 'devices.json').read_text())['devices']
+          runtime = 'com.apple.CoreSimulator.SimRuntime.iOS-' + os.environ['IOS_VERSION'].replace('.', '-')
+          family = os.environ['SIMULATOR_FAMILY']
           candidates = [
-              (tuple(map(int, re.findall(r'\d+', runtime))), runtime, device)
-              for runtime, entries in devices.items() if runtime.endswith('.iOS-18-5')
-              for device in entries
-              if device.get('isAvailable') and device['name'].startswith('iPhone')
+              device for device in devices.get(runtime, [])
+              if device.get('isAvailable') and device['name'].startswith(family + ' ')
           ]
           if not candidates:
-              raise SystemExit('No available iOS 18.5 iPhone simulator in this runner image')
-          _, runtime, device = max(candidates, key=lambda item: (item[0], item[2]['name']))
-          selected = {**device, 'runtime': runtime, 'scope': 'Simulator; synthetic tasks; no cloud or physical-device acceptance'}
+              raise SystemExit(f'No available {family} for required runtime {runtime}; do not substitute another OS')
+          device = max(candidates, key=lambda item: item['name'])
+          selected = {**device, 'runtime': runtime, 'device_family': family,
+                      'requested_ios': os.environ['IOS_VERSION'],
+                      'scope': 'Simulator; synthetic tasks; no cloud or physical-device acceptance'}
           (report / 'selected.json').write_text(json.dumps(selected, indent=2) + '\n')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f"id={device['udid']}\nstate={device['state']}\n")
@@ -295,7 +316,7 @@ jobs:
           set -o pipefail
           flutter build ios --simulator --debug --no-pub --publish-port \
             --target=integration_test/task_flow_test.dart \
-            --dart-define=TEST_DEVICE_LABEL=github-ios-simulator \
+            --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
             -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
       - name: Boot simulator
         id: boot
@@ -319,7 +340,7 @@ jobs:
             --use-application-binary=build/ios/iphonesimulator/Runner.app \
             --driver=test_driver/task_flow_driver.dart \
             --target=integration_test/task_flow_test.dart \
-            --dart-define=TEST_DEVICE_LABEL=github-ios-simulator \
+            --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
             -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/task-flow.log
       - name: Collect simulator launch diagnostics
         if: always() && steps.boot.outcome == 'success'
@@ -353,7 +374,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-simulator-task-flow
+          name: ios-simulator-task-flow-${{ matrix.artifact }}
           path: |
             build/ios-simulator/
             build/integration_results/

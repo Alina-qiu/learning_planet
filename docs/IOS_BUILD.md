@@ -1,5 +1,7 @@
 # iPhone 工程与构建验证
 
+2026-11-12扩展[iOS兼容性矩阵](IOS_COMPATIBILITY.md)：iOS18.5/iPhone、iOS26.2/iPhone和iPad使用各自Xcode执行同一原生流程，产物分别保存。下方单一iOS18.5记录为历史验证；最新运行状态见草稿PR Checks。iOS27、签名与完整目标手机验收仍未完成。
+
 已完成的代码验证：`2aa445c`的[CI 42165056276](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)八项全通过，包含24项Swift通知策略、30项诊断日志及跨进程恢复检查，以及iPhone SE第三代/iOS18.5模拟器的Keychain、加密SQLite、千任务滚动、大字体和重开恢复；报告和两张截图已复核。日志检查使用生产策略和合成数据；Debug模拟器结果不属于性能验收。后续提交结果见当前PR对应CI，尚未签名或完成真机验证。
 
 更新于2026-11-06。通过[草稿PR #1](https://github.com/Alina-qiu/learning_planet/pull/1)运行实际macOS构建，提交`6722047`的[Debug和Release任务](https://github.com/Alina-qiu/learning_planet/actions/runs/42139724907)均通过Xcode编译及打包资源检查。首轮发现的Swift生命周期注册方法名已修正为`add(parentPush)`。**产物未签名，尚未完成安装和iPhone运行验证**；业务Dart/SQL与Android本机包未变。

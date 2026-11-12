@@ -6,9 +6,11 @@
 
 需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，SHA256 `4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`；本轮重新核对文件摘要，前一轮已重提正文并确认与读取内容一致。
 
-最近完成的代码验证：提交`2aa445c`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)全部通过，含818项Flutter、403项数据库、24项Swift通知策略、30项诊断日志检查、iOS Debug/Release及千任务原生模拟器流程。诊断检查包含全新进程读取、重放和确认同一份合成日志；通知和诊断原生检查不能替代真实APNs、MetricKit回调、锁屏存储或手机验收。后续提交状态以[草稿PR](https://github.com/Alina-qiu/learning_planet/pull/1)对应的CI为准。详见[任务远程提醒](TASK_REMOTE_PUSH.md)和[原生诊断检查](RUNTIME_DIAGNOSTICS.md#ios诊断日志的原生策略检查)。
+最近已完成的应用代码验证：提交`1b82843`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/43183293457)全部通过，含823项Flutter、403项数据库、24项Swift通知策略、30项诊断日志检查、iOS Debug/Release及千任务原生模拟器流程。后续提交状态以[草稿PR](https://github.com/Alina-qiu/learning_planet/pull/1)对应的CI为准；模拟器、原生策略检查不能替代真实推送、MetricKit回调或手机验收。
 
 本轮修复[奖励页大字号和窄窗口适配](ECONOMY_ACCESSIBILITY.md)：摘要与待确认请求随页面滚动，避开系统安全区域；新增5项，完整823项Flutter测试通过。用户已确认暂时没有可连接的测试手机，真机验收继续保留，未用窗口模拟结果替代。
+
+本轮扩展[iOS兼容性检查](IOS_COMPATIBILITY.md)：保留iOS18.5/iPhone，增加iOS26.2/iPhone与iPad，分别验证同一原生离线任务流程并保存产物。iOS27及完整真机兼容性仍未验收，不能将矩阵配置完成当作运行通过。
 
 ## 技术栈与交付方式
 
@@ -89,12 +91,12 @@
 |---|---|---|
 | 冷启动<3秒、列表<1.5秒、反馈<500ms | [性能记录](APP_PERFORMANCE.md)：合成数据任务列表/本机完成提示有观测；生产入口profile配置页中位数约4.27秒 | 没有完整真实首页达标证据。图形表面等待不能直接归因到通知插件CPU；没有以跳过清理改善分数 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
-| 事务、幂等、冲突 | 此前804项Flutter；本轮818项Flutter、403项数据库检查；真实并发80条离线命令及重复退款报告通过 | 目标云端负载、长时间运行及双端实机 |
+| 事务、幂等、冲突 | 当前823项Flutter、403项数据库检查；真实并发80条离线命令及重复退款报告通过 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | 实际APK前台及重开后分别14.422秒/7.087秒发起同步 | 本机回环连接断开不代表无线网络、后台或两端实机 |
 | 加密、RLS、密钥隔离 | 加密库、模拟器KeyStore、私有Storage/签名链接、账号隔离与权限回归 | iOS/真机备份与物理清理、目标部署配置审查 |
 | 最少收集、按孩子导出/删除、关闭AI | 对应仓库、迁移及真实本机删除流程 | 云端保留期限与供应商政策、真实导出/删除完成时间 |
 | 崩溃、耗时、同步/AI失败率 | [诊断](RUNTIME_DIAGNOSTICS.md)、[Android系统退出报告](../build/integration_results/native-exit-android36.json) | Android10原生信号等剩余情况、iOS MetricKit、线上监控/告警 |
-| Android10+、当前及前两个iOS主版本、平板 | API29/API36模拟器部分场景，iOS CI未签名编译及15.5最低版本资源检查 | 指定手机、iOS各版本运行和平板完整可用性 |
+| Android10+、当前及前两个iOS主版本、平板 | API29/API36模拟器部分场景，iOS未签名编译；[运行矩阵](IOS_COMPATIBILITY.md)检查18.5/iPhone与26.2/iPhone/iPad | 指定手机、iOS各版本运行和平板完整可用性 |
 
 ## AC-01至AC-11验收结论
 
