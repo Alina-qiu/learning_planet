@@ -11,13 +11,12 @@ CI在同一份源码上执行以下独立任务，每项均使用真实Keychain�
 | iPhone / iOS18.5 | 16.4 | macos-15-intel | ios18-iphone |
 | iPhone / iOS26.2 | 26.2 | macos-15-intel | ios26-iphone |
 | iPad / iOS26.2 | 26.2 | macos-15-intel | ios26-ipad |
-| iPhone / iOS27.2 | 27.2 | xcode-27，通用运行时/x86_64 | ios27-iphone |
 
 新增目标依据既有CI运行43183293457导出的实际设备清单，以及[GitHub镜像说明](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md)。镜像可能变化，因此运行时必须找到指定系统和设备类型；缺失时检查失败，不自动用其他系统替代。各项分别上传`ios-simulator-task-flow-<后缀>`，包括所选设备/系统、Xcode版本、任务报告、两倍字体截图及诊断日志，避免产物互相覆盖。
 
 检查涵盖本地命令先落盘、奖励等待服务端、加密库重开恢复、千任务滚动和两倍字体。各项运行相同测试，不能因为新增系统而跳过失败条件。Intel环境沿用已验证的MLImage链接方案，不通过去掉OCR插件生成特殊兼容包。
 
-本轮只调整检查配置、测试驱动和文档，客户端及平台实现未变化，上一轮Android调试包继续对应当前应用代码。工作流语法已通过actionlint，实际清单演练确认既有三个选择及缺失版本拒绝，新增目标通过五项运行时选择回归；编译和运行是否通过，以对应提交的[PR Checks](https://github.com/Alina-qiu/learning_planet/pull/1)为准。
+本轮只调整检查配置、测试驱动和文档，客户端及平台实现未变化，上一轮Android调试包继续对应当前应用代码。工作流语法已通过actionlint，实际清单演练确认既有三个选择及缺失版本拒绝，通用运行时诊断脚本通过五项选择回归；编译和运行是否通过，以对应提交的[PR Checks](https://github.com/Alina-qiu/learning_planet/pull/1)为准。
 
 ## 当前SDK构建检查
 
@@ -27,15 +26,23 @@ Debug/Release完整应用构建固定使用GitHub的`xcode-27`主机及Xcode27.2
 
 提交`cef66a3`的[运行43365693965](https://github.com/Alina-qiu/learning_planet/actions/runs/43365693965)两个完整应用构建均通过。实际资源报告为`iphoneos27.2`、Xcode版本`2720`、构建号`27B52`、最低iOS15.5，各含16份可解析隐私清单。本机四项合成SDK检查仅验证检查器的匹配/拒绝行为；编译证据来自上述真实产物。
 
-## iOS27模拟器路径
+## iOS27运行验收阻塞
 
-同轮主机实际元数据显示，模拟器SDK27.2支持arm64和x86_64，但预装27.2运行时仅支持arm64。MLImage的arm64切片针对真机，先前已在Apple Silicon模拟器链接失败，因此不能直接使用默认运行时。
+提交`645076f`的[CI任务131699841767](https://github.com/Alina-qiu/learning_planet/actions/runs/43368916879/job/131699841767)实际尝试了iOS27.2/iPhone。已有Rosetta探测通过；实际运行时清单只有可用的arm64变体，随后执行Apple文档提供的指定版本通用运行时下载，服务返回`iOS 27.2 (universal) is not available for download.`，命令退出70，准备步骤失败。应用未编译、未启动，未执行任何业务断言；这不是通过或性能结果。
 
-新增目标使用Apple文档提供的[指定版本通用运行时下载](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components)，并按[simctl的架构选项](https://developer.apple.com/documentation/xcode-release-notes/xcode-14-release-notes)以x86_64启动。准备脚本只探测已有Rosetta，不安装Rosetta或接受新许可；随后确认运行时版本、可用性及x86_64支持。缺少条件就失败，不换系统或移除OCR。
+下载方式与x86_64启动方式来自Apple的[运行时下载说明](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components)和[simctl架构选项](https://developer.apple.com/documentation/xcode-release-notes/xcode-14-release-notes)，但通用说明不能证明每个版本都有对应下载。SDK元数据支持x86_64也不能证明该系统运行时可取得。本次失败附件包含`runtimes-before.json`、`rosetta-check.log`、`universal-runtime.log`，本机证据为`build/review_candidate/ios27-runtime-probe-result.json`。
 
-Flutter先生成原有测试入口的配置和完整Pods，再由原生Xcode使用`ARCHS=x86_64`交叉编译。保存应用二进制架构、启动后运行时架构及实际SDK资源报告，然后使用相同Dart驱动和全部业务断言。旧三个Intel目标保留现有构建路径；四个目标均要求实际模拟器SDK匹配指定版本。
+截至2026-11-13，Google的[最新iOS版本表](https://developers.google.com/ml-kit/release-notes)仍列出本项目使用的GoogleMLKit9.0.0及MLImage1.0.0-beta8；[已知问题](https://developers.google.com/ml-kit/known-issues)仍注明M1模拟器不受支持。先前原生arm64模拟器已经实际出现MLImage真机切片链接错误。尚未找到保留完整OCR依赖、可运行iOS27的受支持模拟器路径。
 
-准备逻辑的五项本机回归覆盖正确运行时、仅arm64、错误系统、不可用状态和双变体选择；它们不是macOS运行证据。新增目标整体上限60分钟（含最多15分钟下载），既有目标仍45分钟；业务等待和性能标准没有变化。实际是否完成仍须检查当前提交CI报告、架构文件和必要截图。Rosetta模拟器仅提供指定环境的功能证据，不能证明iPhone真机性能或完整兼容性。
+常规CI维持上表三个可用运行点，并保留Xcode27.2的完整Debug/Release编译；三个模拟器也要求实际SDK匹配指定版本。没有把不可用目标改为忽略错误或计作通过。iOS27功能验收仍需可用的签名真机，或供应商提供兼容的模拟器依赖/运行时后继续完成；当前用户没有测试手机。
+
+保留`scripts/prepare_ios_universal_simulator.py`供环境变化后在Apple Silicon Mac手工探测：
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode_27.2.app/Contents/Developer IOS_VERSION=27.2 python3 scripts/prepare_ios_universal_simulator.py
+```
+
+它只检查已有Rosetta、查找或下载指定通用运行时，缺失时明确失败，不安装Rosetta、不换系统、不删除运行时。五项选择回归继续在质量检查中执行；这些是脚本验证，不是iOS27运行验收。后续即使准备通过，仍须编译包含全部OCR插件的应用并执行Keychain、加密SQLite、离线任务与大字体流程。
 
 ## 启动与失败诊断
 
@@ -55,11 +62,11 @@ Flutter先生成原有测试入口的配置和完整Pods，再由原生Xcode使�
 
 第七轮提交`cef66a3`的[运行43365693965](https://github.com/Alina-qiu/learning_planet/actions/runs/43365693965)十项全部通过，包括Xcode27.2的Debug/Release及三个既有模拟器。原始报告和两倍字体截图已复核；首页钱包等待为10.449秒、64.306秒、25.885秒（依次为18.5/iPhone、26.2/iPhone、26.2/iPad），依然不属于生产性能验收。
 
-工作流先完成最长10分钟的系统首次迁移并保存boot.log，然后关闭模拟器以腾出编译资源，编译后重新启动同一设备。启动应用后按simctl返回的准确进程ID查询已保存的系统日志，再将VM_SERVICE_URL传给原有Dart集成测试驱动；读取历史日志不依赖实时订阅时机。保留渲染器和OCR插件，退出前尝试保存辅助app-final.png。每阶段仍有上限，既有目标整体45分钟，新增通用运行时目标60分钟；不会无限等待或自动重试断言失败。修复后的运行结果以当前提交Checks为准。
+工作流先完成最长10分钟的系统首次迁移并保存boot.log，然后关闭模拟器以腾出编译资源，编译后重新启动同一设备。启动应用后按simctl返回的准确进程ID查询已保存的系统日志，再将VM_SERVICE_URL传给原有Dart集成测试驱动；读取历史日志不依赖实时订阅时机。保留渲染器和OCR插件，退出前尝试保存辅助app-final.png。每阶段仍有上限，整体45分钟；不会无限等待或自动重试断言失败。修复后的运行结果以当前提交Checks为准。
 
 ## 仍未完成的要求
 
-- iOS27新增模拟器目标尚需实际运行确认；不能把SDK编译通过、下载完成或配置存在计作运行通过。完整iOS27真机兼容性仍未验收。
+- iOS27运行尚未验收：指定通用运行时下载实际不可用，完整OCR依赖也不支持arm64模拟器。SDK27编译通过不代表目标系统运行通过。
 - 18.5与26.2只是各主版本中的具体运行点，不代表所有补丁版本或所有设备通过。
 - iPad检查覆盖合成任务页和本机数据流程，不代表所有页面、分屏、相机、OCR、系统导出或读屏已验收。
 - 测试使用Debug和合成家庭，未经过生产登录、实际后端与推送；不能用于冷启动、完成反馈等PRD性能达标判断。

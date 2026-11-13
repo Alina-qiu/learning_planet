@@ -241,8 +241,8 @@ jobs:
   ios-simulator:
     name: ios-simulator (${{ matrix.ios }}, ${{ matrix.family }})
     # MLImage's arm64 slice targets devices, not Apple Silicon simulators.
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout }}
+    runs-on: macos-15-intel
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -251,35 +251,18 @@ jobs:
             xcode: '16.4'
             family: iPhone
             artifact: ios18-iphone
-            runner: macos-15-intel
-            translated: false
-            timeout: 45
           - ios: '26.2'
             xcode: '26.2'
             family: iPhone
             artifact: ios26-iphone
-            runner: macos-15-intel
-            translated: false
-            timeout: 45
           - ios: '26.2'
             xcode: '26.2'
             family: iPad
             artifact: ios26-ipad
-            runner: macos-15-intel
-            translated: false
-            timeout: 45
-          - ios: '27.2'
-            xcode: '27.2'
-            family: iPhone
-            artifact: ios27-iphone
-            runner: xcode-27
-            translated: true
-            timeout: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
       IOS_VERSION: ${{ matrix.ios }}
       SIMULATOR_FAMILY: ${{ matrix.family }}
-      TRANSLATED_SIMULATOR: ${{ matrix.translated }}
     steps:
       - uses: actions/checkout@v4
       - name: Check native push delivery policy
@@ -298,10 +281,6 @@ jobs:
           flutter-version: '3.47.4'
           cache: true
       - run: flutter pub get
-      - name: Prepare required universal simulator runtime
-        if: matrix.translated
-        timeout-minutes: 16
-        run: python3 scripts/prepare_ios_universal_simulator.py
       - name: Select the required simulator runtime and device family
         id: simulator
         shell: bash
@@ -338,9 +317,7 @@ jobs:
           SIMULATOR_STATE: ${{ steps.simulator.outputs.state }}
         run: |
           if [ "$SIMULATOR_STATE" != Booted ]; then
-            args=()
-            if [ "$TRANSLATED_SIMULATOR" = true ]; then args+=(--arch=x86_64); fi
-            xcrun simctl boot "$SIMULATOR_ID" "${args[@]}"
+            xcrun simctl boot "$SIMULATOR_ID"
           fi
           set -o pipefail
           xcrun simctl bootstatus "$SIMULATOR_ID" -b 2>&1 | tee build/ios-simulator/boot.log
@@ -356,29 +333,10 @@ jobs:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
         run: |
           set -o pipefail
-          if [ "$TRANSLATED_SIMULATOR" = true ]; then
-            # Generate the same Flutter configuration and Pods, then use native
-            # Xcode to cross-build the complete plugin graph for x86_64.
-            flutter build ios --simulator --debug --no-pub --publish-port --config-only \
-              --target=integration_test/task_flow_test.dart \
-              --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
-              -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/flutter-config.log
-            xcodebuild -quiet -workspace ios/Runner.xcworkspace -scheme Runner \
-              -configuration Debug -sdk iphonesimulator \
-              -destination "platform=iOS Simulator,id=$SIMULATOR_ID,arch=x86_64" \
-              "BUILD_DIR=$PWD/build/ios" ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO build \
-              2>&1 | tee build/ios-simulator/simulator-build.log
-            test -d build/ios/Debug-iphonesimulator/Runner.app
-            mkdir -p build/ios/iphonesimulator
-            ditto build/ios/Debug-iphonesimulator/Runner.app build/ios/iphonesimulator/Runner.app
-            lipo -archs build/ios/iphonesimulator/Runner.app/Runner | tee build/ios-simulator/app-architecture.txt
-            test "$(cat build/ios-simulator/app-architecture.txt)" = x86_64
-          else
-            flutter build ios --simulator --debug --no-pub --publish-port \
-              --target=integration_test/task_flow_test.dart \
-              --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
-              -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
-          fi
+          flutter build ios --simulator --debug --no-pub --publish-port \
+            --target=integration_test/task_flow_test.dart \
+            --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
+            -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
           python3 scripts/verify_ios_bundle.py build/ios/iphonesimulator/Runner.app \
             --expected-sdk "iphonesimulator$IOS_VERSION" | tee build/ios-simulator/simulator-resources.json
       - name: Boot prepared simulator
@@ -387,14 +345,8 @@ jobs:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
         run: |
           set -o pipefail
-          args=()
-          if [ "$TRANSLATED_SIMULATOR" = true ]; then args+=(--arch=x86_64); fi
-          xcrun simctl boot "$SIMULATOR_ID" "${args[@]}"
+          xcrun simctl boot "$SIMULATOR_ID"
           xcrun simctl bootstatus "$SIMULATOR_ID" -b 2>&1 | tee build/ios-simulator/resume-boot.log
-          if [ "$TRANSLATED_SIMULATOR" = true ]; then
-            xcrun simctl spawn "$SIMULATOR_ID" uname -m | tee build/ios-simulator/runtime-architecture.txt
-            test "$(cat build/ios-simulator/runtime-architecture.txt)" = x86_64
-          fi
       - name: Run native encrypted offline task flow
         timeout-minutes: 14
         env:

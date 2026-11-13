@@ -18,7 +18,7 @@
 
 提交`cef66a3`的[运行43365693965](https://github.com/Alina-qiu/learning_planet/actions/runs/43365693965)十项CI全部通过；已完成Xcode27.2的完整Debug/Release编译，两个实际产物均确认SDK为`iphoneos27.2`、Xcode构建号`27B52`，各解析16份隐私清单。完整OCR和生产入口保留；三个既有模拟器再次完整通过，报告及两倍字体截图已复核。这是未签名编译及指定模拟器功能证据，不能替代iOS27运行。
 
-后续加入iOS27.2/iPhone模拟器目标：在Apple Silicon主机准备指定版本的通用运行时，使用现有Rosetta启动x86_64模拟器，并用原生Xcode交叉编译完整依赖。运行时、应用架构及实际SDK均需检查，再执行原有Keychain、加密SQLite、千任务与大字体断言。五项选择逻辑回归通过；该目标实际构建及运行状态以当前提交CI为准，配置完成不计为验收通过。
+提交`645076f`的[iOS27.2运行尝试](https://github.com/Alina-qiu/learning_planet/actions/runs/43368916879/job/131699841767)在环境准备阶段失败：预装运行时仅arm64，Apple下载服务明确返回指定通用运行时不可用；已有Rosetta探测通过。没有编译或启动该目标，也没有执行业务断言。当前OCR依赖仍不支持Apple Silicon模拟器，iOS27运行验收保留为阻塞项。常规CI继续执行三个可用目标及SDK27完整构建；保留手工运行的诊断脚本和五项选择回归，不对已确认不可用的运行时反复自动下载。详情见[兼容性记录](IOS_COMPATIBILITY.md)。
 
 ## 技术栈与交付方式
 
