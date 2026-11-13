@@ -389,8 +389,10 @@ jobs:
           if-no-files-found: error
 
   ios-build:
-    runs-on: macos-latest
+    runs-on: xcode-27
     timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     strategy:
       fail-fast: false
       matrix:
@@ -411,6 +413,22 @@ jobs:
           xcodebuild -version
           pod --version
           flutter --version
+          python3 - <<'PYCODE'
+          import json, pathlib, plistlib, subprocess
+          output = pathlib.Path('build/ios-validation')
+          output.mkdir(parents=True, exist_ok=True)
+          sdk = pathlib.Path(subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path'], text=True).strip())
+          settings = sdk / 'SDKSettings.json'
+          capabilities = {'simulator_sdk': json.loads(settings.read_text()) if settings.exists() else None}
+          runtimes = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'runtimes', '--json'], text=True))
+          for runtime in runtimes['runtimes']:
+              metadata = pathlib.Path(runtime.get('bundlePath', '')) / 'Contents/Info.plist'
+              if metadata.is_file():
+                  runtime['bundle_info'] = plistlib.loads(metadata.read_bytes())
+          capabilities['runtimes'] = runtimes['runtimes']
+          capabilities['scope'] = 'Installed SDK/runtime metadata only; no simulator launch or app runtime proof'
+          (output / 'simulator-capabilities.json').write_text(json.dumps(capabilities, indent=2, default=str) + '\n')
+          PYCODE
       - name: Build unsigned iOS app
         shell: bash
         run: |
@@ -421,7 +439,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python3 scripts/verify_ios_bundle.py build/ios/iphoneos/Runner.app | tee build/ios-validation/resources.json
+          python3 scripts/verify_ios_bundle.py build/ios/iphoneos/Runner.app --expected-sdk iphoneos27.2 | tee build/ios-validation/resources.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

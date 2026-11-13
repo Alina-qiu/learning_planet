@@ -1,5 +1,7 @@
 # iPhone 工程与构建验证
 
+2026-11-13起，Debug/Release构建固定为`xcode-27`主机上的Xcode27.2，产物资源检查要求实际SDK为`iphoneos27.2`，并记录Xcode版本/构建号。完整OCR插件与生产入口保留；对应CI通过后才形成当前SDK编译证据，仍不代表iOS27运行、签名或真机验收。详情及运行矩阵见[兼容性记录](IOS_COMPATIBILITY.md)。
+
 2026-11-12扩展[iOS兼容性矩阵](IOS_COMPATIBILITY.md)：iOS18.5/iPhone、iOS26.2/iPhone和iPad使用各自Xcode执行同一原生流程，产物分别保存。下方单一iOS18.5记录为历史验证；最新运行状态见草稿PR Checks。iOS27、签名与完整目标手机验收仍未完成。
 
 已完成的代码验证：`2aa445c`的[CI 42165056276](https://github.com/Alina-qiu/learning_planet/actions/runs/42165056276)八项全通过，包含24项Swift通知策略、30项诊断日志及跨进程恢复检查，以及iPhone SE第三代/iOS18.5模拟器的Keychain、加密SQLite、千任务滚动、大字体和重开恢复；报告和两张截图已复核。日志检查使用生产策略和合成数据；Debug模拟器结果不属于性能验收。后续提交结果见当前PR对应CI，尚未签名或完成真机验证。

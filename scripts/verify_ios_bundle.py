@@ -16,7 +16,7 @@ def load_plist(path):
     return value
 
 
-def verify(bundle):
+def verify(bundle, expected_sdk=None):
     source = Path(__file__).resolve().parents[1] / "ios" / "Runner"
     expected = load_plist(source / "PrivacyInfo.xcprivacy")
     actual = load_plist(bundle / "PrivacyInfo.xcprivacy")
@@ -25,6 +25,8 @@ def verify(bundle):
     info = load_plist(bundle / "Info.plist")
     if info.get("CFBundleIdentifier") != "com.learningplanet.learningPlanet":
         raise ValueError("Unexpected iOS bundle identifier")
+    if expected_sdk is not None and info.get("DTSDKName") != expected_sdk:
+        raise ValueError(f"Expected SDK {expected_sdk}, got {info.get('DTSDKName')!r}")
     minimum = tuple(int(part) for part in info["MinimumOSVersion"].split("."))
     if minimum < (15, 5):
         raise ValueError("iOS deployment target is below the ML Kit 15.5 minimum")
@@ -53,6 +55,9 @@ def verify(bundle):
         "resource_check_passed": True,
         "bundle_id": info["CFBundleIdentifier"],
         "minimum_ios": info["MinimumOSVersion"],
+        "build_sdk": info.get("DTSDKName"),
+        "xcode_version": info.get("DTXcode"),
+        "xcode_build": info.get("DTXcodeBuild"),
         "privacy_manifests_parsed": len(manifests),
         "app_api_categories": len(actual["NSPrivacyAccessedAPITypes"]),
         "app_data_categories": len(actual["NSPrivacyCollectedDataTypes"]),
@@ -63,9 +68,10 @@ def verify(bundle):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path, help="Path to the freshly built Runner.app")
+    parser.add_argument("--expected-sdk", help="Require this device SDK, for example iphoneos27.2")
     args = parser.parse_args()
     try:
-        print(json.dumps(verify(args.bundle.resolve()), ensure_ascii=False, indent=2))
+        print(json.dumps(verify(args.bundle.resolve(), args.expected_sdk), ensure_ascii=False, indent=2))
     except (OSError, ValueError, KeyError, TypeError, ExpatError, plistlib.InvalidFileException) as error:
         print(f"iOS bundle resource check failed: {error}", file=sys.stderr)
         return 1

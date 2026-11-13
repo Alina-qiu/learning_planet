@@ -18,6 +18,14 @@ CI在同一份源码上执行以下独立任务，每项均使用真实Keychain�
 
 本轮只调整检查配置、测试驱动和文档，客户端及平台实现未变化，上一轮Android调试包继续对应当前应用代码。工作流语法已通过actionlint，实际清单演练确认三个选择及缺失版本拒绝；编译和运行是否通过，以对应提交的[PR Checks](https://github.com/Alina-qiu/learning_planet/pull/1)为准。
 
+## 当前SDK构建检查
+
+Debug/Release完整应用构建固定使用GitHub的`xcode-27`主机及Xcode27.2，依据[镜像清单](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)。不再依赖`macos-latest`的默认Xcode（此前实际为26.6）。保留全部OCR插件、最低部署配置和生产入口；这一步验证当前工具链能否编译现有应用，不能替代iOS27运行。
+
+资源检查从实际Runner.app的Info.plist读取SDK和Xcode元数据，CI要求`DTSDKName=iphoneos27.2`，不接受旧SDK或缺失信息。另将安装的模拟器SDK及运行时元数据保存为`simulator-capabilities.json`，用于判断后续原生运行的架构条件；列出运行时不等于应用已在其上运行。actionlint配置只登记官方已发布、尚未被本机1.7.12内置识别的`xcode-27`标签，没有关闭其他工作流规则。
+
+本机合成目录检查确认SDK匹配、旧SDK拒绝、缺失SDK拒绝及旧资源检查入口均符合预期；它不是Xcode构建证据。当前工具链的实际编译结果以新提交CI为准，iOS27运行、签名及真机验收仍未完成。
+
 ## 启动与失败诊断
 
 首次矩阵运行[43188325308](https://github.com/Alina-qiu/learning_planet/actions/runs/43188325308)有三项失败：iPad在系统首次数据迁移期间超过5分钟；iOS26.2/iPhone的Dart VM已监听，但Flutter实时日志订阅遗漏了地址；iOS18.5/iPhone的首页状态等待失败。七项编译、质量和服务端检查通过，不能据此认定矩阵通过。
@@ -31,6 +39,8 @@ CI在同一份源码上执行以下独立任务，每项均使用真实Keychain�
 第五轮[43359140376](https://github.com/Alina-qiu/learning_planet/actions/runs/43359140376)共八项CI通过：iOS26.2/iPhone完整通过；iOS18.5业务测试也全部通过，但额外的结束截图超时覆盖了驱动成功退出码，整项被标为失败。后续修复仅将辅助系统截图的超时/系统错误记录为诊断，不改变Dart驱动退出码或异常；测试中的必要截图仍由驱动检查。新增5项脚本回归覆盖成功、断言失败和驱动超时，防止辅助诊断误报成功或失败。
 
 该轮iPad在`home-wallet`阶段失败，报告等待49,541ms，清理前截图为家庭加载页，页面树显示`FamilyGate(dirty)`，尚未进入钱包。等待返回时已超过原20秒功能上限，尚不能把耗时归因到生产业务代码。Debug功能等待调整为90秒，Profile/Release维持20秒，每阶段保存实际耗时、刷新次数及最长单次刷新耗时；所有业务条件保持。该上限不代表PRD性能门槛，原始观察值继续记录，`qualifies_for_prd_acceptance=false`。
+
+第六轮提交`d27a4a6`的[运行43362271398](https://github.com/Alina-qiu/learning_planet/actions/runs/43362271398)十项CI全部通过，三个指定模拟器首次同轮完整通过。各自报告确认本机先保存、服务端钱包不提前增加、千任务滚动及加密库重开恢复，两倍字号截图已检查。首页钱包状态等待分别为iOS18.5/iPhone的25.010秒、iOS26.2/iPhone的63.959秒、iPad的18.894秒；最长单次刷新47.899秒。原始Debug观察值保留，不能解释为生产冷启动耗时、性能改善或PRD达标。
 
 工作流先完成最长10分钟的系统首次迁移并保存boot.log，然后关闭模拟器以腾出编译资源，编译后重新启动同一设备。启动应用后按simctl返回的准确进程ID查询已保存的系统日志，再将VM_SERVICE_URL传给原有Dart集成测试驱动；读取历史日志不依赖实时订阅时机。保留渲染器和OCR插件，退出前尝试保存辅助app-final.png。每阶段仍有上限，整体45分钟；不会无限等待或自动重试断言失败。修复后的运行结果以当前提交Checks为准。
 
