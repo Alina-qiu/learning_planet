@@ -1,6 +1,6 @@
 # iPhone 工程与构建验证
 
-2026-11-13起，Debug/Release构建固定为`xcode-27`主机上的Xcode27.2，产物资源检查要求实际SDK为`iphoneos27.2`，并记录Xcode版本/构建号。完整OCR插件与生产入口保留；对应CI通过后才形成当前SDK编译证据，仍不代表iOS27运行、签名或真机验收。详情及运行矩阵见[兼容性记录](IOS_COMPATIBILITY.md)。
+2026-11-13，提交`cef66a3`的[Debug/Release检查](https://github.com/Alina-qiu/learning_planet/actions/runs/43365693965)均通过：固定使用`xcode-27`主机的Xcode27.2，实际产物SDK为`iphoneos27.2`、Xcode构建号`27B52`，各含16份可解析隐私清单。完整OCR插件与生产入口保留；这是未签名编译证据，仍不代表iOS27运行、签名或真机验收。后续新增iOS27.2/x86_64模拟器运行检查，路径与限制见[兼容性记录](IOS_COMPATIBILITY.md)。
 
 2026-11-12扩展[iOS兼容性矩阵](IOS_COMPATIBILITY.md)：iOS18.5/iPhone、iOS26.2/iPhone和iPad使用各自Xcode执行同一原生流程，产物分别保存。下方单一iOS18.5记录为历史验证；最新运行状态见草稿PR Checks。iOS27、签名与完整目标手机验收仍未完成。
 

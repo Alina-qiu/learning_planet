@@ -14,9 +14,11 @@
 
 后续提交`ac530b1`的[运行43359140376](https://github.com/Alina-qiu/learning_planet/actions/runs/43359140376)八项CI通过，iOS26.2/iPhone首次完整通过。iOS18.5业务断言通过但结束辅助截图超时使整项失败；iPad则停在家庭加载页，原20秒等待在49.5秒返回时失败。随后修复辅助截图覆盖驱动结果的问题，并为Debug功能测试采用90秒等待、记录每次等待与最长刷新耗时；Profile/Release仍为20秒。该轮尚无同一提交三目标全通过记录，修复后的结果见下段；合成数据Debug结果不用于PRD性能验收。
 
-最新已验证提交`d27a4a6`的[运行43362271398](https://github.com/Alina-qiu/learning_planet/actions/runs/43362271398)十项CI全部通过，iOS18.5/iPhone、iOS26.2/iPhone及iPad原生离线任务首次同轮全部通过；5项辅助诊断回归也通过。已检查三个目标的原始报告和两倍字体截图，Debug合成数据仍不作为PRD性能验收。
+此前提交`d27a4a6`的[运行43362271398](https://github.com/Alina-qiu/learning_planet/actions/runs/43362271398)十项CI全部通过，iOS18.5/iPhone、iOS26.2/iPhone及iPad原生离线任务首次同轮全部通过；5项辅助诊断回归也通过。已检查三个目标的原始报告和两倍字体截图，Debug合成数据仍不作为PRD性能验收。
 
-本轮继续将iOS Debug/Release完整应用构建固定到Xcode27.2，并检查产物实际SDK为iphoneos27.2，保存工具链与已安装模拟器元数据。此前使用的默认Xcode实际为26.6；新增配置与本机合成元数据检查已通过，最新工具链编译仍须以对应提交CI确认，不代表iOS27运行已验收。
+提交`cef66a3`的[运行43365693965](https://github.com/Alina-qiu/learning_planet/actions/runs/43365693965)十项CI全部通过；已完成Xcode27.2的完整Debug/Release编译，两个实际产物均确认SDK为`iphoneos27.2`、Xcode构建号`27B52`，各解析16份隐私清单。完整OCR和生产入口保留；三个既有模拟器再次完整通过，报告及两倍字体截图已复核。这是未签名编译及指定模拟器功能证据，不能替代iOS27运行。
+
+后续加入iOS27.2/iPhone模拟器目标：在Apple Silicon主机准备指定版本的通用运行时，使用现有Rosetta启动x86_64模拟器，并用原生Xcode交叉编译完整依赖。运行时、应用架构及实际SDK均需检查，再执行原有Keychain、加密SQLite、千任务与大字体断言。五项选择逻辑回归通过；该目标实际构建及运行状态以当前提交CI为准，配置完成不计为验收通过。
 
 ## 技术栈与交付方式
 
