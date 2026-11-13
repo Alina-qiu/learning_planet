@@ -336,7 +336,7 @@ jobs:
             --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
             -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
       - name: Boot prepared simulator
-        timeout-minutes: 3
+        timeout-minutes: 5
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
         run: |

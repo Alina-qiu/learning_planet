@@ -31,13 +31,39 @@ class _FixtureSecrets implements DeviceSecrets {
   Future<void> delete(String key) => native.delete('$namespace.$key');
 }
 
-Future<void> _until(WidgetTester tester, bool Function() condition) async {
+Future<void> _until(
+  WidgetTester tester,
+  bool Function() condition, {
+  required String stage,
+}) async {
   final deadline = Stopwatch()..start();
   while (!condition() && deadline.elapsed < const Duration(seconds: 20)) {
     await tester.pump(const Duration(milliseconds: 16));
   }
+  final ready = condition();
+  if (!ready) {
+    final binding = tester.binding as IntegrationTestWidgetsFlutterBinding;
+    binding.reportData?['failure'] = {
+      'stage': stage,
+      'waited_ms': deadline.elapsedMilliseconds,
+      'rendered_text': tester
+          .widgetList<Text>(find.byType(Text))
+          .map((text) => text.data ?? text.textSpan?.toPlainText() ?? '')
+          .take(60)
+          .toList(),
+    };
+    debugDumpApp();
+    try {
+      if (Platform.isAndroid) await binding.convertFlutterSurfaceToImage();
+      await binding
+          .takeScreenshot('failure-$stage')
+          .timeout(const Duration(seconds: 10));
+    } catch (error) {
+      binding.reportData?['failure_screenshot_error'] = error.toString();
+    }
+  }
   expect(
-    condition(),
+    ready,
     isTrue,
     reason: 'The expected application state did not appear.',
   );
@@ -103,6 +129,7 @@ void main() {
       await _until(
         tester,
         () => find.text('金币 100 · 冻结 0 · XP 120').evaluate().isNotEmpty,
+        stage: 'home-wallet',
       );
       report['seeded_home_ready_ms'] = watch.elapsedMicroseconds / 1000;
       await tester.pumpAndSettle();
@@ -117,6 +144,7 @@ void main() {
         () =>
             find.byType(TaskManagementScreen).evaluate().isNotEmpty &&
             find.byTooltip('完成').hitTestable().evaluate().isNotEmpty,
+        stage: 'task-list',
       );
       report['task_list_first_usable_frame_ms'] =
           watch.elapsedMicroseconds / 1000;
@@ -130,6 +158,7 @@ void main() {
       await _until(
         tester,
         () => find.text('完成记录已保存本机，奖励待同步确认').evaluate().isNotEmpty,
+        stage: 'local-completion',
       );
       report['local_completion_feedback_ms'] = watch.elapsedMicroseconds / 1000;
       final commands = await store.commands(workloadOwner);

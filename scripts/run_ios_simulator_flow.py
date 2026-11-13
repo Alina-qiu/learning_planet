@@ -82,11 +82,13 @@ def main():
         url = wait_for_service(device, pid, report)
         print("Dart VM ready; running the unchanged native task assertions", flush=True)
         with (report / "task-flow.log").open("wb") as log:
+            # This is the same Dart driver invocation used by Flutter's
+            # FlutterDriverService.startTest. Avoid a second device discovery
+            # and an unscoped system-log subscription for an existing app.
+            dart = Path(os.environ["FLUTTER_ROOT"]) / "bin/cache/dart-sdk/bin/dart"
             result = subprocess.run(
-                ["flutter", "drive", "--no-pub", "--debug", "--verbose",
-                 f"--use-existing-app={url}",
-                 "--driver=test_driver/task_flow_driver.dart",
-                 "--target=integration_test/task_flow_test.dart", "-d", device],
+                [str(dart), "test_driver/task_flow_driver.dart"],
+                env={**os.environ, "VM_SERVICE_URL": url},
                 stdout=log, stderr=subprocess.STDOUT, timeout=480,
             )
         return result.returncode

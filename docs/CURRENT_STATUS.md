@@ -10,7 +10,7 @@
 
 本轮修复[奖励页大字号和窄窗口适配](ECONOMY_ACCESSIBILITY.md)：摘要与待确认请求随页面滚动，避开系统安全区域；新增5项，完整823项Flutter测试通过。用户已确认暂时没有可连接的测试手机，真机验收继续保留，未用窗口模拟结果替代。
 
-本轮扩展[iOS兼容性检查](IOS_COMPATIBILITY.md)：保留iOS18.5/iPhone，增加iOS26.2/iPhone与iPad，分别验证同一原生离线任务流程并保存产物。iOS27及完整真机兼容性仍未验收，不能将矩阵配置完成当作运行通过。
+本轮扩展[iOS兼容性检查](IOS_COMPATIBILITY.md)：保留iOS18.5/iPhone，增加iOS26.2/iPhone与iPad，分别验证同一原生离线任务流程并保存产物。提交`5bee57f`的[运行43354956838](https://github.com/Alina-qiu/learning_planet/actions/runs/43354956838)中，iOS26.2/iPad原生流程通过，整轮八项通过；iOS18.5首页等待失败，iPhone26.2重新启动超时。iOS27及完整真机兼容性仍未验收，不能将矩阵配置完成当作运行通过。
 
 ## 技术栈与交付方式
 
