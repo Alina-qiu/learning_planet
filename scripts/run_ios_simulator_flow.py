@@ -101,6 +101,11 @@ def main():
                      str(report / "app-final.png")],
                     stdout=log, stderr=subprocess.STDOUT, timeout=30,
                 )
+        except (subprocess.TimeoutExpired, OSError) as error:
+            # This optional post-test image must not replace the driver's exit
+            # code (or its exception). Required in-test screenshots still fail
+            # through the Dart driver when they cannot be captured.
+            print(f"Optional final screenshot unavailable: {type(error).__name__}", flush=True)
         finally:
             for name in ("app-launch.log", "vm-service.log", "task-flow.log"):
                 path = report / name

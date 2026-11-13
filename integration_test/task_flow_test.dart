@@ -36,13 +36,33 @@ Future<void> _until(
   bool Function() condition, {
   required String stage,
 }) async {
+  // Debug/JIT on shared simulator hosts can spend tens of seconds in a single
+  // pump. This is a functional watchdog, not the PRD's performance threshold.
+  const timeout = kDebugMode ? Duration(seconds: 90) : Duration(seconds: 20);
   final deadline = Stopwatch()..start();
-  while (!condition() && deadline.elapsed < const Duration(seconds: 20)) {
+  var pumps = 0;
+  var longestPumpMs = 0;
+  while (!condition() && deadline.elapsed < timeout) {
+    final pumpWatch = Stopwatch()..start();
     await tester.pump(const Duration(milliseconds: 16));
+    pumps++;
+    if (pumpWatch.elapsedMilliseconds > longestPumpMs) {
+      longestPumpMs = pumpWatch.elapsedMilliseconds;
+    }
   }
   final ready = condition();
+  final binding = tester.binding as IntegrationTestWidgetsFlutterBinding;
+  final waits =
+      binding.reportData?.putIfAbsent('state_waits', () => <String, dynamic>{})
+          as Map<String, dynamic>?;
+  waits?[stage] = {
+    'ready': ready,
+    'timeout_ms': timeout.inMilliseconds,
+    'waited_ms': deadline.elapsedMilliseconds,
+    'pumps': pumps,
+    'longest_pump_ms': longestPumpMs,
+  };
   if (!ready) {
-    final binding = tester.binding as IntegrationTestWidgetsFlutterBinding;
     binding.reportData?['failure'] = {
       'stage': stage,
       'waited_ms': deadline.elapsedMilliseconds,

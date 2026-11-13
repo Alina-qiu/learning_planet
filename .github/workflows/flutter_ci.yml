@@ -216,6 +216,7 @@ jobs:
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed lib test integration_test test_driver scripts/fixtures
       - run: flutter analyze
+      - run: python3 scripts/test_ios_simulator_flow.py
       - run: flutter test --coverage
       - run: flutter test --dart-define=MEASURE_STARTUP=true test/startup_timings_test.dart
       - run: node scripts/test_coverage_gate.mjs

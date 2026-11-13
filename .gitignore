@@ -1,4 +1,5 @@
 .dart_tool/
+__pycache__/
 node_modules/
 supabase/.temp/
 .flutter-plugins
