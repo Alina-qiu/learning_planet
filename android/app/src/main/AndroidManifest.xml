@@ -3,20 +3,29 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
-        android:label="learning_planet"
-        android:name="${applicationName}"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:label="${appLabel}"
+        android:name=".LearningPlanetApplication"
         android:icon="@mipmap/ic_launcher">
-        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
-            android:exported="false" />
-        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
-            android:exported="false">
+        <meta-data android:name="push_kit_auto_init_enabled" android:value="false" />
+        <meta-data android:name="com.huawei.hms.client.appid" android:value="${hmsAppId}" />
+        <service android:name=".ParentPushService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <receiver android:name=".TaskAlarmReceiver" android:exported="false" />
+        <receiver android:name=".TaskAlarmBootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIME_SET" />
             </intent-filter>
         </receiver>
+        <!-- Android task alarms must go through TaskAlarmReceiver. Do not keep
+             legacy plugin receivers: pre-upgrade alarms would bypass policy. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

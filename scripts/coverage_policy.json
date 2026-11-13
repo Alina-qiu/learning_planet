@@ -1,0 +1,9 @@
+{
+  "minimumLinePercent": 80,
+  "include": [
+    "^lib/core/.*\\.dart$",
+    "^lib/features/[^/]+/(application|data|domain)/.*\\.dart$"
+  ],
+  "exclude": [],
+  "requireAllSourceRecords": true
+}

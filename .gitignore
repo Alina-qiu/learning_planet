@@ -1,4 +1,5 @@
 .dart_tool/
+__pycache__/
 node_modules/
 supabase/.temp/
 .flutter-plugins
@@ -9,8 +10,15 @@ coverage/
 flutter_*.log
 .env
 android/local.properties
+android/app/agconnect-services.json
+android/.kotlin/
 ios/Pods/
 ios/.symlinks/
 *.iml
 .idea/
 .vscode/
+# Local verification files and generated exports are not source artifacts.
+/tmp/
+/output/
+# User-supplied requirements stay local unless publication is separately requested.
+/学习星球_产品需求文档_PRD.docx

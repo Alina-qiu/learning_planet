@@ -11,18 +11,25 @@ abstract interface class FamilyRepository {
     required String timezone,
     required String childNickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   });
 
   Future<void> createChild({
     required String familyId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   });
 
   Future<void> updateChild({
     required String childId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
+    int expectedVersion = 0,
   });
 
   Future<void> deleteChild(String childId);
@@ -46,6 +53,30 @@ class SupabaseFamilyRepository implements FamilyRepository {
   Future<void> revokeParentAuthorization() =>
       _client.rpc<void>('revoke_parent_authorization');
 
+  Future<List<String>> loadDeletedChildIds() async {
+    final ids = <String>[];
+    for (var offset = 0; ; offset += 500) {
+      final rows = await _client
+          .from('child_deletion_tombstones')
+          .select('child_id')
+          .order('child_id')
+          .range(offset, offset + 499);
+      ids.addAll(rows.map((row) => row['child_id'] as String));
+      if (rows.length < 500) break;
+    }
+    for (var offset = 0; ; offset += 500) {
+      final rows = await _client
+          .from('family_access_revocations')
+          .select('family_id, child_ids')
+          .order('family_id')
+          .range(offset, offset + 499);
+      for (final row in rows) {
+        ids.addAll((row['child_ids'] as List).cast<String>());
+      }
+      if (rows.length < 500) return ids;
+    }
+  }
+
   @override
   Future<List<Family>> loadFamilies() async {
     await _client.rpc<void>('accept_family_invitations');
@@ -55,7 +86,9 @@ class SupabaseFamilyRepository implements FamilyRepository {
         .order('created_at');
     final childRows = await _client
         .from('children')
-        .select('id, family_id, nickname, grade')
+        .select(
+          'id, family_id, nickname, grade, textbook_labels, avatar_key, profile_version, guide_step, starter_task_preset, starter_rules_at, onboarding_completed_at',
+        )
         .order('created_at');
 
     final childrenByFamily = <String, List<ChildProfile>>{};
@@ -63,14 +96,7 @@ class SupabaseFamilyRepository implements FamilyRepository {
       final familyId = row['family_id'] as String;
       childrenByFamily
           .putIfAbsent(familyId, () => [])
-          .add(
-            ChildProfile(
-              id: row['id'] as String,
-              familyId: familyId,
-              nickname: row['nickname'] as String,
-              grade: row['grade'] as int,
-            ),
-          );
+          .add(ChildProfile.fromJson(row));
     }
 
     return [
@@ -90,14 +116,20 @@ class SupabaseFamilyRepository implements FamilyRepository {
     required String timezone,
     required String childNickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   }) async {
     await _client.rpc<void>(
-      'onboard_family',
+      'onboard_family_profile',
       params: {
         'family_name': familyName,
         'family_timezone': timezone,
         'child_nickname': childNickname,
         'child_grade': grade,
+        'preferences': {
+          'textbook_labels': textbookLabels,
+          'avatar_key': avatarKey,
+        },
       },
     );
   }
@@ -107,13 +139,19 @@ class SupabaseFamilyRepository implements FamilyRepository {
     required String familyId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   }) async {
     await _client.rpc<void>(
-      'create_child',
+      'create_child_profile',
       params: {
         'target_family_id': familyId,
         'child_nickname': nickname,
         'child_grade': grade,
+        'preferences': {
+          'textbook_labels': textbookLabels,
+          'avatar_key': avatarKey,
+        },
       },
     );
   }
@@ -123,13 +161,21 @@ class SupabaseFamilyRepository implements FamilyRepository {
     required String childId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
+    int expectedVersion = 0,
   }) async {
     await _client.rpc<void>(
-      'update_child',
+      'update_child_profile',
       params: {
         'target_child_id': childId,
+        'expected_version': expectedVersion,
         'child_nickname': nickname,
         'child_grade': grade,
+        'preferences': {
+          'textbook_labels': textbookLabels,
+          'avatar_key': avatarKey,
+        },
       },
     );
   }
@@ -203,6 +249,8 @@ class UnconfiguredFamilyRepository implements FamilyRepository {
     required String timezone,
     required String childNickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   }) => _fail();
 
   @override
@@ -210,6 +258,8 @@ class UnconfiguredFamilyRepository implements FamilyRepository {
     required String familyId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   }) => _fail();
 
   @override
@@ -217,6 +267,9 @@ class UnconfiguredFamilyRepository implements FamilyRepository {
     required String childId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
+    int expectedVersion = 0,
   }) => _fail();
 
   @override

@@ -1,0 +1,4 @@
+# GitHub-hosted GA label, not yet included in actionlint 1.7.12.
+# https://github.blog/changelog/2026-10-15-xcode-27-runner-image-generally-available/
+self-hosted-runner:
+  labels: [xcode-27]

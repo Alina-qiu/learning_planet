@@ -2,6 +2,10 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://developer.huawei.com/repo/")
+            content { includeGroupByRegex("com\\.huawei\\..*") }
+        }
     }
 }
 
