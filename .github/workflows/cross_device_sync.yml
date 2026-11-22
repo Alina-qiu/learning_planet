@@ -113,7 +113,7 @@ jobs:
   sync:
     needs: [fixtures, ios-fixture]
     runs-on: macos-15-intel
-    timeout-minutes: 90
+    timeout-minutes: 100
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
@@ -173,13 +173,14 @@ jobs:
       - name: Select a local iPhone on iOS 18.5 for the paired run
         run: python3 scripts/select_cross_device_iphone.py
       - name: Exercise the two apps against one database
-        timeout-minutes: 55
+        timeout-minutes: 75
         run: python3 scripts/run_cross_device_sync.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cross-device-sync-evidence
           path: |
+            build/integration_results/cross_device_sync_ios_initial.json
             build/integration_results/cross_device_sync_ios.json
             build/integration_results/cross_device_sync_android.json
             build/cross-device/server.json

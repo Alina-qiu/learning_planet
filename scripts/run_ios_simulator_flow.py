@@ -63,12 +63,12 @@ DEFAULT_DRIVER = "test_driver/task_flow_driver.dart"
 CROSS_DEVICE_DRIVER = "test_driver/cross_device_sync_driver.dart"
 
 
-def main(driver=DEFAULT_DRIVER, private_report=None):
+def main(driver=DEFAULT_DRIVER, private_report=None, reuse_installed=False):
     if sys.platform != "darwin":
         raise RuntimeError("This runner requires macOS and an iOS simulator")
     if driver == CROSS_DEVICE_DRIVER and private_report is None:
         with tempfile.TemporaryDirectory(prefix="cross-device-ios-") as directory:
-            return main(driver, Path(directory))
+            return main(driver, Path(directory), reuse_installed)
     device = os.environ["SIMULATOR_ID"]
     if not re.fullmatch(r"[0-9A-Fa-f-]{36}", device):
         raise ValueError("Expected a simulator UDID")
@@ -77,8 +77,11 @@ def main(driver=DEFAULT_DRIVER, private_report=None):
         bundle = plistlib.load(source)["CFBundleIdentifier"]
     report = private_report or Path("build/ios-simulator")
     report.mkdir(parents=True, exist_ok=True)
-    print("Installing the prebuilt integration app", flush=True)
-    subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=180)
+    if reuse_installed:
+        print("Launching the previously installed integration app", flush=True)
+    else:
+        print("Installing the prebuilt integration app", flush=True)
+        subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=180)
     launch = subprocess.run(
         ["xcrun", "simctl", "launch", device, bundle,
          "--enable-dart-profiling", "--disable-vm-service-publication",
@@ -137,4 +140,6 @@ def collect_diagnostics(device, report):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--driver", choices=[DEFAULT_DRIVER, CROSS_DEVICE_DRIVER], default=DEFAULT_DRIVER)
-    sys.exit(main(parser.parse_args().driver))
+    parser.add_argument("--reuse-installed", action="store_true")
+    args = parser.parse_args()
+    sys.exit(main(args.driver, reuse_installed=args.reuse_installed))

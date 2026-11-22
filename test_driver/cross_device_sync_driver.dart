@@ -5,6 +5,8 @@ Future<void> main() => integrationDriver(
   responseDataCallback: (data) => writeResponseData(
     data,
     destinationDirectory: 'build/integration_results',
-    testOutputFilename: 'cross_device_sync_${data?['device'] ?? 'unknown'}',
+    testOutputFilename: data?['reader_pass'] == 'initial'
+        ? 'cross_device_sync_ios_initial'
+        : 'cross_device_sync_${data?['device'] ?? 'unknown'}',
   ),
 );

@@ -40,7 +40,7 @@ async function run(config, {database}) {
   assert.deepEqual([initial.coin_balance,initial.frozen_balance,initial.xp],[0,0,0]);
   assert.deepEqual(await ledger(),[]);
 
-  let phase = phases[0], lastOtp = Date.now(), blocked = 0, reconnectAt;
+  let phase = phases[0], lastOtp = Date.now(), blocked = 0, blockedAfterWriter = 0, reconnectAt;
   let committedLedger, timer;
   const observations = [], sessions = {}, servers = [];
   const phaseTimes = {};
@@ -57,7 +57,10 @@ async function run(config, {database}) {
           res.writeHead(404).end(); return;
         }
         if (device==='ios' && ['reader-ready','writer-complete'].includes(phase)) {
-          blocked++; req.socket.destroy(); return;
+          blocked++;
+          if (phase==='writer-complete') blockedAfterWriter++;
+          req.socket.destroy();
+          return;
         }
         if (req.headers.apikey!==publicKey) { res.writeHead(401).end(); return; }
         req.headers.apikey = config.anon;
@@ -73,6 +76,7 @@ async function run(config, {database}) {
               const claims=JSON.parse(Buffer.from(payload,'base64url'));
               assert.equal(claims.sub,owner.id);
               assert.ok(claims.session_id);
+              if (sessions[device]) assert.equal(claims.session_id,sessions[device]);
               sessions[device]=claims.session_id;
               observations.push({device,phase:atPhase,at:acceptedAt});
             } catch (err) { fail(err); }
@@ -90,7 +94,7 @@ async function run(config, {database}) {
       const device=url.searchParams.get('device');
       if (!Object.hasOwn(ports,device)) { res.writeHead(400).end(); return; }
       if (req.method==='GET' && url.pathname==='/scenario') {
-        if (Date.now()-lastOtp<61000) { json(res,202,{waiting:true}); return; }
+        if (['initial','reader-ready'].includes(phase) && Date.now()-lastOtp<61000) { json(res,202,{waiting:true}); return; }
         json(res,200,scenario); return;
       }
       if (req.method==='GET' && url.pathname==='/otp') {
@@ -101,7 +105,7 @@ async function run(config, {database}) {
         json(res,200,{code:item.code}); return;
       }
       if (url.pathname!=='/phase') { res.writeHead(404).end(); return; }
-      if (req.method==='GET') { json(res,200,{phase}); return; }
+      if (req.method==='GET') { json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0}); return; }
       if (req.method!=='POST') { res.writeHead(405).end(); return; }
       let body='';
       for await (const part of req) { body+=part; if (body.length>1024) throw Error('Unexpected phase body'); }
@@ -119,8 +123,8 @@ async function run(config, {database}) {
         assert.deepEqual(await state(),{status:'completed',coin_balance:coins,frozen_balance:0,xp});
         committedLedger=await ledger();
         assert.deepEqual(committedLedger.map(r=>[r.asset_type,r.amount]),[['coin',coins],['xp',xp]]);
-        assert.equal(blocked>0,true,'Reader did not attempt to use the unavailable network');
       } else if (next==='reader-reconnect') {
+        assert.ok(blockedAfterWriter>0,'Reader never attempted to use the unavailable network after completion');
         reconnectAt=Date.now();
       } else {
         const fresh=observations.find(o=>o.device==='ios' && o.phase==='reader-reconnect');
@@ -131,7 +135,8 @@ async function run(config, {database}) {
           where task_id=$1 order by created_at`,[task.id]);
         assert.deepEqual(receipts,[{kind:'start',outcome:'applied'},{kind:'complete',outcome:'applied'}]);
         const result={passed:true,childId:family.child,taskId:task.id,separateLogins:true,initial,final:await state(),
-          ledger:rows,receipts,blockedReaderRequests:blocked,firstSnapshotAfterReconnectMs:fresh.at-reconnectAt,
+          ledger:rows,receipts,blockedReaderRequests:blocked,blockedAfterWriter,readerSessionRetained:true,
+          firstSnapshotAfterReconnectMs:fresh.at-reconnectAt,
           phaseTimes:{...phaseTimes,[next]:Date.now()},snapshotCounts:Object.fromEntries(['ios','android'].map(d=>[d,observations.filter(o=>o.device===d).length]))};
         await writeFile(directory+'/server.json',JSON.stringify(result,null,2)+'\n');
       }
@@ -141,7 +146,7 @@ async function run(config, {database}) {
     }
     const controller=createServer((req,res)=>{control(req,res).catch(err=>{json(res,500,{error:'Scenario failed'});fail(err);});});
     servers.push(controller);await listen(controller,54324);
-    timer=setTimeout(()=>fail(Error('Timed out waiting for both devices; last phase '+phase)),45*60000);
+    timer=setTimeout(()=>fail(Error('Timed out waiting for both devices; last phase '+phase)),70*60000);
     process.once('SIGINT',interrupt);process.once('SIGTERM',interrupt);
     console.log('CROSS_DEVICE_READY');
     await promise;
@@ -153,6 +158,5 @@ async function run(config, {database}) {
 
 await mkdir(directory,{recursive:true});
 await writeFile(directory+'/server.json',JSON.stringify({passed:false,status:'starting'})+'\n');
-// The backend is ready before either simulator cold-boots. Keep the fixture
-// anon JWT valid through both boots and the existing 45-minute scenario timer.
-await withAuthBackend(run, {tokenLifetimeSeconds:3600});
+// All three mobile launches use the same disposable backend and signing key.
+await withAuthBackend(run, {tokenLifetimeSeconds:5400});

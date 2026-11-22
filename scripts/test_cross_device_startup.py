@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import socket
 import subprocess
 import tempfile
 import unittest
@@ -15,55 +16,104 @@ import run_cross_device_sync as runner
 
 
 class StartupTests(unittest.TestCase):
-    def test_serial_boot_and_reader_before_writer(self):
+    def exercise_stages(self, occupied=None):
         udid = "10000000-0000-0000-0000-000000000001"
         events = []
-        class WriterStarted(Exception):
-            pass
+        state = {"phase":None, "avd":False, "iphone":False}
+        base = {"test":"AC-01", "task_id":"task", "child_id":"child", "family_id":"family",
+                "ready_with_zero_wallet":True}
+        paid = {"completed":True, "coins":7, "xp":5}
+
+        def report(name, data):
+            runner.RESULTS.mkdir(parents=True, exist_ok=True)
+            (runner.RESULTS / f"cross_device_sync_{name}.json").write_text(json.dumps(data), encoding="utf-8")
 
         def launch(command, **kwargs):
             args = [str(arg) for arg in command]
             if args[0] == "node":
-                events.append("start backend")
-                self.assertEqual(kwargs["env"]["CROSS_DEVICE_STARTUP_STAGES"], "1")
-            elif "bootstatus" in args:
-                self.assertEqual(events[-1], "control initial")
+                events.append("backend")
+                state["phase"] = "initial"
+                return Mock(poll=lambda: 0 if state["phase"] == "reader-confirmed" else None, wait=lambda timeout: 0)
+            if "bootstatus" in args:
+                self.assertIn(udid, args)
+                self.assertFalse(state["avd"])
+                state["iphone"] = True
                 events.append("boot iPhone")
-                return Mock(poll=Mock(side_effect=[None, 0]), returncode=0)
             elif "-avd" in args:
-                self.assertEqual(events[-1], "boot iPhone")
-                self.assertEqual(args[args.index("-cores")+1], "2")
-                self.assertEqual(args[args.index("-memory")+1], "1536")
+                self.assertEqual(state["phase"], "reader-ready")
+                self.assertFalse(state["iphone"])
+                self.assertEqual(args[args.index("-cores") + 1], "2")
+                self.assertEqual(args[args.index("-memory") + 1], "1536")
+                state["avd"] = True
                 events.append("boot Android")
+                return Mock(poll=lambda: None if state["avd"] else 0, wait=lambda timeout: 0)
             elif "scripts/run_ios_simulator_flow.py" in args:
-                self.assertEqual(events[-1], "Android ready")
-                events.append("start iPhone reader")
+                self.assertFalse(state["avd"])
+                self.assertTrue(state["iphone"])
+                if state["phase"] == "initial":
+                    self.assertNotIn("--reuse-installed", args)
+                    report("ios_initial", {**base, "device":"ios", "reader_pass":"initial"})
+                    state["phase"] = "reader-ready"
+                    events.append("initial reader")
+                else:
+                    self.assertEqual(state["phase"], "writer-complete")
+                    self.assertIn("--reuse-installed", args)
+                    self.assertIn("Android released", events)
+                    report("ios", {**base, **paid, "device":"ios", "reader_pass":"restore",
+                                  "offline_state_after_android_completion":True})
+                    proof = {"passed":True, "separateLogins":True, "readerSessionRetained":True,
+                             "initial":{"status":"ready","coin_balance":0,"frozen_balance":0,"xp":0},
+                             "final":{"status":"completed","coin_balance":7,"frozen_balance":0,"xp":5},
+                             "childId":"child", "taskId":"task", "blockedAfterWriter":1, "blockedReaderRequests":1,
+                             "firstSnapshotAfterReconnectMs":8,
+                             "ledger":[{"id":"a","asset_type":"coin","amount":7},{"id":"b","asset_type":"xp","amount":5}],
+                             "receipts":[{"kind":"start","outcome":"applied"},{"kind":"complete","outcome":"applied"}]}
+                    runner.SERVER_RESULT.write_text(json.dumps(proof), encoding="utf-8")
+                    state["phase"] = "reader-confirmed"
+                    events.append("restored reader")
             elif "drive" in args:
-                self.assertEqual(events[-1], "reader ready")
-                events.append("start Android writer")
-                raise WriterStarted
+                self.assertFalse(state["iphone"])
+                self.assertTrue(state["avd"])
+                self.assertIn("both routes",events)
+                report("android", {**base, **paid, "device":"android"})
+                state["phase"] = "writer-complete"
+                events.append("writer")
             else:
-                self.fail("Unexpected startup command")
-            return Mock(poll=Mock(return_value=None))
+                self.fail("Unexpected launch")
+            return Mock(poll=lambda: 0, returncode=0)
 
-        def invoke(command, **_kwargs):
-            output = ""
-            if "list" in command:
-                output = json.dumps({"devices":{"iOS":[{"udid":udid,"state":"Shutdown"}]}})
-            elif "getprop" in command:
-                events.append("Android ready")
-                output = "1"
-            return subprocess.CompletedProcess(command, 0, output, "")
+        def command(args, timeout, discard=False):
+            self.assertGreater(timeout, 0)
+            if "start-server" in args:
+                self.assertEqual(state["phase"], "initial")
+                self.assertFalse(state["avd"] or state["iphone"])
+                self.assertTrue(discard)
+                events.append("ADB server")
+            elif str(args[0]).endswith("adb") and args[-1] == "devices":
+                if state["phase"] == "writer-complete":
+                    self.assertFalse(state["avd"])
+                    events.append("Android released")
+                return 0, "List of devices attached\n" + (runner.SERIAL+" offline\n" if occupied == "serial" else "")
+            elif "list" in args:
+                return 0, json.dumps({"devices":{"iOS":[{"udid":udid,"state":"Shutdown"}]}})
+            elif "-accel-check" in args:
+                return 0, "accel:\n0\nOK\naccel\n"
+            elif "getprop" in args:
+                return 0, "1"
+            elif "get-state" in args:
+                return 0, "device"
+            elif "--list" in args:
+                events.append("both routes")
+                return 0, "android tcp:54324 tcp:54324\nandroid tcp:54326 tcp:54326\n"
+            elif "kill" in args:
+                events.append("stop Android")
+                state["avd"] = False
+            return 0, ""
 
-        phases = iter([None, None, "initial", "initial", "reader-ready"])
-        def phase():
-            value = next(phases)
-            if value == "initial" and events == ["start backend"]:
-                events.append("control initial")
-            if value == "reader-ready":
-                self.assertEqual(events[-1], "start iPhone reader")
-                events.append("reader ready")
-            return value
+        def shutdown(device):
+            self.assertEqual(device, udid)
+            state["iphone"] = False
+            events.append("stop iPhone")
 
         with tempfile.TemporaryDirectory() as temp, contextlib.ExitStack() as stack:
             old_cwd = Path.cwd()
@@ -76,17 +126,62 @@ class StartupTests(unittest.TestCase):
             (app / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier":"test.local"}))
             stack.enter_context(patch.dict(os.environ, {"ANDROID_HOME":temp, "FLUTTER_ROOT":temp, "SIMULATOR_ID":udid}))
             stack.enter_context(patch.object(runner.sys, "platform", "darwin"))
-            stack.enter_context(patch.object(runner, "control_phase", side_effect=phase))
+            stack.enter_context(patch.object(runner, "control_phase", side_effect=lambda:state["phase"]))
             stack.enter_context(patch.object(runner, "stop_group"))
-            stack.enter_context(patch.object(runner.time, "sleep"))
+            stack.enter_context(patch.object(runner, "shutdown_iphone", side_effect=shutdown))
+            stack.enter_context(patch.object(runner, "ports_free", side_effect=lambda:occupied != "port"))
+            stack.enter_context(patch.object(runner, "one_probe", side_effect=command))
             stack.enter_context(patch.object(runner.subprocess, "Popen", side_effect=launch))
-            stack.enter_context(patch.object(runner.subprocess, "check_output", return_value=""))
-            stack.enter_context(patch.object(runner.subprocess, "run", side_effect=invoke))
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
-            with self.assertRaises(WriterStarted):
+            if occupied:
+                with self.assertRaisesRegex(RuntimeError,"ports already in use"):
+                    runner.run()
+            else:
                 runner.run()
-        self.assertEqual(events, ["start backend", "control initial", "boot iPhone", "boot Android",
-                                  "Android ready", "start iPhone reader", "reader ready", "start Android writer"])
+        return events
+
+    def test_staged_boot_and_same_install(self):
+        self.assertEqual(self.exercise_stages(), ["backend", "ADB server", "boot iPhone", "initial reader", "stop iPhone",
+                         "boot Android", "both routes", "writer", "stop Android", "Android released", "boot iPhone",
+                         "restored reader", "stop iPhone"])
+
+    def test_occupied_serial_or_port_stops_before_boot(self):
+        for occupied in ("port", "serial"):
+            with self.subTest(occupied=occupied):
+                self.assertEqual(self.exercise_stages(occupied), ["backend", "ADB server"])
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as already_listening:
+            already_listening.bind(("127.0.0.1", 0))
+            already_listening.listen(1)
+            port = already_listening.getsockname()[1]
+            self.assertFalse(runner.ports_free(port))
+            self.assertFalse(runner.ports_free(port - 1))
+
+    def test_probes_use_regular_files_and_bounded_backoff(self):
+        def invoke(command, **kwargs):
+            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertNotIn(subprocess.PIPE, [kwargs["stdout"], kwargs["stderr"]])
+            if kwargs["stdout"] != subprocess.DEVNULL:
+                kwargs["stdout"].write(b"fixture response")
+            return subprocess.CompletedProcess(command, 0)
+        with patch.object(runner.subprocess, "run", side_effect=invoke):
+            self.assertEqual(runner.one_probe(["adb", "start-server"], 5, True), (0, ""))
+            self.assertEqual(runner.one_probe(["adb", "devices"], 5), (0, "fixture response"))
+        now = [0]
+        def sleep(seconds):
+            now[0] += seconds
+        with patch.object(runner.time, "monotonic", side_effect=lambda:now[0]), patch.object(runner.time, "sleep", side_effect=sleep):
+            with patch.object(runner, "one_probe", side_effect=[subprocess.TimeoutExpired("hidden", 1),
+                        (1,"private detail"),(0,"List of devices attached\n")]) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertTrue(runner.probe("inventory", ["adb"], total=10, per_attempt=4, accept=runner.device_list))
+                self.assertEqual(run.call_count,3)
+                self.assertNotIn("private detail",out.getvalue())
+            with patch.object(runner, "one_probe", return_value=(3, "sensitive")), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, r"exceeded 5s after 3 attempts \(exited with code 3\)"):
+                    runner.probe("keyguard", ["adb"], total=5)
+        self.assertTrue(runner.valid_accel_result(0, "accel:\n0\nusable"))
+        self.assertTrue(runner.valid_accel_result(8, "accel:\n8\nunavailable"))
+        self.assertFalse(runner.valid_accel_result(8, "unclassified"))
+        self.assertFalse(runner.valid_accel_result(1, "accel:\n0\nusable"))
 
     def test_real_spawn_failure_diagnostics(self):
         root = Path(__file__).resolve().parent.parent

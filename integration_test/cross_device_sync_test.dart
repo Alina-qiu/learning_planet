@@ -13,11 +13,12 @@ import 'package:learning_planet/main.dart' as app;
 Future<void> _until(
   WidgetTester tester,
   String stage,
-  bool Function() ready,
-) async {
+  bool Function() ready, {
+  Duration timeout = const Duration(minutes: 2),
+}) async {
   final watch = Stopwatch()..start();
   while (!ready()) {
-    if (watch.elapsed >= const Duration(minutes: 2)) {
+    if (watch.elapsed >= timeout) {
       fail('Timed out waiting for $stage');
     }
     await tester.pump(const Duration(milliseconds: 200));
@@ -34,7 +35,11 @@ class _Control {
 
   Uri uri(String path) => Uri.http('127.0.0.1:54324', path, {'device': device});
 
-  Future<Map<String, dynamic>> wait(String path, {String? phase}) async {
+  Future<Map<String, dynamic>> wait(
+    String path, {
+    String? phase,
+    bool waitForOfflineRequest = false,
+  }) async {
     final watch = Stopwatch()..start();
     final timeout = phase == null
         ? const Duration(minutes: 3)
@@ -46,7 +51,11 @@ class _Control {
       if (response.statusCode == 200) {
         final data =
             jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-        if (phase == null || data['phase'] == phase) return data;
+        if ((phase == null || data['phase'] == phase) &&
+            (!waitForOfflineRequest ||
+                data['readerAttemptedWhileOffline'] == true)) {
+          return data;
+        }
       } else if (response.statusCode != 202) {
         fail('Fixture $path returned HTTP ${response.statusCode}');
       }
@@ -180,9 +189,21 @@ void main() {
       );
       final control = _Control(device, tester);
       addTearDown(control.client.close);
-      final report = <String, dynamic>{'device': device, 'test': 'AC-01'};
+      final report = <String, dynamic>{
+        'device': device,
+        'test': 'AC-01',
+        'stage': 'fixture',
+      };
       binding.reportData = report;
-      if (!reader) await control.wait('/phase', phase: 'reader-ready');
+      final phase = (await control.wait(
+        '/phase',
+        phase: reader ? null : 'reader-ready',
+      ))['phase'];
+      final restoring = reader && phase == 'writer-complete';
+      if (reader) {
+        expect(phase, isIn(['initial', 'writer-complete']));
+        report['reader_pass'] = restoring ? 'restore' : 'initial';
+      }
       final scenario = await control.wait('/scenario');
       final task = scenario['task_id'] as String,
           child = scenario['child_id'] as String;
@@ -202,7 +223,21 @@ void main() {
         FlutterError.onError = frameworkError;
         PlatformDispatcher.instance.onError = platformError;
       }
-      await _login(tester, control, scenario['email'] as String);
+      if (restoring) {
+        // The same simulator reopens the installed app with the data endpoint
+        // still offline. Only its own persisted account and cache can open it.
+        report['stage'] = 'restore_offline_session';
+        await _until(
+          tester,
+          'home from the offline iPhone session',
+          () => find.byType(HomeScreen).evaluate().isNotEmpty,
+          timeout: const Duration(minutes: 4),
+        );
+      } else {
+        report['stage'] = 'email_login';
+        await _login(tester, control, scenario['email'] as String);
+      }
+      report['stage'] = 'load_family_task_and_wallet';
       await _selectChild(tester, child, family);
       final homeList = find.byKey(PageStorageKey('home:$child'));
       final scroll = find.descendant(
@@ -219,29 +254,33 @@ void main() {
       await _show(tester, scroll, start, 'ready task', bottom: true);
       expect(onCard(scenario['title'] as String), findsOneWidget);
       report['ready_with_zero_wallet'] = true;
-      if (reader) {
+      if (reader && !restoring) {
         await control.mark('reader-ready', task);
-        await control.wait('/phase', phase: 'writer-complete');
-        await _show(
-          tester,
-          scroll,
-          start,
-          'offline cached ready task',
-          bottom: true,
-        );
-        await _show(tester, scroll, initialWallet, 'offline cached wallet');
+        report['stage'] = 'cached_before_shutdown';
+        return;
+      }
+      if (restoring) {
         report['offline_state_after_android_completion'] = true;
+        report['stage'] = 'reconnect';
+        await control.wait(
+          '/phase',
+          phase: 'writer-complete',
+          waitForOfflineRequest: true,
+        );
         await control.mark('reader-reconnect', task);
       } else {
+        report['stage'] = 'complete_task';
         await _tapTaskAction(tester, start, 'enabled start action');
         final finish = onCard('完成');
         await _show(tester, scroll, finish, 'in-progress task', bottom: true);
         await _tapTaskAction(tester, finish, 'enabled completion action');
       }
+      report['stage'] = 'confirm_task_and_wallet';
       await _show(tester, scroll, done, 'completed task', bottom: true);
       await _show(tester, scroll, paidWallet, 'confirmed wallet');
       report.addAll({'completed': true, 'coins': coins, 'xp': xp});
       await control.mark(reader ? 'reader-confirmed' : 'writer-complete', task);
+      report['stage'] = 'confirmed';
     },
   );
 }

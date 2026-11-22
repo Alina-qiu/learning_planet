@@ -1,18 +1,21 @@
 """Run the prebuilt AC-01 clients on one Intel Mac and one loopback backend."""
 import contextlib
 import errno
+import io
 import json
 import os
 from pathlib import Path
 import plistlib
 import re
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
+from shutdown_ios_simulator import shutdown as shutdown_iphone
 
 
 PORT = 5568
@@ -25,7 +28,9 @@ PHASES = ("initial", "reader-ready", "writer-complete", "reader-reconnect", "rea
 UI_STAGES = {*PHASES, "/scenario", "/otp", "email sign-in screen", "enabled OTP form", "home after OTP verification",
              "child menu", "selected child", "initial wallet", "ready task", "offline cached ready task",
              "offline cached wallet", "enabled start action", "in-progress task", "enabled completion action",
-             "completed task", "confirmed wallet"}
+             "completed task", "confirmed wallet", "home from the offline iPhone session"}
+REPORT_STAGES = {"fixture", "email_login", "restore_offline_session", "load_family_task_and_wallet",
+                 "cached_before_shutdown", "reconnect", "complete_task", "confirm_task_and_wallet", "confirmed"}
 
 
 def require(condition, message):
@@ -42,8 +47,9 @@ def control_phase():
         return None
 
 
-def verify_evidence(ios, android, server):
-    require(server["passed"] is True and server["separateLogins"] is True, "Server proof incomplete")
+def verify_evidence(initial, ios, android, server):
+    require(server["passed"] is True and server["separateLogins"] is True and server["readerSessionRetained"] is True,
+            "Server proof incomplete")
     require(server["initial"]["status"] in ("ready", "scheduled"), "Invalid initial task")
     require(all(server["initial"][key] == 0 for key in ("coin_balance", "frozen_balance", "xp")), "Invalid initial wallet")
     final = server["final"]
@@ -53,8 +59,12 @@ def verify_evidence(ios, android, server):
         require(device["ready_with_zero_wallet"] is True and device["completed"] is True, f"Incomplete {name} UI flow")
         require(device["task_id"] == server["taskId"] and device["child_id"] == server["childId"], f"Different {name} task or child")
         require(device["coins"] == final["coin_balance"] > 0 and device["xp"] == final["xp"] > 0, f"{name} wallet mismatch")
-    require(ios["family_id"] == android["family_id"], "Different families")
-    require(ios["offline_state_after_android_completion"] is True and server["blockedReaderRequests"] > 0, "Missing offline observation")
+    require(initial["device"] == "ios" and initial["test"] == "AC-01" and initial["reader_pass"] == "initial"
+            and initial["ready_with_zero_wallet"] is True and ios["reader_pass"] == "restore", "Invalid reader passes")
+    require(all(initial[key] == ios[key] == android[key] for key in ("task_id", "child_id", "family_id")),
+            "Different task, child or family")
+    require(ios["offline_state_after_android_completion"] is True and server["blockedAfterWriter"] > 0
+            and server["blockedReaderRequests"] >= server["blockedAfterWriter"], "Missing offline cold-start observation")
     require(server["firstSnapshotAfterReconnectMs"] >= 0, "Missing fresh post-reconnect snapshot")
     rows = server["ledger"]
     require(len({row["id"] for row in rows}) == 2 and
@@ -133,6 +143,124 @@ def backend_timeout():
     return int(setting)
 
 
+def one_probe(command, timeout, discard=False):
+    # A newly spawned ADB daemon can retain its client's descriptors. In
+    # particular, communicate()/check_output() can then wait for EOF long
+    # after the client exits. No startup or health command here uses a pipe.
+    with tempfile.TemporaryFile() as output:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL if discard else output,
+                                stderr=subprocess.DEVNULL if discard else subprocess.STDOUT,
+                                timeout=timeout, start_new_session=True)
+        output.seek(0)
+        return result.returncode, output.read(1024 * 1024).decode("utf-8", "replace")
+
+
+def probe(label, command, *, total=90, per_attempt=15, accept=lambda code, _: code == 0,
+          discard=False, health=lambda: None):
+    deadline = time.monotonic() + total
+    attempts, pause, last = 0, 1, None
+    while time.monotonic() < deadline:
+        health()
+        timeout = min(per_attempt, deadline - time.monotonic())
+        if timeout <= 0:
+            break
+        attempts += 1
+        try:
+            code, output = one_probe(command, timeout, discard)
+        except subprocess.TimeoutExpired:
+            reason = "command timed out"
+        except OSError as error:
+            reason = "errno=" + errno.errorcode.get(error.errno, "UNKNOWN")
+            if error.errno in (errno.ENOENT, errno.ENOEXEC, errno.EACCES):
+                raise RuntimeError(f"{label} failed: {reason}") from None
+        else:
+            if accept(code, output):
+                return output
+            reason = exit_status(code) if code else "expected state not observed"
+            for text, detail in (("device offline", "offline"), ("device unauthorized", "unauthorized"),
+                                 ("cannot connect to daemon", "ADB daemon unreachable")):
+                if text in output.lower():
+                    reason += f" ({detail})"
+                    break
+        if last != reason:
+            print(f"{label}: attempt {attempts} {reason}; retrying", flush=True)
+        last = reason
+        time.sleep(min(pause, max(0, deadline - time.monotonic())))
+        pause = min(pause * 2, 8)
+    raise RuntimeError(f"{label} exceeded {total}s after {attempts} attempts ({last})")
+
+
+def device_list(code, output):
+    return code == 0 and "List of devices attached" in output.splitlines()
+
+
+def serial_present(output):
+    return any(line.split()[:1] == [SERIAL] for line in output.splitlines())
+
+
+def ports_free(first=PORT):
+    with contextlib.ExitStack() as sockets:
+        for port in (first, first + 1):
+            sock = sockets.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+            try:
+                sock.bind(("127.0.0.1", port))
+                sock.listen(1)
+            except OSError as error:
+                if error.errno == errno.EADDRINUSE:
+                    return False
+                raise
+    return True
+
+
+def accel_status(output):
+    return re.search(r"^accel:[ \t]*\r?\n?[ \t]*(\d+)[ \t\r]*$", output, re.MULTILINE)
+
+
+def valid_accel_result(code, output):
+    match = accel_status(output)
+    # A documented nonzero acceleration status permits software emulation.
+    # An unrecognized failure or missing report must retry the probe.
+    if not match:
+        return False
+    status = int(match.group(1))
+    return code == 0 if status == 0 else 0 < status <= 255 and code in (0, 1, status)
+
+
+def read_report(path, name):
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise RuntimeError(f"{name} report missing or invalid") from None
+    require(isinstance(result, dict), f"Invalid {name} report")
+    return result
+
+
+def driver_failure(path, name, status, phase, report=None):
+    log = path.read_text(encoding="utf-8", errors="replace")
+    message = f"{name} {status} in {phase}"
+    if report and report.is_file():
+        try:
+            data = read_report(report, name)
+        except RuntimeError:
+            data = {}
+        if data.get("stage") in REPORT_STAGES:
+            message += ", app stage " + data["stage"]
+        facts = [key for key in ("ready_with_zero_wallet", "offline_state_after_android_completion", "completed")
+                 if data.get(key) is True]
+        if facts:
+            message += ", confirmed " + ", ".join(facts)
+    for match in re.finditer(r"Timed out waiting for ([a-zA-Z /-]{1,60})(?:\r?\n|$)", log):
+        if match.group(1) in UI_STAGES:
+            return message + ", timeout at " + match.group(1)
+    for text, detail in (("Dart VM service was not announced", "Dart VM discovery timed out"),
+                         ("timed out after 1200 seconds", "Dart driver timed out"),
+                         ("failed to install", "app installation failed"),
+                         ("Error connecting to the service protocol", "Flutter service connection failed")):
+        if text.lower() in log.lower():
+            return f"{message} ({detail})"
+    return message
+
+
 def run():
     require(sys.platform == "darwin", "A macOS host is required")
     sdk = Path(os.environ.get("ANDROID_HOME") or os.environ["ANDROID_SDK_ROOT"])
@@ -146,25 +274,21 @@ def run():
     require(re.fullmatch(r"[0-9a-fA-F-]{36}", device), "Expected a simulator UDID")
     server_timeout = backend_timeout()
     require(control_phase() is None, "The control port is already in use")
-    for name in ("ios", "android"):
-        (RESULTS / f"cross_device_sync_{name}.json").unlink(missing_ok=True)
-    SERVER_RESULT.unlink(missing_ok=True)
+    reports = {name: RESULTS / f"cross_device_sync_{name}.json" for name in ("ios_initial", "android", "ios")}
+    for path in (*reports.values(), SERVER_RESULT):
+        path.unlink(missing_ok=True)
     adb_device = [adb, "-s", SERIAL]
     with tempfile.TemporaryDirectory(prefix="cross-device-") as tmp, contextlib.ExitStack() as stack:
-        # No raw child output enters the public CI logs or artifacts.
-        def start(name, command, env=None):
-            stream = stack.enter_context((Path(tmp) / name).open("wb"))
+        # Only controlled stage and status messages enter the public build log.
+        def start(name, command, owner, env=None):
+            stream = owner.enter_context((Path(tmp) / name).open("wb"))
             try:
-                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
+                process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
                                            start_new_session=True, env=env)
             except OSError as error:
                 raise RuntimeError(f"{name} spawn failed: errno={errno.errorcode.get(error.errno, 'UNKNOWN')}") from None
-            stack.callback(stop_group, process)
+            owner.callback(stop_group, process)
             return process
-
-        def adb_run(*args, check=True, timeout=15):
-            return subprocess.run(adb_device + list(args), capture_output=True, text=True,
-                                  timeout=timeout, check=check)
 
         def running(name, process):
             code = process.poll()
@@ -174,101 +298,167 @@ def run():
         print("Starting the isolated backend before booting the simulators", flush=True)
         env = {**os.environ, "CROSS_DEVICE_STARTUP_STAGES": "1"}
         env.setdefault("AUTH_VERSION_TIMEOUT_MS", "60000")
-        server = start("server", ["node", "scripts/test_cross_device_sync.mjs"], env)
+        server = start("server", ["node", "scripts/test_cross_device_sync.mjs"], stack, env)
+        def backend_alive():
+            running("server", server)
         deadline = time.monotonic() + server_timeout
         while control_phase() != "initial":
-            running("server", server)
+            backend_alive()
             if time.monotonic() >= deadline:
                 raise RuntimeError(startup_error(Path(tmp) / "server", "server", f"timed out after {server_timeout}s"))
             time.sleep(2)
-        print("Backend control is initial; booting the selected iPhone", flush=True)
+        print("Backend control is initial; starting the ADB server with both simulators idle", flush=True)
+        probe("ADB start-server", [adb, "start-server"], total=120, per_attempt=30, discard=True, health=backend_alive)
 
-        def simctl_cleanup(*arguments):
-            with contextlib.suppress(subprocess.TimeoutExpired, OSError):
-                subprocess.run(["xcrun", "simctl", *arguments], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                               timeout=20)
+        def check_available():
+            devices = probe("ADB device inventory", [adb, "devices"], accept=device_list, health=backend_alive)
+            require(not serial_present(devices) and ports_free(), "Target Android serial or emulator ports already in use")
+        check_available()
+        print("ADB device inventory responded and both target emulator ports are available", flush=True)
 
-        devices = subprocess.run(["xcrun", "simctl", "list", "devices", "available", "--json"],
-                                 capture_output=True, text=True, timeout=30)
-        require(devices.returncode == 0, "Could not query selected iPhone state")
-        states = [entry["state"] for entries in json.loads(devices.stdout)["devices"].values()
-                  for entry in entries if entry["udid"].lower() == device.lower()]
+        inventory = probe("iPhone inventory", ["xcrun", "simctl", "list", "devices", "available", "--json"],
+                          total=60, per_attempt=20, health=backend_alive)
+        try:
+            states = [row["state"] for devices in json.loads(inventory)["devices"].values()
+                      for row in devices if row["udid"].lower() == device.lower()]
+        except (ValueError, KeyError, TypeError):
+            raise RuntimeError("Invalid iPhone inventory response") from None
         require(len(states) == 1, "Selected iPhone is unavailable")
-        if states[0] == "Shutdown":
-            stack.callback(simctl_cleanup, "shutdown", device)
-        boot_ios = start("iPhone boot", ["xcrun", "simctl", "bootstatus", device, "-b"])
-        deadline = time.monotonic() + 480
-        while boot_ios.poll() is None:
-            running("server", server)
-            require(time.monotonic() < deadline, "Timed out waiting for iPhone boot")
-            time.sleep(2)
-        if boot_ios.returncode:
-            raise RuntimeError(startup_error(Path(tmp) / "iPhone boot", "iPhone boot", exit_status(boot_ios.returncode)))
+        initially_booted = states[0] in ("Booted", "Booting")
+        iphone_in_use = False
 
-        adb_devices = subprocess.check_output([adb, "devices"], text=True, timeout=20, stderr=subprocess.DEVNULL)
-        require(SERIAL not in adb_devices, f"{SERIAL} already in use")
-        accel = subprocess.run([emulator, "-accel-check"], capture_output=True, text=True, timeout=15)
-        accelerated = bool(re.search(r"^accel:\s*0\s*$", accel.stdout + accel.stderr, re.MULTILINE))
-        print("iPhone booted; starting Android AVD with " +
-              ("hardware acceleration" if accelerated else "software CPU emulation"), flush=True)
-        avd = start("emulator", [emulator, "-avd", "cross-device-android", "-port", str(PORT),
-                                 "-cores", "2", "-memory", "1536", "-no-window", "-no-audio", "-no-boot-anim",
-                                 "-no-snapshot", "-gpu", "software", "-accel", "on" if accelerated else "off"])
-        def shutdown_avd():
-            with contextlib.suppress(subprocess.TimeoutExpired, OSError):
-                adb_run("emu", "kill", check=False, timeout=8)
-        stack.callback(shutdown_avd)
-        deadline = time.monotonic() + (600 if accelerated else 900)
-        while True:
-            running("server", server)
-            running("emulator", avd)
+        def off_iphone():
+            nonlocal iphone_in_use
+            # simctl output can include a simulator identifier. Confirm shutdown
+            # through the shared state checker and report only the stage.
             try:
-                boot = adb_run("shell", "getprop", "sys.boot_completed", check=False, timeout=5)
-            except subprocess.TimeoutExpired:
-                boot = None
-            if boot and boot.returncode == 0 and boot.stdout.strip() == "1":
-                break
-            require(time.monotonic() < deadline, "Timed out waiting for Android boot")
-            time.sleep(2)
-        adb_run("shell", "wm", "dismiss-keyguard")
-        for port in ("54324", "54326"):
-            adb_run("reverse", f"tcp:{port}", f"tcp:{port}")
-        print("Both simulators are ready; launching the iPhone reader", flush=True)
-        stack.callback(simctl_cleanup, "terminate", device, bundle)
-        ios = start("ios", [sys.executable, "scripts/run_ios_simulator_flow.py", "--driver", DRIVER])
-        android = None
-        last_phase = None
-        deadline = time.monotonic() + 21 * 60
-        while True:
-            phase = control_phase()
-            if phase and phase != last_phase:
-                last_phase = phase
-                print(f"AC-01 phase {phase}", flush=True)
-            if phase == "reader-ready" and android is None:
-                android = start("android", [flutter, "drive", "--no-dds", "--debug", "--no-pub", "-d", SERIAL,
-                                           f"--use-application-binary={APK}", f"--driver={DRIVER}",
-                                           "--target=integration_test/cross_device_sync_test.dart"])
-            for name, process in [("ios", ios), ("android", android), ("server", server)]:
-                if process is None:
-                    continue
-                code = process.poll()
-                if code not in (None, 0):
-                    # Device transcripts may contain OTPs or VM addresses. Only
-                    # extract a bounded stage from our own test assertion.
-                    log = (Path(tmp) / name).read_text(encoding="utf-8", errors="replace")
-                    match = re.search(r"Timed out waiting for ([a-zA-Z /-]{1,60})(?:\r?\n|$)", log)
-                    detail = f", timeout at {match.group(1)}" if match and match.group(1) in UI_STAGES else ""
-                    raise RuntimeError(f"{name} exited with {code} in {last_phase}{detail}")
-            if android is not None and all(p.poll() == 0 for p in (ios, android, server)):
-                break
-            require(avd.poll() is None, "Android emulator exited during the test")
-            require(time.monotonic() < deadline, f"Cross-device flow timed out in {last_phase}")
-            time.sleep(2)
-        ios_report, android_report = [json.loads((RESULTS / f"cross_device_sync_{name}.json").read_text())
-                                      for name in ("ios", "android")]
-        proof = json.loads(SERVER_RESULT.read_text())
-        verify_evidence(ios_report, android_report, proof)
-        print(f"AC-01 passed: both device reports agree, one coin entry and one XP entry; "
+                with contextlib.redirect_stdout(io.StringIO()):
+                    shutdown_iphone(device)
+            except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+                raise RuntimeError("Shutdown of the selected iPhone was not confirmed") from None
+            iphone_in_use = False
+
+        def cleanup_iphone():
+            if iphone_in_use:
+                if initially_booted:
+                    with contextlib.suppress(subprocess.SubprocessError, OSError):
+                        one_probe(["xcrun", "simctl", "terminate", device, bundle], 15, True)
+                else:
+                    with contextlib.suppress(RuntimeError):
+                        off_iphone()
+        stack.callback(cleanup_iphone)
+
+        def boot_iphone(label):
+            nonlocal iphone_in_use
+            iphone_in_use = True
+            with contextlib.ExitStack() as owner:
+                process = start(label, ["xcrun", "simctl", "bootstatus", device, "-b"], owner)
+                deadline = time.monotonic() + 480
+                while process.poll() is None:
+                    backend_alive()
+                    require(time.monotonic() < deadline, f"{label} exceeded 480s")
+                    time.sleep(2)
+                if process.returncode:
+                    raise RuntimeError(startup_error(Path(tmp) / label, label, exit_status(process.returncode)))
+
+        def drive(label, command, expected, report, health=None):
+            # This covers installation, VM connection and execution on both
+            # platforms. Flutter's extended integration driver has no request
+            # deadline; the separate iOS Dart invocation also has a 1200s cap.
+            deadline = time.monotonic() + 21 * 60
+            last = None
+            exited_at = None
+            final = expected == "reader-confirmed"
+            with contextlib.ExitStack() as owner:
+                process = start(label, command, owner)
+                while time.monotonic() < deadline:
+                    if health:
+                        health()
+                    phase = control_phase()
+                    if phase and phase != last:
+                        last = phase
+                        print(f"{label}: AC-01 phase {phase}", flush=True)
+                    code = process.poll()
+                    if code not in (None, 0):
+                        raise RuntimeError(driver_failure(Path(tmp) / label, label, exit_status(code), last, report))
+                    server_code = server.poll()
+                    if server_code is not None and not (final and server_code == 0):
+                        raise RuntimeError(driver_failure(Path(tmp) / "server", "server", exit_status(server_code), last))
+                    if code == 0:
+                        # The server exits after the final HTTP acknowledgement;
+                        # that short-lived phase may be observable only in its proof.
+                        finished = final and SERVER_RESULT.is_file() and read_report(SERVER_RESULT, "server").get("passed") is True
+                        if last == expected or finished:
+                            return read_report(report, label)
+                        exited_at = exited_at or time.monotonic()
+                        require(time.monotonic() - exited_at < 10, f"{label} exited before {expected}")
+                    time.sleep(2)
+            raise RuntimeError(driver_failure(Path(tmp) / label, label, "exceeded 21 minutes", last, report))
+
+        ios_command = [sys.executable, "scripts/run_ios_simulator_flow.py", "--driver", DRIVER]
+        boot_iphone("initial iPhone boot")
+        initial = drive("initial iPhone reader", ios_command, "reader-ready", reports["ios_initial"])
+        require(initial.get("reader_pass") == "initial" and initial.get("ready_with_zero_wallet") is True,
+                "Initial reader report incomplete")
+        print("Initial iPhone reader confirmed the ready task and zero wallet; shutting down that simulator", flush=True)
+        off_iphone()
+        print("iPhone shutdown confirmed; preparing the Android writer", flush=True)
+
+        # Recheck ownership after the iPhone phase before launching anything on these ports.
+        check_available()
+        accel = probe("Android acceleration check", [emulator, "-accel-check"], total=60,
+                      per_attempt=15, accept=valid_accel_result, health=backend_alive)
+        accelerated = int(accel_status(accel).group(1)) == 0
+        print("Starting Android AVD with " + ("hardware acceleration" if accelerated else "software CPU emulation"), flush=True)
+        with contextlib.ExitStack() as owner:
+            avd = start("emulator", [emulator, "-avd", "cross-device-android", "-port", str(PORT),
+                        "-cores", "2", "-memory", "1536", "-no-window", "-no-audio", "-no-boot-anim",
+                        "-no-snapshot", "-gpu", "software", "-accel", "on" if accelerated else "off"], owner)
+            def android_alive():
+                backend_alive()
+                running("emulator", avd)
+            def stop_avd():
+                if avd.poll() is None:
+                    with contextlib.suppress(subprocess.SubprocessError, OSError):
+                        code, _ = one_probe(adb_device + ["emu", "kill"], 8, True)
+                        if code == 0:
+                            avd.wait(timeout=15)
+                # The owner then reaps this exact process group, including after a transport failure.
+            owner.callback(stop_avd)
+            probe("Android boot completion", adb_device + ["shell", "getprop", "sys.boot_completed"],
+                  total=600 if accelerated else 900, per_attempt=8,
+                  accept=lambda code, out: code == 0 and out.strip() == "1", health=android_alive)
+            probe("Android transport", adb_device + ["get-state"], total=60,
+                  accept=lambda code, out: code == 0 and out.strip() == "device", health=android_alive)
+            probe("Android keyguard", adb_device + ["shell", "wm", "dismiss-keyguard"], health=android_alive)
+            ports = ("54324", "54326")
+            for port in ports:
+                probe(f"Android reverse {port}", adb_device + ["reverse", f"tcp:{port}", f"tcp:{port}"], health=android_alive)
+            def mapped(code, output):
+                routes = [line.split()[-2:] for line in output.splitlines()]
+                return code == 0 and all([f"tcp:{port}", f"tcp:{port}"] in routes for port in ports)
+            probe("Android reverse verification", adb_device + ["reverse", "--list"], accept=mapped, health=android_alive)
+            print("Android boot, transport and both reverse mappings confirmed; launching the writer", flush=True)
+            android = drive("Android writer", [flutter, "drive", "--no-dds", "--debug", "--no-pub", "-d", SERIAL,
+                            f"--use-application-binary={APK}", f"--driver={DRIVER}",
+                            "--target=integration_test/cross_device_sync_test.dart"],
+                            "writer-complete", reports["android"], android_alive)
+            require(android.get("completed") is True and android.get("task_id") == initial.get("task_id"),
+                    "Android writer report incomplete or wrong task")
+            print("Android writer confirmed completion; shutting down its emulator", flush=True)
+        probe("Android release verification", [adb, "devices"], total=90, per_attempt=12, health=backend_alive,
+              accept=lambda code, out: device_list(code, out) and not serial_present(out) and ports_free())
+        print("Android process, serial and emulator ports released; restarting the same iPhone", flush=True)
+        boot_iphone("restore iPhone boot")
+        ios = drive("restored iPhone reader", ios_command + ["--reuse-installed"], "reader-confirmed", reports["ios"])
+        try:
+            server_code = server.wait(timeout=45)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Backend did not exit after reader confirmation") from None
+        require(server_code == 0, f"Backend {exit_status(server_code)} after reader confirmation")
+        proof = read_report(SERVER_RESULT, "server")
+        verify_evidence(initial, ios, android, proof)
+        print(f"AC-01 passed: three native launches agree, one coin entry and one XP entry; "
               f"first fresh reader snapshot in {proof['firstSnapshotAfterReconnectMs']} ms.", flush=True)
 
 
