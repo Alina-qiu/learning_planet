@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
@@ -9,6 +10,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:learning_planet/core/config/app_config.dart';
 import 'package:learning_planet/features/home/presentation/home_screen.dart';
 import 'package:learning_planet/main.dart' as app;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> _until(
   WidgetTester tester,
@@ -27,13 +29,82 @@ Future<void> _until(
 
 /// Only coordinates the two devices and reads the fixture's local OTP mailbox.
 /// All session, task and wallet operations go through the running app.
+Uri _controlUri(String device, String path) =>
+    Uri.http('127.0.0.1:54324', path, {'device': device});
+
+// allTestsPassed resolves after the binding has recorded assertion/teardown
+// failures. A populated reportData alone cannot establish that the test passed.
+Future<void> _sendAndroidOutcome(
+  IntegrationTestWidgetsFlutterBinding binding,
+) async {
+  final passed = await binding.allTestsPassed.future;
+  final report = binding.reportData;
+  final success = passed && report?['stage'] == 'confirmed';
+  final token = success
+      ? Supabase.instance.client.auth.currentSession?.accessToken
+      : null;
+  final client = http.Client();
+  try {
+    for (var attempt = 0; success && token != null && attempt < 3; attempt++) {
+      try {
+        final response = await client
+            .post(
+              _controlUri('android', '/report'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $token',
+              },
+              body: jsonEncode(report),
+            )
+            .timeout(const Duration(seconds: 5));
+        if (response.statusCode == 200) return;
+        if (response.statusCode < 500) break;
+      } on TimeoutException {
+        // An accepted report can lose its acknowledgement.
+      } on http.ClientException {
+        // The server accepts identical reports after transport recovery.
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    // An accepted report is immutable even if all its acknowledgements were lost.
+    try {
+      await client
+          .post(
+            _controlUri('android', '/progress'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'stage': 'failed'}),
+          )
+          .timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      // The coordinator enforces an independent deadline.
+    } on http.ClientException {
+      // The coordinator also checks backend health while waiting.
+    }
+  } finally {
+    client.close();
+  }
+}
+
 class _Control {
   _Control(this.device, this.tester);
   final String device;
   final WidgetTester tester;
   final client = http.Client();
 
-  Uri uri(String path) => Uri.http('127.0.0.1:54324', path, {'device': device});
+  Uri uri(String path) => _controlUri(device, path);
+
+  Future<void> stage(Map<String, dynamic> report, String name) async {
+    report['stage'] = name;
+    if (device != 'android') return;
+    final response = await client
+        .post(
+          uri('/progress'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'stage': name}),
+        )
+        .timeout(const Duration(seconds: 10));
+    expect(response.statusCode, 200, reason: 'Reporting Android stage');
+  }
 
   Future<Map<String, dynamic>> wait(
     String path, {
@@ -173,6 +244,7 @@ Future<void> _tapTaskAction(
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isAndroid) unawaited(_sendAndroidOutcome(binding));
   testWidgets(
     'AC-01 Android completes, iOS reconnects to the same task and wallet',
     (tester) async {
@@ -195,6 +267,7 @@ void main() {
         'stage': 'fixture',
       };
       binding.reportData = report;
+      await control.stage(report, 'fixture');
       final phase = (await control.wait(
         '/phase',
         phase: reader ? null : 'reader-ready',
@@ -234,10 +307,10 @@ void main() {
           timeout: const Duration(minutes: 4),
         );
       } else {
-        report['stage'] = 'email_login';
+        await control.stage(report, 'email_login');
         await _login(tester, control, scenario['email'] as String);
       }
-      report['stage'] = 'load_family_task_and_wallet';
+      await control.stage(report, 'load_family_task_and_wallet');
       await _selectChild(tester, child, family);
       final homeList = find.byKey(PageStorageKey('home:$child'));
       final scroll = find.descendant(
@@ -269,18 +342,18 @@ void main() {
         );
         await control.mark('reader-reconnect', task);
       } else {
-        report['stage'] = 'complete_task';
+        await control.stage(report, 'complete_task');
         await _tapTaskAction(tester, start, 'enabled start action');
         final finish = onCard('完成');
         await _show(tester, scroll, finish, 'in-progress task', bottom: true);
         await _tapTaskAction(tester, finish, 'enabled completion action');
       }
-      report['stage'] = 'confirm_task_and_wallet';
+      await control.stage(report, 'confirm_task_and_wallet');
       await _show(tester, scroll, done, 'completed task', bottom: true);
       await _show(tester, scroll, paidWallet, 'confirmed wallet');
       report.addAll({'completed': true, 'coins': coins, 'xp': xp});
       await control.mark(reader ? 'reader-confirmed' : 'writer-complete', task);
-      report['stage'] = 'confirmed';
+      await control.stage(report, 'confirmed');
     },
   );
 }

@@ -24,7 +24,7 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 
 上一版在 Windows 通过全部 842 项 Flutter 测试和静态分析，核心行覆盖率 90.62%。本机 PostgreSQL 通过 405 项检查和 14 项有数据升级检查。PostgREST 16.2 处理了 99 次实际 HTTP 请求，覆盖新版 PIN、旧客户端兼容和设备校时后重放原命令。
 
-提交 `40f8c7e` 的十项远程检查全部通过，包括 846 项 Flutter 测试、409 项数据库检查、14 项迁移升级、9 项备份恢复、iOS SDK 27.2 未签名 Debug 和 Release 编译，以及三组 iPhone/iPad 模拟器测试。macOS 也已执行 35 项原生提醒策略检查。[构建和测试](https://github.com/Alina-qiu/learning_planet/actions/runs/45072276369) · [后续提交与检查](https://github.com/Alina-qiu/learning_planet/pull/1)
+提交 `1d68c28` 的十项远程检查全部通过，包括 847 项 Flutter 测试、409 项数据库检查、14 项迁移升级、9 项备份恢复、iOS SDK 27.2 未签名 Debug 和 Release 编译，以及三组 iPhone/iPad 模拟器测试。macOS 也已执行 35 项原生提醒策略检查。[构建和测试](https://github.com/Alina-qiu/learning_planet/actions/runs/45074628662) · [后续提交与检查](https://github.com/Alina-qiu/learning_planet/pull/1)
 
 上一版修复了三处用户流程。
 
@@ -123,7 +123,7 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动<3秒、列表<1.5秒、反馈<500ms | [性能记录](APP_PERFORMANCE.md)：合成数据任务列表/本机完成提示有观测；生产入口profile配置页中位数约4.27秒 | 没有完整真实首页达标证据。图形表面等待不能直接归因到通知插件CPU；没有以跳过清理改善分数 |
+| 冷启动<3秒、列表<1.5秒、反馈<500ms | API 29 模拟器用 Profile 构建经 HTTPS 和验证码登录。5 次冷启的系统首帧中位 1.65 秒，另 3 次首次采样到大厅、孩子和钱包同时可见为 3.63 至 5.42 秒。[在线测量](../build/acceptance-20261123/online-profile-startup.json) · [列表与反馈](APP_PERFORMANCE.md) | 尚未证实首页达到 3 秒目标。API 36 调试版断网且会话过期时，回到缓存首页与钱包约需 29 至 30 秒。两轮观测均有 11 次令牌刷新尝试，进入首页前未发出注销状态或家庭业务请求。[离线诊断](../build/acceptance-20261123/account-poll-apk/offline-entry-network-diagnosis.json) |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | 实际APK前台及重开后分别14.422秒/7.087秒发起同步 | 本机回环连接断开不代表无线网络、后台或两端实机 |

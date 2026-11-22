@@ -159,6 +159,7 @@ jobs:
         run: |
           python3 scripts/test_cross_device_startup.py
           python3 scripts/test_android_simulator_flow.py
+          node --test scripts/test_cross_device_android_report.mjs
       - name: Install and verify disposable backend binaries before boot
         run: |
           install -m 755 build/cross-device/auth "$RUNNER_TEMP/cross-device-auth"

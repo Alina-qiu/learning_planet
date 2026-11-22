@@ -16,7 +16,7 @@ import run_cross_device_sync as runner
 
 
 class StartupTests(unittest.TestCase):
-    def exercise_stages(self, occupied=None):
+    def exercise_stages(self, occupied=None, android_result="passed"):
         udid = "10000000-0000-0000-0000-000000000001"
         events = []
         state = {"phase":None, "avd":False, "iphone":False}
@@ -75,9 +75,8 @@ class StartupTests(unittest.TestCase):
                 self.assertFalse(state["iphone"])
                 self.assertTrue(state["avd"])
                 self.assertEqual(args[args.index("--serial") + 1], runner.SERIAL)
-                self.assertEqual(args[args.index("--driver") + 1], runner.DRIVER)
+                self.assertNotIn("--driver", args)
                 self.assertIn("both routes",events)
-                report("android", {**base, **paid, "device":"android"})
                 state["phase"] = "writer-complete"
                 events.append("writer")
             else:
@@ -117,6 +116,20 @@ class StartupTests(unittest.TestCase):
             state["iphone"] = False
             events.append("stop iPhone")
 
+        queries = 0
+        def android_status(device):
+            nonlocal queries
+            self.assertEqual(device, "android")
+            queries += 1
+            if queries == 1:
+                return state["phase"], "confirm_task_and_wallet"
+            if android_result == "failed":
+                return state["phase"], "failed"
+            if android_result == "passed":
+                report("android", {**base, **paid, "device":"android"})
+                events.append("verified Android report")
+            return state["phase"], "confirmed"
+
         with tempfile.TemporaryDirectory() as temp, contextlib.ExitStack() as stack:
             old_cwd = Path.cwd()
             os.chdir(temp)
@@ -129,6 +142,7 @@ class StartupTests(unittest.TestCase):
             stack.enter_context(patch.dict(os.environ, {"ANDROID_HOME":temp, "FLUTTER_ROOT":temp, "SIMULATOR_ID":udid}))
             stack.enter_context(patch.object(runner.sys, "platform", "darwin"))
             stack.enter_context(patch.object(runner, "control_phase", side_effect=lambda:state["phase"]))
+            stack.enter_context(patch.object(runner, "control_status", side_effect=android_status))
             stack.enter_context(patch.object(runner, "stop_group"))
             stack.enter_context(patch.object(runner, "shutdown_iphone", side_effect=shutdown))
             stack.enter_context(patch.object(runner, "ports_free", side_effect=lambda:occupied != "port"))
@@ -138,14 +152,29 @@ class StartupTests(unittest.TestCase):
             if occupied:
                 with self.assertRaisesRegex(RuntimeError,"ports already in use"):
                     runner.run()
+            elif android_result == "failed":
+                with self.assertRaisesRegex(RuntimeError, "assertions failed after confirm_task_and_wallet"):
+                    runner.run()
+            elif android_result == "missing":
+                now = [0]
+                def advance(_):
+                    now[0] += 30
+                with patch.object(runner.time, "monotonic", side_effect=lambda:now[0]), patch.object(runner.time, "sleep", side_effect=advance):
+                    with self.assertRaisesRegex(RuntimeError, "Verified Android report timed out"):
+                        runner.run()
             else:
                 runner.run()
         return events
 
     def test_staged_boot_and_same_install(self):
         self.assertEqual(self.exercise_stages(), ["backend", "ADB server", "boot iPhone", "initial reader", "stop iPhone",
-                         "boot Android", "both routes", "writer", "stop Android", "Android released", "boot iPhone",
+                         "boot Android", "both routes", "writer", "verified Android report", "stop Android", "Android released", "boot iPhone",
                          "restored reader", "stop iPhone"])
+
+    def test_failed_or_missing_report_never_starts_the_restored_reader(self):
+        for outcome in ("failed", "missing"):
+            with self.subTest(outcome=outcome):
+                self.assertNotIn("restored reader", self.exercise_stages(android_result=outcome))
 
     def test_occupied_serial_or_port_stops_before_boot(self):
         for occupied in ("port", "serial"):

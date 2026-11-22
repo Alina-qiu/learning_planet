@@ -31,8 +31,9 @@ UI_STAGES = {*PHASES, "/scenario", "/otp", "email sign-in screen", "enabled OTP 
              "completed task", "confirmed wallet", "home from the offline iPhone session"}
 REPORT_STAGES = {"fixture", "email_login", "restore_offline_session", "load_family_task_and_wallet",
                  "cached_before_shutdown", "reconnect", "complete_task", "confirm_task_and_wallet", "confirmed"}
-ANDROID_DRIVER_STAGES = {"APK metadata", "installation", "activity launch", "app PID", "VM discovery",
-                         "VM forwarding", "Dart driver", "cleanup"}
+ANDROID_DRIVER_STAGES = {"APK metadata", "installation", "activity launch"}
+ANDROID_APP_STAGES = {"fixture", "email_login", "load_family_task_and_wallet", "complete_task",
+                      "confirm_task_and_wallet", "confirmed", "failed"}
 
 
 def require(condition, message):
@@ -40,13 +41,19 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def control_phase():
+def control_status(device):
     try:
-        with urllib.request.urlopen("http://127.0.0.1:54324/phase?device=ios", timeout=2) as response:
-            phase = json.load(response)["phase"]
-        return phase if phase in PHASES else None
-    except (OSError, ValueError, KeyError, urllib.error.URLError):
-        return None
+        with urllib.request.urlopen(f"http://127.0.0.1:54324/phase?device={device}", timeout=2) as response:
+            data = json.load(response)
+        phase = data.get("phase")
+        stage = data.get("androidStage")
+        return phase if phase in PHASES else None, stage if stage in ANDROID_APP_STAGES else None
+    except (OSError, ValueError, AttributeError, TypeError, urllib.error.URLError):
+        return None, None
+
+
+def control_phase():
+    return control_status("ios")[0]
 
 
 def verify_evidence(initial, ios, android, server):
@@ -266,9 +273,8 @@ def driver_failure(path, name, status, phase, report=None):
     if label:
         return message + ", timeout at " + label
     direct_failure = re.search(r"^Android driver failure: (command (?:timed out|could not start|exited -?\d{1,3})|"
-                               r"no launchable app in APK|APK installation not confirmed|could not read device clock|"
-                               r"activity launch failed|app PID not found|VM discovery timed out|app process changed|"
-                               r"no host port allocated|could not release app or forward)\r?$", log, re.MULTILINE)
+                               r"no launchable app in APK|APK installation not confirmed|"
+                               r"activity launch failed)\r?$", log, re.MULTILINE)
     if direct_failure:
         return f"{message} ({direct_failure[1]})"
     for text, detail in (("Dart VM service was not announced", "Dart VM discovery timed out"),
@@ -379,12 +385,11 @@ def run():
                 if process.returncode:
                     raise RuntimeError(startup_error(Path(tmp) / label, label, exit_status(process.returncode)))
 
-        def drive(label, command, expected, report, health=None):
-            # This covers installation, VM connection and execution on both
-            # platforms. Flutter's extended integration driver has no request
-            # deadline; the separate iOS Dart invocation also has a 1200s cap.
+        def drive(label, command, expected, report, health=None, on_device=False):
+            # On Android the launcher exits after am start. Only the backend's
+            # verified report marks the on-device test as successfully finished.
             deadline = time.monotonic() + 21 * 60
-            last = None
+            last = last_app_stage = None
             exited_at = None
             final = expected == "reader-confirmed"
             with contextlib.ExitStack() as owner:
@@ -392,7 +397,15 @@ def run():
                 while time.monotonic() < deadline:
                     if health:
                         health()
-                    phase = control_phase()
+                    if on_device:
+                        phase, app_stage = control_status("android")
+                        if app_stage == "failed":
+                            raise RuntimeError(f"Android on-device assertions failed after {last_app_stage or 'launch'}")
+                        if app_stage and app_stage != last_app_stage:
+                            last_app_stage = app_stage
+                            print(f"Android on-device stage {app_stage}", flush=True)
+                    else:
+                        phase = control_phase()
                     if phase and phase != last:
                         last = phase
                         print(f"{label}: AC-01 phase {phase}", flush=True)
@@ -403,6 +416,11 @@ def run():
                     if server_code is not None and not (final and server_code == 0):
                         raise RuntimeError(driver_failure(Path(tmp) / "server", "server", exit_status(server_code), last))
                     if code == 0:
+                        if on_device:
+                            if last == expected and report.is_file():
+                                return read_report(report, label)
+                            time.sleep(2)
+                            continue
                         # The server exits after the final HTTP acknowledgement;
                         # that short-lived phase may be observable only in its proof.
                         finished = final and SERVER_RESULT.is_file() and read_report(SERVER_RESULT, "server").get("passed") is True
@@ -411,6 +429,8 @@ def run():
                         exited_at = exited_at or time.monotonic()
                         require(time.monotonic() - exited_at < 10, f"{label} exited before {expected}")
                     time.sleep(2)
+            if on_device:
+                raise RuntimeError(f"Verified Android report timed out after {last_app_stage or 'launch'}")
             raise RuntimeError(driver_failure(Path(tmp) / label, label, "exceeded 21 minutes", last, report))
 
         ios_command = [sys.executable, "scripts/run_ios_simulator_flow.py", "--driver", DRIVER]
@@ -458,8 +478,8 @@ def run():
             probe("Android reverse verification", adb_device + ["reverse", "--list"], accept=mapped, health=android_alive)
             print("Android boot, transport and both reverse mappings confirmed; launching the writer", flush=True)
             android = drive("Android writer", [sys.executable, "scripts/run_android_simulator_flow.py",
-                            "--serial", SERIAL, "--apk", str(APK), "--driver", DRIVER],
-                            "writer-complete", reports["android"], android_alive)
+                            "--serial", SERIAL, "--apk", str(APK)],
+                            "writer-complete", reports["android"], android_alive, on_device=True)
             require(android.get("completed") is True and android.get("task_id") == initial.get("task_id"),
                     "Android writer report incomplete or wrong task")
             print("Android writer confirmed completion; shutting down its emulator", flush=True)

@@ -1,8 +1,11 @@
 // Both native apps share one disposable Auth/PostgREST database. The control
 // port stays reachable when the reader's data port drops its connections.
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
-import {mkdir, writeFile} from 'node:fs/promises';
+import {link, mkdir, rm, writeFile} from 'node:fs/promises';
+import {dirname} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {withAuthBackend} from './fixtures/auth_backend.mjs';
 import {closeServer, forwardHttp, listen} from './fixtures/http_test_tools.mjs';
 import {realApiClient} from './fixtures/real_api_client.mjs';
@@ -13,10 +16,96 @@ const publicKey = 'sb_publishable_cross_device_loopback_fixture';
 const title = '跨设备阅读';
 const coins = 7, xp = 5;
 const phases = ['initial', 'reader-ready', 'writer-complete', 'reader-reconnect', 'reader-confirmed'];
+const androidReportPath = process.env.ANDROID_REPORT_PATH ?? 'build/integration_results/cross_device_sync_android.json';
+const androidStages = ['fixture','email_login','load_family_task_and_wallet','complete_task','confirm_task_and_wallet','confirmed'];
 
 function json(res, code, value) {
   res.writeHead(code, {'Content-Type':'application/json', 'Cache-Control':'no-store'});
   res.end(JSON.stringify(value));
+}
+
+export async function androidSessionMatches(authorization,session,ownerId,client) {
+  const match = /^Bearer ([A-Za-z0-9_-]+\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+)$/.exec(authorization ?? '');
+  if (!match || !session) return false;
+  let claims;
+  try { claims=JSON.parse(Buffer.from(match[2],'base64url')); } catch { return false; }
+  if (claims?.session_id!==session || claims.sub!==ownerId) return false;
+  // GoTrue verifies the signature and expiry. This also accepts a renewed
+  // token from the same Android session after the snapshot was taken.
+  const response=await client.api('/auth/v1/user',match[1]);
+  return response.status===200 && response.data?.id===ownerId;
+}
+
+// Only the standalone test APK uses these loopback endpoints. Report fields
+// must match the fixture, and the device must prove ownership of its session.
+export function androidEvidence({scenario, file, phase, authorize, verify, log = console.log}) {
+  const expected = {device:'android',test:'AC-01',stage:'confirmed',task_id:scenario.task_id,
+    child_id:scenario.child_id,family_id:scenario.family_id,ready_with_zero_wallet:true,
+    completed:true,coins:scenario.coins,xp:scenario.xp};
+  let stage = null, saved = false, pending = Promise.resolve();
+
+  function record(next) {
+    if (next === stage) return;
+    stage = next;
+    log('CROSS_DEVICE_ANDROID_STAGE '+stage);
+  }
+
+  async function update(path, body, authorization) {
+    if (!['reader-ready','writer-complete'].includes(phase())) return 409;
+    if (!body || Array.isArray(body) || typeof body !== 'object') return 400;
+    if (path === '/progress') {
+      if (Object.keys(body).length !== 1 || !Object.hasOwn(body,'stage') ||
+          (!androidStages.includes(body.stage) && body.stage !== 'failed')) return 400;
+      if (saved || stage === 'failed' || body.stage === 'confirmed') return 200;
+      if (body.stage === 'failed' || androidStages.indexOf(body.stage) > androidStages.indexOf(stage)) record(body.stage);
+      return 200;
+    }
+    if (phase() !== 'writer-complete' || stage === 'failed') return 409;
+    if (Object.keys(body).length !== Object.keys(expected).length ||
+        !Object.entries(expected).every(([key,value]) => Object.hasOwn(body,key) && body[key] === value)) return 400;
+    if (!await authorize(authorization)) return 403;
+    await verify();
+    if (!saved) {
+      await mkdir(dirname(file),{recursive:true});
+      const temporary = file+'.'+randomUUID()+'.tmp';
+      try {
+        await writeFile(temporary,JSON.stringify(body,null,2)+'\n',{flag:'wx',mode:0o600});
+        // A single link publishes the complete file and never overwrites an
+        // existing result. The coordinator clears previous runs before startup.
+        await link(temporary,file);
+      } finally {
+        await rm(temporary,{force:true});
+      }
+      saved = true;
+      record('confirmed');
+    }
+    return 200;
+  }
+
+  return {
+    get stage() { return stage; },
+    get saved() { return saved; },
+    async receive(path,device,req,res) {
+      if (device !== 'android') { res.writeHead(403).end(); return; }
+      if (req.method !== 'POST') { res.writeHead(405).end(); return; }
+      if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+        res.writeHead(415).end(); return;
+      }
+      const chunks = [];
+      let length = 0;
+      for await (const chunk of req.iterator({destroyOnReturn:false})) {
+        length += chunk.length;
+        if (length > 2048) { res.writeHead(413).end(); req.resume(); return; }
+        chunks.push(chunk);
+      }
+      let body;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      catch { res.writeHead(400).end(); return; }
+      const request = pending.then(() => update(path,body,req.headers.authorization));
+      pending = request.catch(() => {});
+      res.writeHead(await request).end();
+    },
+  };
 }
 
 async function run(config, {database}) {
@@ -33,6 +122,9 @@ async function run(config, {database}) {
   assert.ok(task?.id, 'Scheduled task missing');
   const scenario = {email:owner.email,title,coins,xp,task_id:task.id,child_id:family.child,family_id:family.id};
   const ledger = () => select('select id,asset_type,amount from public.ledger_entries where child_id=$1 and source_id=$2 order by asset_type',[family.child,task.id]);
+  const receipts = () => select(`select request->>'kind' kind,outcome from public.task_command_receipts
+    where task_id=$1 order by created_at`,[task.id]);
+  const applied = [{kind:'start',outcome:'applied'},{kind:'complete',outcome:'applied'}];
   const state = async () => (await select(`select i.status,w.coin_balance,w.frozen_balance,w.xp
     from public.task_instances i join public.wallets w on w.child_id=i.child_id where i.id=$1`,[task.id]))[0];
   const initial = await state();
@@ -49,6 +141,19 @@ async function run(config, {database}) {
   const port = Number(new URL(config.url).port);
   const fail = error => reject(error);
   const interrupt = () => fail(new Error('Cross-device run interrupted'));
+  async function verifiedWriterLedger() {
+    assert.ok(sessions.android && sessions.ios && sessions.android!==sessions.ios);
+    assert.ok(observations.some(o=>o.device==='android' && o.phase==='reader-ready'));
+    assert.deepEqual(await state(),{status:'completed',coin_balance:coins,frozen_balance:0,xp});
+    const rows = await ledger();
+    assert.deepEqual(rows.map(r=>[r.asset_type,r.amount]),[['coin',coins],['xp',xp]]);
+    assert.deepEqual(await receipts(),applied);
+    return rows;
+  }
+  const android = androidEvidence({scenario, file:androidReportPath, phase:()=>phase,
+    authorize:authorization=>androidSessionMatches(authorization,sessions.android,owner.id,client),
+    verify:async ()=>assert.deepEqual(await verifiedWriterLedger(),committedLedger),
+  });
   try {
     for (const device of ['ios','android']) {
       const service = createServer((req,res) => {
@@ -93,6 +198,9 @@ async function run(config, {database}) {
       const url = new URL(req.url,'http://127.0.0.1:54324');
       const device=url.searchParams.get('device');
       if (!Object.hasOwn(ports,device)) { res.writeHead(400).end(); return; }
+      if (['/progress','/report'].includes(url.pathname)) {
+        await android.receive(url.pathname,device,req,res); return;
+      }
       if (req.method==='GET' && url.pathname==='/scenario') {
         if (['initial','reader-ready'].includes(phase) && Date.now()-lastOtp<61000) { json(res,202,{waiting:true}); return; }
         json(res,200,scenario); return;
@@ -105,7 +213,7 @@ async function run(config, {database}) {
         json(res,200,{code:item.code}); return;
       }
       if (url.pathname!=='/phase') { res.writeHead(404).end(); return; }
-      if (req.method==='GET') { json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0}); return; }
+      if (req.method==='GET') { json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0,androidStage:android.stage}); return; }
       if (req.method!=='POST') { res.writeHead(405).end(); return; }
       let body='';
       for await (const part of req) { body+=part; if (body.length>1024) throw Error('Unexpected phase body'); }
@@ -119,11 +227,9 @@ async function run(config, {database}) {
         // Close keepalive and any response currently in flight before the writer runs.
         servers[0].closeAllConnections();
       } else if (next==='writer-complete') {
-        assert.ok(sessions.android && sessions.ios && sessions.android!==sessions.ios);
-        assert.deepEqual(await state(),{status:'completed',coin_balance:coins,frozen_balance:0,xp});
-        committedLedger=await ledger();
-        assert.deepEqual(committedLedger.map(r=>[r.asset_type,r.amount]),[['coin',coins],['xp',xp]]);
+        committedLedger=await verifiedWriterLedger();
       } else if (next==='reader-reconnect') {
+        assert.ok(android.saved,'Android UI report has not arrived');
         assert.ok(blockedAfterWriter>0,'Reader never attempted to use the unavailable network after completion');
         reconnectAt=Date.now();
       } else {
@@ -131,11 +237,10 @@ async function run(config, {database}) {
         assert.ok(fresh,'Reader never fetched a fresh snapshot');
         const rows=await ledger();
         assert.deepEqual(rows,committedLedger);
-        const receipts=await select(`select request->>'kind' kind,outcome from public.task_command_receipts
-          where task_id=$1 order by created_at`,[task.id]);
-        assert.deepEqual(receipts,[{kind:'start',outcome:'applied'},{kind:'complete',outcome:'applied'}]);
+        const finalReceipts=await receipts();
+        assert.deepEqual(finalReceipts,applied);
         const result={passed:true,childId:family.child,taskId:task.id,separateLogins:true,initial,final:await state(),
-          ledger:rows,receipts,blockedReaderRequests:blocked,blockedAfterWriter,readerSessionRetained:true,
+          ledger:rows,receipts:finalReceipts,blockedReaderRequests:blocked,blockedAfterWriter,readerSessionRetained:true,
           firstSnapshotAfterReconnectMs:fresh.at-reconnectAt,
           phaseTimes:{...phaseTimes,[next]:Date.now()},snapshotCounts:Object.fromEntries(['ios','android'].map(d=>[d,observations.filter(o=>o.device===d).length]))};
         await writeFile(directory+'/server.json',JSON.stringify(result,null,2)+'\n');
@@ -156,7 +261,10 @@ async function run(config, {database}) {
   }
 }
 
-await mkdir(directory,{recursive:true});
-await writeFile(directory+'/server.json',JSON.stringify({passed:false,status:'starting'})+'\n');
-// All three mobile launches use the same disposable backend and signing key.
-await withAuthBackend(run, {tokenLifetimeSeconds:5400});
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  await rm(androidReportPath,{force:true});
+  await mkdir(directory,{recursive:true});
+  await writeFile(directory+'/server.json',JSON.stringify({passed:false,status:'starting'})+'\n');
+  // All three mobile launches use the same disposable backend and signing key.
+  await withAuthBackend(run, {tokenLifetimeSeconds:5400});
+}
