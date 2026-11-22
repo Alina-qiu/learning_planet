@@ -32,6 +32,9 @@ try {
     foreach ($testMarker in @('integration_test/notifications_test.dart', 'integration_test/task_flow_test.dart', 'integration_test/ocr_native_test.dart', 'integration_test/native_crash_test.dart', 'SYNTHETIC_PRIVATE_TASK_DO_NOT_SHOW', 'synthetic-held-remote', 'synthetic-printed-chinese-and-digits', 'integration_crash_phase')) {
         if ($kernel.Contains($testMarker)) { throw "Refusing to deliver an integration test APK: $testMarker" }
     }
+    if ($kernel.Contains('integration_test/cross_device_sync_test.dart')) {
+        throw 'Refusing to deliver the cross-device integration APK.'
+    }
     if (-not $kernel.Contains('initializeApp')) { throw 'Production initialization is missing from the debug APK.' }
     if ($kernel.Contains('integration_test/image_import_native_test.dart') -or $kernel.Contains('synthetic-native-gallery')) {
         throw 'Refusing to deliver the native gallery integration APK.'

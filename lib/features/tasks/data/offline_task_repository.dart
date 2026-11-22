@@ -80,6 +80,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   Timer? _timer;
   String? _owner, _activeChild;
   bool _foreground = true, _disposed = false;
+  int _resumeGeneration = 0;
   TaskSyncState _state = const TaskSyncState();
   TaskSyncState get state => _state;
   Stream<TaskSyncState> get changes => _events.stream;
@@ -259,8 +260,13 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   }
 
   void setForeground(bool foreground) {
+    final resumed = foreground && !_foreground;
     _foreground = foreground;
-    if (foreground && _activeChild != null) _backgroundSync(_activeChild!);
+    if (resumed) _resumeGeneration++;
+    final child = _activeChild;
+    if (foreground && child != null) {
+      _backgroundSync(child, followUp: resumed && _syncChild == child);
+    }
   }
 
   Future<void> dispose() async {
@@ -752,7 +758,9 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
       final again = _syncAgain;
       _syncAgain = false;
       if (again && !_disposed && _foreground && accountId() == owner) {
-        _backgroundSync(_activeChild ?? childId);
+        // Callers waiting for their first cached snapshot must also await the
+        // replacement when the pre-suspension response has been discarded.
+        return synchronize(_activeChild ?? childId);
       }
     });
     _inFlight = work;
@@ -798,8 +806,12 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
         await _publish(owner, TaskSyncPhase.synced);
         return;
       }
+      final requestGeneration = _resumeGeneration;
       final data = await remote.snapshot(childId);
       check();
+      // A response captured before suspension can predate a remote completion
+      // or family midnight. The foreground request will fetch a fresh snapshot.
+      if (requestGeneration != _resumeGeneration) return;
       await _locked(() async {
         check();
         await store.write(owner, 'tasks:$childId', {

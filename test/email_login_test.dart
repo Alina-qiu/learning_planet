@@ -128,6 +128,44 @@ class LoginFake implements AuthRepository {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
+    'an offline refresh keeps the restored account until the SDK signs it out',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      await h.client.auth.setInitialSession(
+        jsonEncode(session(seconds: -3600)),
+      );
+      final events = <String?>[];
+      final errors = <Object>[];
+      final sub = h.repository.watchSession().listen(
+        (session) => events.add(session?.userId),
+        onError: (Object error) => errors.add(error),
+      );
+      addTearDown(sub.cancel);
+      h.handle = (_) => throw http.ClientException('offline');
+      await expectLater(
+        h.client.auth.refreshSession(),
+        throwsA(isA<AuthRetryableFetchException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(events.last, 'parent');
+      expect(h.repository.currentSession?.userId, 'parent');
+      expect(errors, isEmpty);
+
+      h.handle = (_) => Harness.reply({
+        'error_code': 'refresh_token_not_found',
+        'msg': 'Invalid Refresh Token',
+      }, 400);
+      await expectLater(
+        h.client.auth.refreshSession(),
+        throwsA(isA<AuthException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(h.repository.currentSession, isNull);
+      expect(events.last, isNull);
+    },
+  );
+  test(
     'real SDK sends and verifies email code, commits one fresh session without a second network call',
     () async {
       final h = Harness();

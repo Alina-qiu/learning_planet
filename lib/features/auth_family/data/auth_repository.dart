@@ -57,7 +57,14 @@ class SupabaseAuthRepository implements AuthRepository {
     sink.add(currentSession);
     final sdk = _client.auth.onAuthStateChange.listen(
       (state) => sink.add(_mapSession(state.session)),
-      onError: sink.addError,
+      onError: (Object error, StackTrace stack) {
+        // GoTrue keeps the restored session on a transient refresh failure and
+        // emits signedOut if the server later rejects its refresh token.
+        if (error is AuthRetryableFetchException && currentSession != null) {
+          return;
+        }
+        sink.addError(error, stack);
+      },
     );
     // The SDK removes its in-memory session before deleting PKCE storage. If
     // that redundant delete fails, it may not emit signedOut; our preflight

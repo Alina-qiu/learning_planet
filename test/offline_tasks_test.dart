@@ -153,6 +153,23 @@ class FakeTaskRemote implements TaskSyncRemote {
   }
 }
 
+class _HeldSnapshotReply extends FakeTaskRemote {
+  _HeldSnapshotReply(super.now);
+  final captured = Completer<void>();
+  final deliver = Completer<void>();
+  int snapshots = 0;
+
+  @override
+  Future<Map<String, dynamic>> snapshot(String childId) async {
+    final response = await super.snapshot(childId);
+    if (++snapshots == 1) {
+      captured.complete();
+      await deliver.future;
+    }
+    return response;
+  }
+}
+
 void main() {
   late OfflineStore store;
   late OfflineTaskRepository repository;
@@ -739,6 +756,65 @@ void main() {
     await done.timeout(const Duration(seconds: 5));
     expect(remote.wallets['child']!['coin_balance'], 110);
   });
+
+  test(
+    'resuming across midnight fetches a new task and wallet snapshot after an old in-flight response',
+    () async {
+      await repository.dispose();
+      final delayed = _HeldSnapshotReply(() => now)..seed('child');
+      remote = delayed;
+      repository = make()..setForeground(false);
+      expect(
+        (await repository.loadTasks('child')).single.status,
+        TaskStatus.ready,
+      );
+      repository.setForeground(true);
+      await delayed.captured.future;
+      final waitingWallet = repository
+          .synchronize('child')
+          .then((_) => store.read('user-a', 'tasks:child'));
+      repository.setForeground(false);
+
+      // The other device completes yesterday's task. The new family day also has
+      // a review task. The first response already contains the previous state.
+      now = now.add(const Duration(hours: 9));
+      remote.tasks['task-child']!['status'] = 'completed';
+      remote.wallets['child']!['coin_balance'] = 110;
+      remote.tasks['today-review'] = {
+        ...remote.tasks['task-child']!,
+        'id': 'today-review',
+        'source_type': 'automatic_wrong_review',
+        'status': 'ready',
+        'due_date': '2026-09-17',
+      };
+      var syncedSnapshots = 0;
+      final refreshed = repository.changes
+          .where((state) => state.phase == TaskSyncPhase.synced)
+          .asyncMap((_) {
+            syncedSnapshots++;
+            return store.read('user-a', 'tasks:child');
+          })
+          .firstWhere((row) => row?['wallet']['coin_balance'] == 110)
+          .timeout(const Duration(seconds: 3));
+      repository.setForeground(true);
+      delayed.deliver.complete();
+
+      // Polling is disabled. The foreground transition itself must refetch.
+      await refreshed;
+      expect((await waitingWallet)?['wallet']['coin_balance'], 110);
+      expect(delayed.snapshots, 2);
+      expect(syncedSnapshots, 1);
+      final tasks = await repository.loadTasks('child');
+      expect(
+        tasks.singleWhere((item) => item.id == 'task-child').status,
+        TaskStatus.completed,
+      );
+      expect(tasks.where((item) => item.id == 'today-review'), hasLength(1));
+      expect((await repository.loadWallet('child')).coins, 110);
+      expect(await repository.today('child'), DateTime(2026, 9, 17));
+      expect(remote.requests, isEmpty);
+    },
+  );
 
   test(
     'cold start retries an unacknowledged completion after a device clock correction',

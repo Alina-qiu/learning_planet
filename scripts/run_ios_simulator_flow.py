@@ -4,12 +4,14 @@ The simulator and prebuilt integration app must already exist. Read retained
 system logs for the PID returned by launch, including an early VM announcement.
 This changes test transport only, not the app, renderer or test assertions.
 """
+import argparse
 import os
 from pathlib import Path
 import plistlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -57,16 +59,23 @@ def wait_for_service(device, pid, report, timeout=120):
     raise TimeoutError("Dart VM service was not announced within 120 seconds")
 
 
-def main():
+DEFAULT_DRIVER = "test_driver/task_flow_driver.dart"
+CROSS_DEVICE_DRIVER = "test_driver/cross_device_sync_driver.dart"
+
+
+def main(driver=DEFAULT_DRIVER, private_report=None):
     if sys.platform != "darwin":
         raise RuntimeError("This runner requires macOS and an iOS simulator")
+    if driver == CROSS_DEVICE_DRIVER and private_report is None:
+        with tempfile.TemporaryDirectory(prefix="cross-device-ios-") as directory:
+            return main(driver, Path(directory))
     device = os.environ["SIMULATOR_ID"]
     if not re.fullmatch(r"[0-9A-Fa-f-]{36}", device):
         raise ValueError("Expected a simulator UDID")
     app = Path("build/ios/iphonesimulator/Runner.app")
     with (app / "Info.plist").open("rb") as source:
         bundle = plistlib.load(source)["CFBundleIdentifier"]
-    report = Path("build/ios-simulator")
+    report = private_report or Path("build/ios-simulator")
     report.mkdir(parents=True, exist_ok=True)
     print("Installing the prebuilt integration app", flush=True)
     subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=180)
@@ -87,31 +96,45 @@ def main():
             # and an unscoped system-log subscription for an existing app.
             dart = Path(os.environ["FLUTTER_ROOT"]) / "bin/cache/dart-sdk/bin/dart"
             result = subprocess.run(
-                [str(dart), "test_driver/task_flow_driver.dart"],
+                [str(dart), driver],
                 env={**os.environ, "VM_SERVICE_URL": url},
-                stdout=log, stderr=subprocess.STDOUT, timeout=480,
+                stdout=log, stderr=subprocess.STDOUT, timeout=1200 if private_report else 480,
             )
+        if private_report and result.returncode:
+            # Share the failed assertion stage with the coordinator. Raw device
+            # logs can include a VM token, and a login screenshot can show an OTP.
+            output = (report / "task-flow.log").read_text(encoding="utf-8", errors="replace")
+            match = re.search(r"Timed out waiting for ([a-zA-Z /-]{1,60})(?:\r?\n|$)", output)
+            if match:
+                print("Timed out waiting for " + match.group(1), flush=True)
         return result.returncode
     finally:
-        # Keep the app alive until workflow cleanup, preserving its failed UI.
-        try:
-            with (report / "app-screenshot.log").open("wb") as log:
-                subprocess.run(
-                    ["xcrun", "simctl", "io", device, "screenshot",
-                     str(report / "app-final.png")],
-                    stdout=log, stderr=subprocess.STDOUT, timeout=30,
-                )
-        except (subprocess.TimeoutExpired, OSError) as error:
-            # This optional post-test image must not replace the driver's exit
-            # code (or its exception). Required in-test screenshots still fail
-            # through the Dart driver when they cannot be captured.
-            print(f"Optional final screenshot unavailable: {type(error).__name__}", flush=True)
-        finally:
-            for name in ("app-launch.log", "vm-service.log", "task-flow.log"):
-                path = report / name
-                if path.exists():
-                    print(f"\n{name}:\n{path.read_text(encoding='utf-8', errors='replace')}", flush=True)
+        if not private_report:
+            collect_diagnostics(device, report)
+
+
+def collect_diagnostics(device, report):
+    # Keep the app alive until workflow cleanup, preserving its failed UI.
+    try:
+        with (report / "app-screenshot.log").open("wb") as log:
+            subprocess.run(
+                ["xcrun", "simctl", "io", device, "screenshot",
+                 str(report / "app-final.png")],
+                stdout=log, stderr=subprocess.STDOUT, timeout=30,
+            )
+    except (subprocess.TimeoutExpired, OSError) as error:
+        # This optional post-test image must not replace the driver's exit
+        # code (or its exception). Required in-test screenshots still fail
+        # through the Dart driver when they cannot be captured.
+        print(f"Optional final screenshot unavailable: {type(error).__name__}", flush=True)
+    finally:
+        for name in ("app-launch.log", "vm-service.log", "task-flow.log"):
+            path = report / name
+            if path.exists():
+                print(f"\n{name}:\n{path.read_text(encoding='utf-8', errors='replace')}", flush=True)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--driver", choices=[DEFAULT_DRIVER, CROSS_DEVICE_DRIVER], default=DEFAULT_DRIVER)
+    sys.exit(main(parser.parse_args().driver))
