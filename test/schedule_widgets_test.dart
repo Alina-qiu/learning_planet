@@ -12,6 +12,67 @@ import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'widget_test.dart' show FakeTaskRepository;
 
 void main() {
+  testWidgets('编辑未来模板可选择完整周期，也可将开始日改回', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScheduleEditor(
+          today: DateTime(2026, 1, 1),
+          initial: const {
+            'title': '阅读',
+            'starts_on': '2026-12-15',
+            'ends_on': '2027-12-16',
+          },
+        ),
+      ),
+    );
+    await tester.tap(find.text('结束：2027-12-16'));
+    await tester.pumpAndSettle();
+    final endPicker = tester.widget<DatePickerDialog>(
+      find.byType(DatePickerDialog),
+    );
+    expect(endPicker.firstDate, DateTime(2026, 12, 15));
+    expect(endPicker.lastDate, DateTime(2027, 12, 16));
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    Future<DatePickerDialog> openStart() async {
+      await tester.tap(find.textContaining('开始：'));
+      await tester.pumpAndSettle();
+      return tester.widget<DatePickerDialog>(find.byType(DatePickerDialog));
+    }
+
+    await openStart();
+    await tester.tap(find.text('18'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('开始：2026-12-18'), findsOneWidget);
+    await openStart();
+    await tester.tap(find.text('14'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('开始：2026-12-14'), findsOneWidget);
+    expect(find.text('结束：2027-12-15'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('计划范围与自定义日期使用日历日，与输入时刻无关', () {
+    ScheduleConfig config(DateTime end) => ScheduleConfig(
+      title: '自选阅读',
+      startsOn: DateTime.utc(2026, 1, 1, 23),
+      endsOn: end,
+      recurrence: ScheduleRecurrence.custom,
+      startTime: '16:00',
+      dueTime: '17:00',
+      customDates: [DateTime.utc(2026, 1, 1)],
+    );
+    expect(config(DateTime.utc(2026, 1, 1)).toJson()['ends_on'], '2026-01-01');
+    expect(config(DateTime.utc(2027, 1, 2)).toJson()['ends_on'], '2027-01-02');
+    expect(
+      () => config(DateTime.utc(2027, 1, 3)).toJson(),
+      throwsFormatException,
+    );
+  });
+
   testWidgets('伪造客户端模式开关不能显示创建或补签入口', (tester) async {
     await tester.pumpWidget(
       ProviderScope(

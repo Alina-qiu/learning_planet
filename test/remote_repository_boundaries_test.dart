@@ -306,9 +306,7 @@ void main() {
         'pdf_path': 'family/child/job.pdf',
         'byte_size': bytes.length,
         'sha256': sha256.convert(bytes).toString(),
-        'expires_at': DateTime.now()
-            .add(Duration(days: expired ? -1 : 1))
-            .toIso8601String(),
+        'is_expired': expired,
       };
       backend.handle = (r) => r.url.path.contains('/storage/')
           ? http.Response.bytes(

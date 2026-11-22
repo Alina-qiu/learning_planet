@@ -3,16 +3,20 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:learning_planet/features/auth_family/application/family_providers.dart';
 import 'package:learning_planet/features/wrong_questions/data/review_repository.dart';
 import 'package:learning_planet/features/worksheets/data/worksheet_repository.dart';
 import 'package:learning_planet/features/worksheets/presentation/worksheet_screen.dart';
 import 'package:learning_planet/features/worksheets/presentation/worksheet_pdf_screen.dart';
+import 'support/mock_supabase.dart';
 
 class FakeWorksheet implements WorksheetRepository {
   final bytes = Uint8List.fromList('%PDF-test-byte-identity'.codeUnits);
   final creates = <Map<String, dynamic>>[];
   bool fail = false, ready = false, changed = false;
+  bool expired = false, historyOffline = false;
+  String expiresAt = '2099-01-01T00:00:00Z';
   String? generated;
   final deletes = <String>[];
   @override
@@ -40,18 +44,22 @@ class FakeWorksheet implements WorksheetRepository {
   @override
   Future<void> generate(String id) async => generated = id;
   @override
-  Future<List<Map<String, dynamic>>> history(String child) async => ready
-      ? [
-          {
-            'id': 'job',
-            'config': {'title': '已生成卷'},
-            'status': 'ready',
-            'progress': 100,
-            'pages': 2,
-            'expires_at': '2099-01-01T00:00:00Z',
-          },
-        ]
-      : [];
+  Future<List<Map<String, dynamic>>> history(String child) async {
+    if (historyOffline) throw StateError('未连接网络');
+    return [
+      if (ready)
+        {
+          'id': 'job',
+          'config': {'title': '已生成卷'},
+          'status': 'ready',
+          'progress': 100,
+          'pages': 2,
+          'expires_at': expiresAt,
+          'is_expired': expired,
+        },
+    ];
+  }
+
   @override
   Future<Uint8List> download(String id) async =>
       changed ? Uint8List.fromList('%PDF-changed'.codeUnits) : bytes;
@@ -133,6 +141,33 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'history actions follow server retention even with a skewed device clock',
+    (tester) async {
+      final repo = FakeWorksheet()
+        ..ready = true
+        ..expiresAt = '2000-01-01T00:00:00Z';
+      await mount(tester, repo);
+      await tester.tap(find.text('生成历史'));
+      await tester.pumpAndSettle();
+      expect(find.text('预览 / 导出'), findsOneWidget);
+
+      repo
+        ..expired = true
+        ..expiresAt = '2099-01-01T00:00:00Z';
+      await tester.tap(find.byTooltip('刷新生成历史'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('已到期'), findsOneWidget);
+      expect(find.text('预览 / 导出'), findsNothing);
+
+      repo.historyOffline = true;
+      await tester.tap(find.byTooltip('刷新生成历史'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('历史读取失败'), findsOneWidget);
+      expect(find.textContaining('已到期'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'PDF deletion requires confirmation and retains UUID after unknown acknowledgement',
     (tester) async {
@@ -245,6 +280,59 @@ void main() {
     expect(output.exports, isEmpty);
     expect(find.textContaining('文件已改变'), findsOneWidget);
   });
+  test(
+    'download rechecks server retention before reading file bytes',
+    () async {
+      final backend = MockSupabase();
+      addTearDown(backend.close);
+      await backend.signIn();
+      final repository = SupabaseWorksheetRepository(backend.client);
+      final bytes = Uint8List.fromList('%PDF-retention-test'.codeUnits);
+      bool? expired = false;
+      var storageReads = 0;
+      backend.handle = (request) {
+        if (request.url.path == '/rest/v1/worksheet_job_history') {
+          expect(request.url.queryParameters['id'], 'eq.job');
+          expect(request.url.queryParameters['select'], contains('is_expired'));
+          return MockSupabase.json(request, {
+            'status': 'ready',
+            'is_expired': expired,
+            'pdf_path': 'file.pdf',
+            'byte_size': bytes.length,
+            'sha256': sha256.convert(bytes).toString(),
+          });
+        }
+        expect(request.url.path, endsWith('/worksheets/file.pdf'));
+        storageReads++;
+        return http.Response.bytes(bytes, 200, request: request);
+      };
+
+      expect(await repository.download('job'), bytes);
+      expired = true;
+      await expectLater(
+        repository.download('job'),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('已超过'),
+          ),
+        ),
+      );
+      expired = null;
+      await expectLater(
+        repository.download('job'),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('无法确认'),
+          ),
+        ),
+      );
+      expect(storageReads, 1);
+    },
+  );
   test(
     'download integrity rejects modified bytes incorrect size and non PDF data',
     () {

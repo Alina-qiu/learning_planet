@@ -390,16 +390,17 @@ class _WorksheetScreenState extends ConsumerState<WorksheetScreen> {
   Widget _historyJob(Map<String, dynamic> job) {
     final id = job['id'] as String;
     final status = job['status'];
-    final available =
-        ['ready', 'queued', 'running', 'failed'].contains(status) &&
-        DateTime.parse(job['expires_at'] as String).isAfter(DateTime.now());
+    final expired = job['is_expired'];
+    final available = expired == false;
     final label = switch (status) {
-      'queued' => '等待生成',
-      'running' => '正在生成',
-      'ready' => available ? '可预览' : '已到期',
-      'failed' => '生成失败',
       'deleting' => '正在删除',
       'deleted' => '已删除',
+      _ when expired == true => '已到期',
+      _ when !available => '保留状态待确认',
+      'queued' => '等待生成',
+      'running' => '正在生成',
+      'ready' => '可预览',
+      'failed' => '生成失败',
       _ => '状态待确认',
     };
     return Card(
@@ -418,7 +419,7 @@ class _WorksheetScreenState extends ConsumerState<WorksheetScreen> {
               Text(
                 '保留至 ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.parse(job['expires_at'] as String).toLocal())}（本机时间）',
               ),
-            if (status == 'failed') const Text('生成未完成，可重试同一份组卷。'),
+            if (status == 'failed' && available) const Text('生成未完成，可重试同一份组卷。'),
             Wrap(
               spacing: 12,
               runSpacing: 4,
@@ -518,11 +519,13 @@ class _WorksheetScreenState extends ConsumerState<WorksheetScreen> {
                               Center(child: Text('历史读取失败：$error')),
                           data: (jobs) {
                             _activeJobs = jobs.any(
-                              (job) => [
-                                'queued',
-                                'running',
-                                'deleting',
-                              ].contains(job['status']),
+                              (job) =>
+                                  job['status'] == 'deleting' ||
+                                  (job['is_expired'] == false &&
+                                      [
+                                        'queued',
+                                        'running',
+                                      ].contains(job['status'])),
                             );
                             return ListView(
                               padding: const EdgeInsets.all(16),

@@ -1,12 +1,20 @@
 # 当前需求覆盖与验收状态
 
-核对日期：2026-11-13。本文汇总当前状态；[PROGRESS.md](PROGRESS.md)保留各轮历史，旧条目中的待办可能已在后续轮次处理，不能直接累计为当前缺口。
+核对日期为 2026-11-23。本文汇总当前交付范围及验收进度，[PROGRESS.md](PROGRESS.md)保留各轮历史。
 
 **目前可交付Android本地调试包，尚不能认定整个App开发和验收完成。** 核心业务已有实现及本机测试，但云端、iOS、华为鸿蒙4.2/iPhone、完整性能和连续家庭使用尚未验收；另有下文列出的已知实现缺口与待决策范围。没有以测试数量推算功能完成百分比。
 
 需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，SHA256 `4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`；本轮重新核对文件摘要，前一轮已重提正文并确认与读取内容一致。
 
-最近已完成的应用代码验证：提交`1b82843`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/43183293457)全部通过，含823项Flutter、403项数据库、24项Swift通知策略、30项诊断日志检查、iOS Debug/Release及千任务原生模拟器流程。后续提交状态以[草稿PR](https://github.com/Alina-qiu/learning_planet/pull/1)对应的CI为准；模拟器、原生策略检查不能替代真实推送、MetricKit回调或手机验收。
+本轮修复了三处用户流程。
+
+- 家长手工录入或编辑错题时，保存失败可在原页重试。数据库用同一次保存的请求标识识别重复提交，服务器已落库而手机未收到回执时也只保存一次。服务端提示 PIN 授权已过期时，编辑页会遮住草稿，家长可当场重新验证并继续编辑。
+- 练习卷历史、预览和下载使用数据库时间判断 30 天保留期。手机日期提前或落后均按服务器结果处理。读取失败时可重试。
+- 周期任务按家庭日历日校验日期跨度，支持从开始日选择完整周期、将开始日改回，以及输入中文逗号分隔的自定义日期。
+
+新版客户端需要迁移 069 和 070。上一个提交 `2da781f` 的 10 项 CI 均已通过，含 823 项 Flutter、403 项数据库、iOS 27.2 SDK 未签名编译及三个模拟器上的离线任务流程。当前分支的构建结果见草稿 PR。[上版 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/43369796685) · [草稿 PR](https://github.com/Alina-qiu/learning_planet/pull/1)
+
+本机完整 Flutter 测试 831 项、数据库检查 404 项和静态分析均通过，核心行覆盖率 90.79%。PostgREST 实际处理 96 次 HTTP 请求，验证已提交的保存请求在丢失回执后可安全重试。14 项历史数据升级检查通过。PDF 联调通过 3 项客户端测试与 4 组服务测试，包括读取原文件、阻止过期访问以及清理对象。当前可用的本机安装包与运行条件见[Android 构建记录](ANDROID_BUILD.md)。
 
 本轮修复[奖励页大字号和窄窗口适配](ECONOMY_ACCESSIBILITY.md)：摘要与待确认请求随页面滚动，避开系统安全区域；新增5项，完整823项Flutter测试通过。用户已确认暂时没有可连接的测试手机，真机验收继续保留，未用窗口模拟结果替代。
 
@@ -26,7 +34,7 @@
 |---|---|---|
 | 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS Debug/Release](IOS_BUILD.md)已通过CI未签名编译及资源检查，尚未签名或真机运行 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
-| 后端 | Supabase PostgreSQL/Auth/Storage，70份业务迁移至068 | 本机PG15.19、GoTrue、PostgREST、Storage、MinIO已有联调；未部署用户云端项目 |
+| 后端 | Supabase PostgreSQL/Auth/Storage，72 份业务迁移至 070 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
@@ -35,7 +43,7 @@
 
 依赖声明见[pubspec.yaml](../pubspec.yaml)、[package.json](../package.json)，架构细节见[ARCHITECTURE.md](ARCHITECTURE.md)。本机工具安装在`D:\learning-planet-tools`，未修改系统PATH。
 
-普通`app-debug.apk`未连接后端，只用于启动验证。本机`app-local-debug.apk`连接电脑回环服务，需要USB端口转发；临时后端每次启动为空库，不能当作家庭日常持久后端。当前摘要、签名和资源检查见[ANDROID_BUILD.md](ANDROID_BUILD.md)，运行方法见[LOCAL_DEBUG.md](LOCAL_DEBUG.md)。本轮继续修复奖励页适配；当前APK摘要和构建状态以Android构建文档为准，没有重新安装设备。
+普通 `app-debug.apk` 可验证无后端配置的启动页。本机 `app-local-debug.apk` 可登录电脑上的临时测试服务并操作家庭业务，需要 USB 端口转发。该服务每次启动使用空的测试数据库。安装包和运行步骤见[构建记录](ANDROID_BUILD.md)及[本机联调](LOCAL_DEBUG.md)。
 
 ## 已确认的产品规则
 
@@ -88,7 +96,7 @@
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
 | 7.1–7.3 AI契约/审核/隐私 | [AI分析](AI_ANALYSIS.md)、[相似题](SIMILAR_QUESTIONS.md)、[上传提示](WORKSHEET_ACCESSIBILITY.md) | 实际供应商配置、预算和保留策略、教材质量评测；端侧自动模糊未实现，PRD将其列为可选 |
-| 8 数据模型/状态机 | 70份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
+| 8 数据模型/状态机 | 72 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
 | 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实HMS/APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
 | 12 / 15 迭代与原型 | MVP及多项V1.1/V1.2能力已有实现；当前验收基于真实App与服务测试 | V2学习伙伴、家庭协作、成熟动画按PRD验证后决定，不用加入新模块替代当前验收 |

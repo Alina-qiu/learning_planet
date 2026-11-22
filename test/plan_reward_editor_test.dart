@@ -100,6 +100,23 @@ Future<void> stage(
 }
 
 void main() {
+  testWidgets('自定义计划支持中文和英文输入法的逗号', (tester) async {
+    final h = _Harness();
+    await h.open(tester);
+    await recurrence(tester, '自定义日期');
+    await enter(
+      tester,
+      '日期（YYYY-MM-DD，逗号分隔）',
+      '2026-11-07， 2026-11-05,2026-11-06',
+    );
+    await tap(tester, '保存配置');
+    expect(h.saved!.toJson()['rule']['dates'], [
+      '2026-11-05',
+      '2026-11-06',
+      '2026-11-07',
+    ]);
+  });
+
   testWidgets(
     'structured stage and terminal tiers keep the server reward contract',
     (tester) async {

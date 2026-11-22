@@ -126,7 +126,7 @@ class SupabaseWorksheetRepository implements WorksheetRepository {
     final rows = <Map<String, dynamic>>[];
     for (var offset = 0; ; offset += 500) {
       final page = await client
-          .from('worksheet_jobs')
+          .from('worksheet_job_history')
           .select()
           .eq('child_id', child)
           .order('created_at', ascending: false)
@@ -144,16 +144,15 @@ class SupabaseWorksheetRepository implements WorksheetRepository {
     final owner = client.auth.currentUser?.id;
     if (owner == null) throw StateError('请先登录');
     final row = await client
-        .from('worksheet_jobs')
-        .select('status,pdf_path,byte_size,sha256,expires_at')
+        .from('worksheet_job_history')
+        .select('status,pdf_path,byte_size,sha256,is_expired')
         .eq('id', id)
         .single()
         .timeout(const Duration(seconds: 15));
     if (client.auth.currentUser?.id != owner) throw StateError('登录账号已变化');
-    if (row['status'] != 'ready' ||
-        !DateTime.parse(row['expires_at'] as String).isAfter(DateTime.now())) {
-      throw StateError('PDF 尚未完成、已删除或超过30天保留期');
-    }
+    if (row['is_expired'] == true) throw StateError('PDF 已超过30天保留期');
+    if (row['is_expired'] != false) throw StateError('无法确认 PDF 保留状态，请重试');
+    if (row['status'] != 'ready') throw StateError('PDF 尚未完成或已删除');
     final bytes = await client.storage
         .from('worksheets')
         .download(row['pdf_path'] as String)

@@ -566,6 +566,7 @@ class ScheduleEditor extends StatefulWidget {
 class _ScheduleEditorState extends State<ScheduleEditor> {
   final _form = GlobalKey<FormState>();
   late DateTime _start, _end;
+  late final DateTime _firstStart, _lastStart;
   late ScheduleRecurrence _recurrence;
   late TaskPriority _priority;
   late TaskGrowthCategory _growthCategory;
@@ -586,11 +587,17 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
     );
     final rule = row?['recurrence_rule'] as Map<String, dynamic>? ?? {};
     _start = row?['starts_on'] == null
-        ? widget.today
-        : DateTime.parse(row!['starts_on'] as String);
+        ? DateUtils.dateOnly(widget.today)
+        : parseScheduleDate(row!['starts_on'] as String);
+    final today = DateUtils.dateOnly(widget.today);
+    final horizon = DateUtils.addDaysToDate(today, maxScheduleSpanDays);
+    _firstStart = widget.initial != null && _start.isBefore(today)
+        ? _start
+        : today;
+    _lastStart = _start.isAfter(horizon) ? _start : horizon;
     _end = row?['ends_on'] == null
-        ? _start.add(const Duration(days: 30))
-        : DateTime.parse(row!['ends_on'] as String);
+        ? DateUtils.addDaysToDate(_start, 30)
+        : parseScheduleDate(row!['ends_on'] as String);
     _recurrence = ScheduleRecurrence.values.byName(
       row?['recurrence'] as String? ?? 'daily',
     );
@@ -651,8 +658,11 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
     final date = await showDatePicker(
       context: context,
       initialDate: start ? _start : _end,
-      firstDate: widget.initial == null ? widget.today : _start,
-      lastDate: widget.today.add(const Duration(days: 366)),
+      firstDate: start ? _firstStart : _start,
+      lastDate: start
+          ? _lastStart
+          : DateUtils.addDaysToDate(_start, maxScheduleSpanDays),
+      currentDate: widget.today,
       builder: (_, child) => Listener(
         onPointerDown: (_) => ConfigurationTimeScope.activity(context),
         child: child,
@@ -664,7 +674,9 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
       setState(() {
         if (start) {
           _start = date;
+          final latestEnd = DateUtils.addDaysToDate(date, maxScheduleSpanDays);
           if (_end.isBefore(date)) _end = date;
+          if (_end.isAfter(latestEnd)) _end = latestEnd;
         } else {
           _end = date;
         }
@@ -703,7 +715,7 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
         customDates: _recurrence != ScheduleRecurrence.custom
             ? const []
             : _fields['dates']!.text
-                  .split(',')
+                  .split(RegExp('[,，]'))
                   .where((v) => v.trim().isNotEmpty)
                   .map((v) => parseScheduleDate(v.trim()))
                   .toList(),

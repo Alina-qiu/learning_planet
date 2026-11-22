@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
+import 'package:uuid/uuid.dart';
 import '../../auth_family/application/family_providers.dart';
+import '../../auth_family/presentation/parent_mode_prompt.dart';
 import '../../tasks/application/task_providers.dart';
 import '../data/review_repository.dart';
 import '../data/question_media_repository.dart';
@@ -122,47 +125,87 @@ class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
     }
   }
 
-  Future<void> _edit(bool pinyin, {String? questionId, bool convert = false}) =>
-      _run(() async {
-        if (ref.read(activeParentFamilyProvider) != widget.familyId) {
-          throw StateError('请先在首页验证家长 PIN');
-        }
-        final repository = ref.read(reviewRepositoryProvider);
-        final initial = questionId == null
-            ? null
-            : await repository.editor(questionId);
-        if (!mounted) return;
-        final config = await Navigator.of(context).push<Map<String, dynamic>>(
-          MaterialPageRoute(
-            builder: (_) => Consumer(
-              builder: (context, ref, _) =>
-                  ref.watch(activeParentFamilyProvider) != widget.familyId
-                  ? const Scaffold(
-                      body: Center(child: Text('家长授权已到期，请返回后重新验证')),
-                    )
-                  : ReviewQuestionEditor(
-                      familyId: widget.familyId,
-                      childId: widget.childId,
-                      pinyin: pinyin,
-                      fromQuestion: convert,
-                      initial: convert
-                          ? {
-                              ...initial!,
-                              'final_text': '',
-                              'pronunciation_context': initial['final_text'],
-                              'answers': <String>[],
-                            }
-                          : initial,
-                    ),
-            ),
-          ),
-        );
-        if (config == null || !mounted) return;
-        if (ref.read(activeParentFamilyProvider) != widget.familyId) {
-          throw StateError('家长授权已到期，请重新验证');
-        }
-        await repository.save(widget.childId, config, questionId: questionId);
-      });
+  Future<void> _edit(
+    bool pinyin, {
+    String? questionId,
+    bool convert = false,
+  }) => _run(() async {
+    final familyId = widget.familyId;
+    final childId = widget.childId;
+    if (ref.read(activeParentFamilyProvider) != familyId) {
+      throw StateError('请先在首页验证家长 PIN');
+    }
+    final revision = ref.read(parentAuthorizationRevisionProvider);
+    final requestId = const Uuid().v4();
+    final repository = ref.read(reviewRepositoryProvider);
+    final initial = questionId == null
+        ? null
+        : await repository.editor(questionId);
+    if (!mounted) return;
+    await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => Consumer(
+          builder: (context, ref, _) {
+            if (ref.watch(parentAuthorizationRevisionProvider) != revision) {
+              return const Scaffold(
+                body: Center(child: Text('登录状态已变化，请返回错题本')),
+              );
+            }
+            final authorized =
+                ref.watch(activeParentFamilyProvider) == familyId;
+            return ReviewQuestionEditor(
+              familyId: familyId,
+              childId: childId,
+              pinyin: pinyin,
+              fromQuestion: convert,
+              onReauthorize: authorized
+                  ? null
+                  : () => enterParentMode(context, ref, familyId),
+              onSave: (config) async {
+                if (ref.read(parentAuthorizationRevisionProvider) != revision ||
+                    ref.read(activeParentFamilyProvider) != familyId) {
+                  throw StateError('家长授权已到期，请重新验证');
+                }
+                final authorizedUntil = ref.read(parentAuthorizedUntilProvider);
+                try {
+                  await repository.save(
+                    childId,
+                    config,
+                    questionId: questionId,
+                    requestId: requestId,
+                  );
+                } on PostgrestException catch (error) {
+                  if (error.code == '42501' &&
+                      const {
+                        'Parent authorization required or expired',
+                        'Parent authorization expired',
+                      }.contains(error.message) &&
+                      context.mounted &&
+                      ref.read(parentAuthorizationRevisionProvider) ==
+                          revision &&
+                      ref.read(parentFamilyIdProvider) == familyId &&
+                      ref.read(parentAuthorizedUntilProvider) ==
+                          authorizedUntil) {
+                    ref.read(parentAuthorizedUntilProvider.notifier).state =
+                        null;
+                  }
+                  rethrow;
+                }
+              },
+              initial: convert
+                  ? {
+                      ...initial!,
+                      'final_text': '',
+                      'pronunciation_context': initial['final_text'],
+                      'answers': <String>[],
+                    }
+                  : initial,
+            );
+          },
+        ),
+      ),
+    );
+  });
   Future<void> _practice(String taskId) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(

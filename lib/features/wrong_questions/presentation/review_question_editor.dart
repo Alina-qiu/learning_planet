@@ -15,6 +15,8 @@ class ReviewQuestionEditor extends StatefulWidget {
     this.processedImage,
     this.fromQuestion = false,
     this.onDraftChanged,
+    this.onSave,
+    this.onReauthorize,
     this.familyId,
     this.childId,
     this.collectErrorReasons = true,
@@ -32,6 +34,8 @@ class ReviewQuestionEditor extends StatefulWidget {
   final bool fromImage;
   final bool fromQuestion;
   final ValueChanged<Map<String, dynamic>>? onDraftChanged;
+  final Future<void> Function(Map<String, dynamic> config)? onSave;
+  final VoidCallback? onReauthorize;
   final Uint8List? originalImage, processedImage;
   @override
   State<ReviewQuestionEditor> createState() => _ReviewQuestionEditorState();
@@ -73,6 +77,8 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
   bool _confirmed = false;
   bool _ocrConfirmed = false;
   bool _sandhi = false;
+  bool _saving = false;
+  String? _saveError;
   String? _candidateHint;
   @override
   void initState() {
@@ -280,7 +286,8 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
     }
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving || widget.onReauthorize != null) return;
     if (!_form.currentState!.validate()) return;
     if (_prompt.text.trim().isEmpty ||
         _prompt.text.length > 2000 ||
@@ -329,7 +336,7 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
       ).showSnackBar(const SnackBar(content: Text('标准答案须为1至5行')));
       return;
     }
-    Navigator.pop(context, <String, dynamic>{
+    final config = <String, dynamic>{
       'kind': widget.pinyin ? 'pinyin' : 'question',
       'subject': _subject,
       'prompt': prompt,
@@ -349,11 +356,52 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
       },
       if (widget.initial?['content_version'] != null)
         'expected_version': widget.initial!['content_version'],
+    };
+    final save = widget.onSave;
+    if (save == null) {
+      Navigator.pop(context, config);
+      return;
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _saving = true;
+      _saveError = null;
     });
+    try {
+      await save(config);
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.pop(context, config);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _saveError = '保存失败：$error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final unlock = widget.onReauthorize;
+    return PopScope(
+      canPop: !_saving,
+      child: AbsorbPointer(
+        absorbing: _saving,
+        child: unlock == null
+            ? _editor()
+            : Scaffold(
+                appBar: AppBar(title: const Text('家长验证')),
+                body: Center(
+                  child: FilledButton(
+                    onPressed: _saving ? null : unlock,
+                    child: const Text('验证家长 PIN 后继续编辑'),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _editor() => Scaffold(
     appBar: AppBar(
       title: Text(
         widget.childSubmission
@@ -585,9 +633,16 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
                     : '我已逐项核对原图、所有题目文字（含低置信/未知置信内容）及标准答案',
               ),
             ),
+          if (_saveError != null) Text(_saveError!),
           FilledButton(
-            onPressed: _save,
-            child: Text(widget.childSubmission ? '保存给家长确认' : '保存'),
+            onPressed: _saving ? null : _save,
+            child: Text(
+              _saving
+                  ? '正在保存…'
+                  : widget.childSubmission
+                  ? '保存给家长确认'
+                  : '保存',
+            ),
           ),
         ],
       ),

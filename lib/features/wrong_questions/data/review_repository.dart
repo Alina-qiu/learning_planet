@@ -15,6 +15,7 @@ abstract interface class ReviewRepository {
     String childId,
     Map<String, dynamic> config, {
     String? questionId,
+    String? requestId,
   });
   Future<void> archive(String questionId, bool archived);
   Future<Map<String, dynamic>> task(String taskId);
@@ -114,14 +115,20 @@ class SupabaseReviewRepository
     String childId,
     Map<String, dynamic> config, {
     String? questionId,
-  }) => client.rpc<void>(
-    'save_review_question',
-    params: {
-      'target_child_id': childId,
-      'config': config,
-      'target_question_id': questionId,
-    },
-  );
+    String? requestId,
+  }) => client
+      .rpc<void>(
+        requestId == null
+            ? 'save_review_question'
+            : 'save_manual_review_question',
+        params: {
+          'target_child_id': childId,
+          'config': config,
+          'target_question_id': questionId,
+          if (requestId != null) 'request_id': requestId,
+        },
+      )
+      .timeout(const Duration(seconds: 15));
   @override
   Future<void> archive(String questionId, bool archived) => client.rpc<void>(
     'archive_review_question',
@@ -262,7 +269,9 @@ class CachedReviewRepository
     String childId,
     Map<String, dynamic> config, {
     String? questionId,
-  }) => live.save(childId, config, questionId: questionId);
+    String? requestId,
+  }) =>
+      live.save(childId, config, questionId: questionId, requestId: requestId);
   @override
   Future<void> archive(String questionId, bool archived) =>
       live.archive(questionId, archived);

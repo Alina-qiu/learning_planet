@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -16,6 +17,7 @@ import 'package:learning_planet/features/wrong_questions/domain/review_scheduler
 import 'package:learning_planet/features/wrong_questions/presentation/review_hub_screen.dart';
 import 'package:learning_planet/features/wrong_questions/presentation/review_question_editor.dart';
 import 'package:learning_planet/features/wrong_questions/presentation/review_session_screen.dart';
+import 'widget_test.dart' show FakeFamilyRepository;
 
 class FakeReviewRepository implements ReviewRepository {
   String status = 'ready';
@@ -24,6 +26,9 @@ class FakeReviewRepository implements ReviewRepository {
   String? submitted;
   ReviewConfidence? submittedConfidence;
   int transitionCalls = 0, completionCalls = 0;
+  final manualSaves = <Map<String, dynamic>>[];
+  final saveRequests = <String?>[];
+  Completer<void>? pendingSave;
   void check() {
     if (forbidden) {
       throw const PostgrestException(message: 'Denied', code: '42501');
@@ -67,8 +72,12 @@ class FakeReviewRepository implements ReviewRepository {
     String childId,
     Map<String, dynamic> config, {
     String? questionId,
+    String? requestId,
   }) async {
+    manualSaves.add(config);
+    saveRequests.add(requestId);
     check();
+    await pendingSave?.future;
   }
 
   @override
@@ -332,6 +341,221 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+  testWidgets(
+    'manual editor retains input on failure and retries just once with the same request',
+    (tester) async {
+      tester.view.physicalSize = const Size(850, 1700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final live = FakeReviewRepository();
+      await mount(
+        tester,
+        live,
+        const ReviewHubScreen(childId: 'child', familyId: 'family'),
+        authorized: true,
+      );
+      await tester.tap(find.text('手工录入错题'));
+      await tester.pumpAndSettle();
+      final prompt = find.widgetWithText(TextFormField, '题目');
+      final answers = find.widgetWithText(TextFormField, '标准答案（一行一个可接受答案）');
+      final save = find.text('保存');
+      await tester.enterText(prompt, '6 × 7');
+      await tester.enterText(answers, '42');
+      live.online = false;
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('保存失败'), findsOneWidget);
+      expect(find.text('6 × 7'), findsOneWidget);
+      expect(find.text('42'), findsOneWidget);
+      expect(live.saveRequests.single, isNotNull);
+      await tester.enterText(prompt, '6 × 7 = ?');
+      live.online = true;
+      live.pendingSave = Completer<void>();
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.tap(save);
+      await tester.pump();
+      expect(find.text('正在保存…'), findsOneWidget);
+      expect(live.saveRequests, [
+        live.saveRequests.first,
+        live.saveRequests.first,
+      ]);
+      expect(live.manualSaves.last['prompt'], '6 × 7 = ?');
+      expect(live.manualSaves.last['answers'], ['42']);
+      live.pendingSave!.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(ReviewQuestionEditor), findsNothing);
+      expect(find.text('手工录入错题'), findsOneWidget);
+    },
+  );
+
+  Future<ProviderContainer> openParentEditor(
+    WidgetTester tester,
+    FakeReviewRepository live,
+  ) async {
+    tester.view.physicalSize = const Size(850, 1700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          reviewRepositoryProvider.overrideWithValue(live),
+          taskRepositoryProvider.overrideWithValue(
+            const UnconfiguredTaskRepository(),
+          ),
+          familyRepositoryProvider.overrideWithValue(FakeFamilyRepository()),
+          authorizationClockProvider.overrideWith(
+            (ref) => Stream.value(DateTime.now()),
+          ),
+        ],
+        child: const MaterialApp(
+          home: ReviewHubScreen(childId: 'child', familyId: 'family'),
+        ),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReviewHubScreen)),
+    );
+    container.read(parentModeProvider.notifier).state = true;
+    container.read(parentFamilyIdProvider.notifier).state = 'family';
+    container.read(parentAuthorizedUntilProvider.notifier).state =
+        DateTime.now().add(const Duration(minutes: 10));
+    await tester.pumpAndSettle();
+    expect(container.read(activeParentFamilyProvider), 'family');
+    await tester.scrollUntilVisible(
+      find.text('手工录入错题'),
+      150,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('手工录入错题'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, '题目'),
+      'private draft',
+    );
+    return container;
+  }
+
+  testWidgets(
+    'manual editor hides its draft until PIN renewal and clears it on account change',
+    (tester) async {
+      final live = FakeReviewRepository();
+      final container = await openParentEditor(tester, live);
+      container.read(parentAuthorizedUntilProvider.notifier).state = DateTime(
+        2000,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('private draft'), findsNothing);
+      expect(find.text('保存'), findsNothing);
+      expect(live.manualSaves, isEmpty);
+      await tester.tap(find.text('验证家长 PIN 后继续编辑'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '1234');
+      await tester.tap(find.text('验证'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text('private draft'), findsOneWidget);
+      final answerField = find.widgetWithText(TextFormField, '标准答案（一行一个可接受答案）');
+      await tester.ensureVisible(answerField);
+      await tester.enterText(answerField, 'private answer');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.widgetWithText(FilledButton, '保存'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      live.pendingSave = Completer<void>();
+      await tester.tap(find.text('保存'));
+      await tester.pump();
+      expect(live.manualSaves, hasLength(1));
+      container.read(parentAuthorizationRevisionProvider.notifier).state++;
+      await tester.pumpAndSettle();
+      live.pendingSave!.completeError(
+        const PostgrestException(
+          code: '42501',
+          message: 'Parent authorization expired',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ReviewQuestionEditor), findsNothing);
+      expect(find.text('private draft'), findsNothing);
+      expect(find.text('登录状态已变化，请返回错题本'), findsOneWidget);
+      expect(container.read(parentAuthorizedUntilProvider), isNotNull);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'server PIN revocation locks the matching editor grant and preserves the draft for renewal',
+    (tester) async {
+      final live = FakeReviewRepository();
+      final container = await openParentEditor(tester, live);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, '标准答案（一行一个可接受答案）'),
+        'private answer',
+      );
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      Future<void> submit() async {
+        live.pendingSave = Completer<void>();
+        await tester.ensureVisible(find.widgetWithText(FilledButton, '保存'));
+        await tester.tap(find.text('保存'));
+        await tester.pump();
+      }
+
+      Future<void> reject(String message) async {
+        live.pendingSave!.completeError(
+          PostgrestException(code: '42501', message: message),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      const expired = 'Parent authorization expired';
+      await submit();
+      await reject('Child access required');
+      expect(container.read(activeParentFamilyProvider), 'family');
+      await submit();
+      container.read(parentFamilyIdProvider.notifier).state = 'another family';
+      await tester.pump();
+      await reject(expired);
+      expect(container.read(activeParentFamilyProvider), 'another family');
+      container.read(parentFamilyIdProvider.notifier).state = 'family';
+      await tester.pumpAndSettle();
+      await submit();
+      final renewedElsewhere = DateTime.now().add(const Duration(minutes: 20));
+      container.read(parentAuthorizedUntilProvider.notifier).state =
+          renewedElsewhere;
+      await reject(expired);
+      expect(container.read(parentAuthorizedUntilProvider), renewedElsewhere);
+      for (final reason in [
+        'Parent authorization required or expired',
+        expired,
+      ]) {
+        await submit();
+        await reject(reason);
+        expect(container.read(parentAuthorizedUntilProvider), isNull);
+        expect(find.text('private answer'), findsNothing);
+        expect(find.text('private draft'), findsNothing);
+        await tester.tap(find.text('验证家长 PIN 后继续编辑'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), '1234');
+        await tester.tap(find.text('验证'));
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(find.text('private draft'), findsOneWidget);
+        expect(find.text('private answer'), findsOneWidget);
+      }
+      expect(live.saveRequests.toSet(), hasLength(1));
+    },
+  );
+
   testWidgets(
     'pinyin editor requires parent pronunciation confirmation and retains tone marks',
     (tester) async {

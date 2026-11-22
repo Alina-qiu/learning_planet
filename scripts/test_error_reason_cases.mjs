@@ -13,6 +13,29 @@ export async function errorReasonCases({client,scalar,login,denied,check,otherUi
   const save=(value=config,id=null)=>scalar('select public.save_review_question($1,$2,$3)',[child,value,id]);
   const read=id=>scalar('select public.review_question_editor($1)',[id]);
   let question;
+  await check('manual editor retries create and edit once, keep failed requests correctable and require the current PIN', async () => {
+    const request = randomUUID();
+    const manual = (payload, key = request, id = null) =>
+      scalar('select public.save_manual_review_question($1,$2,$3,$4)', [child, payload, key, id]);
+    await assert.rejects(manual({...config, answers: []}));
+    const saved = await manual(config);
+    const initial = await read(saved);
+    assert.equal(await manual(config), saved);
+    assert.equal((await read(saved)).content_version, initial.content_version);
+    await assert.rejects(manual({...config, prompt: 'changed after acknowledgement loss'}), {code: '22023'});
+    const editRequest = randomUUID();
+    const edit = {...config, prompt: 'new version', expected_version: initial.content_version};
+    await manual(edit, editRequest, saved);
+    await manual(edit, editRequest, saved);
+    assert.equal((await read(saved)).content_version, initial.content_version + 1);
+    assert.equal(await scalar('select count(*)::int from public.wrong_questions where child_id=$1', [child]), 1);
+    await denied('select * from public.manual_review_save_receipts');
+    await login(user, 'no-pin');
+    await assert.rejects(manual(config), {code: '42501'});
+    await login(otherUid);
+    await assert.rejects(manual(config), {code: '42501'});
+    await auth();
+  });
   await check('six reviewed error labels remain separate from legacy notes and do not issue rewards',async()=>{
     question=await save();assert.deepEqual((await read(question)).error_reason_tags,[]);
     const row=await read(question);

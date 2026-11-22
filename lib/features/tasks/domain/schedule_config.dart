@@ -3,6 +3,8 @@ import 'task_growth_category.dart';
 
 enum ScheduleRecurrence { once, daily, weekly, custom }
 
+const maxScheduleSpanDays = 366;
+
 DateTime parseScheduleDate(String value) {
   final date = DateTime.parse(value);
   if (scheduleDate(date) != value) {
@@ -55,6 +57,11 @@ class ScheduleConfig {
   final List<Map<String, num>> tiers;
 
   Map<String, dynamic> toJson() {
+    // SQL compares calendar dates. A local day can have 23 or 25 hours.
+    DateTime calendarDay(DateTime date) =>
+        DateTime.utc(date.year, date.month, date.day);
+    final firstDay = calendarDay(startsOn);
+    final lastDay = calendarDay(endsOn);
     final timePattern = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
     if (expectedMinutes < 1 ||
         expectedMinutes > 1440 ||
@@ -62,8 +69,8 @@ class ScheduleConfig {
       throw const FormatException('目标时长需为1至1440分钟，且不少于最低有效时长');
     }
     if (title.trim().isEmpty ||
-        endsOn.isBefore(startsOn) ||
-        endsOn.difference(startsOn).inDays > 366 ||
+        lastDay.isBefore(firstDay) ||
+        lastDay.difference(firstDay).inDays > maxScheduleSpanDays ||
         !timePattern.hasMatch(startTime) ||
         !timePattern.hasMatch(dueTime) ||
         dueTime.compareTo(startTime) <= 0 ||
@@ -77,7 +84,9 @@ class ScheduleConfig {
     if (recurrence == ScheduleRecurrence.custom &&
         (customDates.isEmpty ||
             customDates.any(
-              (d) => d.isBefore(startsOn) || d.isAfter(endsOn),
+              (d) =>
+                  calendarDay(d).isBefore(firstDay) ||
+                  calendarDay(d).isAfter(lastDay),
             ))) {
       throw const FormatException('自定义日期必须在计划范围内');
     }

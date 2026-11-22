@@ -21,11 +21,22 @@ import 'package:uuid/uuid.dart';
 class FaultTransport extends http.BaseClient {
   final http.Client inner = http.Client();
   bool offline = false, loseAnswerReply = false;
+  bool loseManualSaveReply = false;
   int lostReplies = 0;
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (offline) throw http.ClientException('Injected offline transport');
     final response = await inner.send(request);
+    if (loseManualSaveReply &&
+        request.url.path.endsWith('/rpc/save_manual_review_question') &&
+        response.statusCode == 200) {
+      loseManualSaveReply = false;
+      await response.stream.drain<void>();
+      lostReplies++;
+      throw http.ClientException(
+        'Injected reply loss after manual question save',
+      );
+    }
     if (loseAnswerReply &&
         request.url.path.endsWith('/rpc/apply_task_command') &&
         request is http.Request &&
@@ -222,6 +233,34 @@ void main() {
       expect(wallet.coins, 20);
       expect(wallet.xp, 30);
       expect(await other.from('wallets').select().eq('child_id', id), isEmpty);
+    },
+  );
+
+  test(
+    'resubmitting a manual question after a lost HTTP reply preserves a single record',
+    () async {
+      final transport = FaultTransport();
+      final client = await connect('parent', transport: transport);
+      final reviews = SupabaseReviewRepository(client);
+      final id = await child('保存重试');
+      final requestId = uuid.v4();
+      const draft = {
+        'kind': 'question',
+        'subject': 'math',
+        'prompt': '6 × 7 = ?',
+        'answers': ['42'],
+      };
+      transport.loseManualSaveReply = true;
+      await expectLater(
+        reviews.save(id, draft, requestId: requestId),
+        throwsA(isA<http.ClientException>()),
+      );
+      expect(transport.lostReplies, 1);
+      final saved = (await reviews.questions(id)).single;
+      await reviews.save(id, draft, requestId: requestId);
+      final replay = (await reviews.questions(id)).single;
+      expect(replay['id'], saved['id']);
+      expect(replay['content_version'], saved['content_version']);
     },
   );
 

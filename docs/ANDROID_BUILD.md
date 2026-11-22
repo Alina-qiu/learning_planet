@@ -1,6 +1,21 @@
 # Android 调试构建
 
-## 2026-11-12 奖励页适配（当前产物）
+## 2026-11-23 错题、任务日期与组卷调试包
+
+本版包含手工错题保存重试、周期任务日期选择、按服务器时间读取练习卷三项修复。两个安装包与构建时生成的 SHA-256 文件一起保存在 `build/app/outputs/flutter-apk/`。
+
+| 安装包 | 启动后可验证的范围 | 应用 ID |
+|---|---|---|
+| `app-local-debug.apk` | 通过 USB 转发连接运行中的电脑服务，登录后使用家庭业务 | `com.learningplanet.learning_planet.local` |
+| `app-debug.apk` | 无后端配置的启动页 | `com.learningplanet.learning_planet` |
+
+本机的两份 APK 均通过 v2 签名验证，均包含三个 Android ABI 的加密 SQLite。联调包为 216012507 字节，SHA-256 为 `22f13e953282d016d372a32ad94bd42fea80773ac3d0d4506f375eedec401f56`。普通包为 216011311 字节，SHA-256 为 `181c836c96a69210439e691671f6941c32afd5f18001e4d2b064663c1be1ca31`。
+
+已在 Android API 36 模拟器安装联调包，核对设备上的 APK 摘要一致。从系统启动图标进入后，页面显示“登录学习星球”“家长邮箱”和“发送验证码”。本次安装检查截至邮箱登录页。[本机截图](../build/review_candidate/android-20261123/email-login.png)
+
+本机服务需加载截至 070 的数据库迁移。启动服务、配置 USB 转发和读取测试邮箱验证码的步骤见[本机联调](LOCAL_DEBUG.md)。
+
+## 2026-11-12 奖励页适配
 
 奖励商城、兑换记录及账本现在支持横屏窄窗口、两倍字号和安全区域；范围见[奖励页适配](ECONOMY_ACCESSIBILITY.md)。两个生产入口调试包已重建，通过资源、三ABI加密SQLite、测试入口排除及v2签名检查，没有安装真机。
 

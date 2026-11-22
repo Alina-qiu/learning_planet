@@ -990,17 +990,22 @@ try {
     assert.equal(await scalar('select count(*)::int from storage.objects where name=$1',[worksheetClaim.pdf_path]),1);
   });
   await check('worksheet PDFs and history require current-session PIN and block outsiders or expiry', async () => {
+    const history = 'select is_expired from public.worksheet_job_history where id=$1';
+    assert.equal(await scalar(history,[worksheet]),false);
     await client.query('select public.revoke_parent_authorization($1)',[family]);
+    assert.equal((await client.query(history,[worksheet])).rowCount,0);
     assert.equal(await scalar('select count(*)::int from public.worksheet_jobs where id=$1',[worksheet]),0);
     assert.equal(await scalar('select count(*)::int from storage.objects where name=$1',[worksheetClaim.pdf_path]),0);
     await denied('select public.claim_worksheet($1)',[worksheet]);
     await login('10000000-0000-0000-0000-000000000003');
+    assert.equal((await client.query(history,[worksheet])).rowCount,0);
     await denied('select public.claim_worksheet($1)',[worksheet]);
     assert.equal(await scalar('select count(*)::int from public.worksheet_jobs where id=$1',[worksheet]),0);
     await login(); await client.query("select public.verify_parent_pin($1,'1234')",[family]);
     await client.query('reset role');
     await client.query("update public.worksheet_jobs set expires_at=now()-interval '1 second' where id=$1",[worksheet]);
     await login();
+    assert.equal(await scalar(history,[worksheet]),true);
     await denied('select public.claim_worksheet($1)',[worksheet]);
     assert.equal(await scalar('select count(*)::int from storage.objects where name=$1',[worksheetClaim.pdf_path]),0);
   });
