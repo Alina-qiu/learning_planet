@@ -391,6 +391,81 @@ void main() {
     },
   );
 
+  for (final (size, scale, insets) in [
+    (const Size(412, 800), 1.0, const FakeViewPadding(top: 24, bottom: 48)),
+    (const Size(320, 640), 2.0, const FakeViewPadding(top: 24, bottom: 48)),
+    (const Size(720, 360), 2.0, const FakeViewPadding(left: 24, right: 48)),
+  ]) {
+    testWidgets(
+      'manual editor save and retry clear system navigation at $size',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = size;
+        tester.view.viewPadding = insets;
+        tester.view.padding = insets;
+        addTearDown(tester.view.reset);
+        var attempts = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(scale)),
+              child: child!,
+            ),
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: FilledButton(
+                    child: const Text('打开编辑器'),
+                    onPressed: () =>
+                        Navigator.of(context).push<Map<String, dynamic>>(
+                          MaterialPageRoute(
+                            builder: (_) => ReviewQuestionEditor(
+                              pinyin: false,
+                              initial: const {
+                                'final_text': '6 × 7',
+                                'answers': ['42'],
+                              },
+                              onSave: (config) async {
+                                expect(config['answers'], ['42']);
+                                if (++attempts == 1) throw StateError('网络暂不可用');
+                              },
+                            ),
+                          ),
+                        ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('打开编辑器'));
+        await tester.pumpAndSettle();
+        final save = find.widgetWithText(FilledButton, '保存');
+        final list = find.byType(Scrollable).first;
+        for (var attempt = 1; attempt <= 2; attempt++) {
+          await tester.scrollUntilVisible(save, 200, scrollable: list);
+          await tester.drag(find.byType(ListView), const Offset(0, -300));
+          await tester.pumpAndSettle();
+          final error = find.textContaining('网络暂不可用');
+          for (final control in [save, if (attempt == 2) error]) {
+            final rect = tester.getRect(control);
+            expect(rect.left, greaterThanOrEqualTo(insets.left));
+            expect(rect.right, lessThanOrEqualTo(size.width - insets.right));
+            expect(rect.top, greaterThanOrEqualTo(insets.top));
+            expect(rect.bottom, lessThanOrEqualTo(size.height - insets.bottom));
+          }
+          await tester.tap(save);
+          await tester.pumpAndSettle();
+          expect(attempts, attempt);
+        }
+        expect(find.text('打开编辑器'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   Future<ProviderContainer> openParentEditor(
     WidgetTester tester,
     FakeReviewRepository live,

@@ -415,7 +415,11 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
             : '手工录入错题',
       ),
     ),
-    body: Form(
+    body: SafeArea(top: false, child: _editorForm()),
+  );
+
+  Widget _editorForm() {
+    return Form(
       key: _form,
       child: ListView(
         padding: const EdgeInsets.all(16),
@@ -646,6 +650,6 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
           ),
         ],
       ),
-    ),
-  );
+    );
+  }
 }

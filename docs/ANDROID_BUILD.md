@@ -9,9 +9,9 @@
 | `app-local-debug.apk` | 通过 USB 转发连接运行中的电脑服务，登录后使用家庭业务 | `com.learningplanet.learning_planet.local` |
 | `app-debug.apk` | 无后端配置的启动页 | `com.learningplanet.learning_planet` |
 
-本机的两份 APK 均通过 v2 签名验证，均包含三个 Android ABI 的加密 SQLite。联调包为 216012507 字节，SHA-256 为 `22f13e953282d016d372a32ad94bd42fea80773ac3d0d4506f375eedec401f56`。普通包为 216011311 字节，SHA-256 为 `181c836c96a69210439e691671f6941c32afd5f18001e4d2b064663c1be1ca31`。
+本机的两份 APK 均通过 v2 签名验证，均包含三个 Android ABI 的加密 SQLite。联调包为 216009807 字节，SHA-256 为 `368d8fe18e9f2519bb3935ca543160ad266d1e623a6c51470e8bd1f4f0b9054e`。普通包为 216009583 字节，SHA-256 为 `3874edad0f2b1ff73e8357e57fbd8d70e41b92ed0e050bfee7422b0506dd18cb`。
 
-已在 Android API 36 模拟器安装联调包，核对设备上的 APK 摘要一致。从系统启动图标进入后，页面显示“登录学习星球”“家长邮箱”和“发送验证码”。本次安装检查截至邮箱登录页。[本机截图](../build/review_candidate/android-20261123/email-login.png)
+在 Android API 36 的 1080×2400 三键导航模拟器上，系统导航区从纵坐标 2274 开始。上一版手工错题编辑器的保存按钮中心位于 2295，点击会返回系统桌面。本版重新安装后，将表单滚动到底，按钮下边缘位于 2232，中心位于 2169。已用中心点击保存合成题目。上一版同一业务流程也实际验证了连接中断时保留题干和答案，恢复后重试只写入一条题目。[本机验证记录](../build/review_candidate/android-20261123/manual-retry/manual-result-before-inset.json)
 
 本机服务需加载截至 070 的数据库迁移。启动服务、配置 USB 转发和读取测试邮箱验证码的步骤见[本机联调](LOCAL_DEBUG.md)。
 
