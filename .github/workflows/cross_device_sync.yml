@@ -151,12 +151,14 @@ jobs:
           packages: 'platform-tools'
       - name: Prepare Android 10 x86_64 emulator
         run: |
-          sdkmanager --install 'emulator' 'platform-tools' 'system-images;android-29;default;x86_64'
+          sdkmanager --install 'emulator' 'platform-tools' 'build-tools;36.0.0' 'system-images;android-29;default;x86_64'
           echo no | avdmanager create avd --name cross-device-android \
             --package 'system-images;android-29;default;x86_64' --device 'pixel_2'
       - run: npm ci
       - name: Check simulator and backend startup handling
-        run: python3 scripts/test_cross_device_startup.py
+        run: |
+          python3 scripts/test_cross_device_startup.py
+          python3 scripts/test_android_simulator_flow.py
       - name: Install and verify disposable backend binaries before boot
         run: |
           install -m 755 build/cross-device/auth "$RUNNER_TEMP/cross-device-auth"

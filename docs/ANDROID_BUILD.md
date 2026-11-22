@@ -1,13 +1,13 @@
 # Android 调试构建
 
-## 2026-11-23 提醒校时更新后的本机包
+## 2026-11-23 首页恢复和提醒校时更新后的调试包
 
-本机联调版使用电脑上的临时服务登录和操作家庭业务，普通调试版用于检查未配置服务时的启动页。两个包均通过 Flutter 资源、三种 ABI 的加密 SQLite 库和调试签名检查。[本机联调和安装](LOCAL_DEBUG.md)
+本机联调版使用电脑上的临时服务登录和操作家庭业务，普通调试版用于检查未配置服务时的启动页。应用启动时，后台轮询会等待正在进行的账号注销检查，避免断网时重复检查使首页持续转圈。[本机联调和安装](LOCAL_DEBUG.md)
 
 | 安装包 | SHA-256 |
 |---|---|
-| `build/app/outputs/flutter-apk/app-local-debug.apk` | `c260f81c443404f924cf49bc2023b6e22b050b5649b533f75b9af96158a636ea` |
-| `build/app/outputs/flutter-apk/app-debug.apk` | `a9c5590d4d06b5b345783bda366298f5c7c567affa03a02b4755de680445853a` |
+| `build/app/outputs/flutter-apk/app-local-debug.apk` | `768b47de73444dc16915a1f1a8b84f72755583d11809257571b9e50ba6202a87` |
+| `build/app/outputs/flutter-apk/app-debug.apk` | `92dba504e5075b7894eac4bdb2f6a661e19e2fb90eb6a183d8e92fb049aef057` |
 
 ## 2026-11-23 离线登录与跨端同步调试包
 

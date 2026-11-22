@@ -132,31 +132,81 @@ void _expectNoRawFailure() {
   expect(find.textContaining('42501'), findsNothing);
 }
 
+Future<void> _mountPendingAccount(
+  WidgetTester tester,
+  _Auth auth,
+  _PendingAccountStatus status,
+) async {
+  addTearDown(() async {
+    await tester.pumpWidget(const SizedBox());
+    await auth.changes.close();
+  });
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        authRepositoryProvider.overrideWithValue(auth),
+        accountDeletionRepositoryProvider.overrideWithValue(status),
+        familyRepositoryProvider.overrideWithValue(_Family()),
+        taskRepositoryProvider.overrideWithValue(fixture.FakeTaskRepository()),
+        notificationSchedulerProvider.overrideWithValue(_Notifications()),
+      ],
+      child: const MaterialApp(home: AuthGate()),
+    ),
+  );
+  await tester.pump();
+  await tester.pump();
+}
+
 void main() {
+  testWidgets(
+    'a periodic tick preserves a pending check and resume still rechecks deletion',
+    (tester) async {
+      final auth = _Auth(), status = _PendingAccountStatus();
+      await _mountPendingAccount(tester, auth, status);
+      final first = status.reads.single;
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      expect(find.text('今日任务'), findsNothing);
+      first.complete(null); // The repository completed its offline fallback.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('今日任务'), findsOneWidget);
+      expect(status.reads, hasLength(1));
+      await tester.pumpAndSettle();
+
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      expect(status.reads, hasLength(2));
+      final backgroundCheck = status.reads.last;
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      expect(status.reads, hasLength(2));
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(status.reads, hasLength(3));
+      status.reads.last.complete({
+        'id': 'job',
+        'status': 'queued',
+        'phase': 'files',
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('今日任务'), findsNothing);
+      expect(find.text('注销已受理，正在清理'), findsOneWidget);
+      backgroundCheck.complete(null);
+      await tester.pumpAndSettle();
+      expect(find.text('今日任务'), findsNothing);
+      expect(find.text('注销已受理，正在清理'), findsOneWidget);
+    },
+  );
+
   testWidgets(
     'refreshing the same account while checking its status still opens home',
     (tester) async {
       final auth = _Auth(), status = _PendingAccountStatus();
-      addTearDown(() async {
-        await tester.pumpWidget(const SizedBox());
-        await auth.changes.close();
-      });
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            authRepositoryProvider.overrideWithValue(auth),
-            accountDeletionRepositoryProvider.overrideWithValue(status),
-            familyRepositoryProvider.overrideWithValue(_Family()),
-            taskRepositoryProvider.overrideWithValue(
-              fixture.FakeTaskRepository(),
-            ),
-            notificationSchedulerProvider.overrideWithValue(_Notifications()),
-          ],
-          child: const MaterialApp(home: AuthGate()),
-        ),
-      );
-      await tester.pump();
-      await tester.pump();
+      await _mountPendingAccount(tester, auth, status);
       expect(status.reads, hasLength(1));
       for (var i = 0; i < 3; i++) {
         auth.changes.add(

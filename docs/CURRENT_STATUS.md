@@ -8,7 +8,9 @@
 
 ## 当前开发进度
 
-Windows 完整 Flutter 测试 846 项通过，核心行覆盖率 90.69%。应用回到前台后会补拉任务和余额，断网重开时可继续使用已恢复的本机账号。iPhone 任务和家长提醒的服务器校时现覆盖系统权限查询与主线程等待。如果收到消息时的时间范围可能跨入安静时段，应用会抑制提醒。升级前保存的校时记录需在前台重新校准。[Android 调试包](ANDROID_BUILD.md) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
+Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用回到前台后会补拉任务和余额，断网重开时可继续使用已恢复的本机账号。iPhone 任务和家长提醒的服务器校时现覆盖系统权限查询与主线程等待。如果收到消息时的时间范围可能跨入安静时段，应用会抑制提醒。升级前保存的校时记录需在前台重新校准。[Android 调试包](ANDROID_BUILD.md) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
+
+账号注销状态检查较慢时，首页的定时轮询会等待当前检查返回。之前每 30 秒新发起的检查可能使初次结果失效，导致离线首页持续转圈。应用回到前台仍会立即核查注销状态，服务端确认已受理注销后，应用立即遮住家庭数据。[入口回归用例](../test/entry_recovery_test.dart)
 
 同一测试家庭在 Android API 36、API 29 分别登录。API 36 断网作答 3 题，API 29 在同步前仍显示原状态。恢复连接后，两端显示同一条已完成的复习任务；3 道题分别记为正确、错误、正确，各有 1 次作答记录，金币和 XP 分别增加 30。零题孩子没有生成任务。下表区分本机服务、模拟器与目标真机的验收范围。
 
@@ -22,7 +24,7 @@ Windows 完整 Flutter 测试 846 项通过，核心行覆盖率 90.69%。应用
 
 上一版在 Windows 通过全部 842 项 Flutter 测试和静态分析，核心行覆盖率 90.62%。本机 PostgreSQL 通过 405 项检查和 14 项有数据升级检查。PostgREST 16.2 处理了 99 次实际 HTTP 请求，覆盖新版 PIN、旧客户端兼容和设备校时后重放原命令。
 
-提交 `d605194` 的十项远程检查全部通过，包括 844 项 Flutter 测试、409 项数据库检查、14 项迁移升级、9 项备份恢复、iOS SDK 27.2 未签名 Debug 和 Release 编译，以及三组 iPhone/iPad 模拟器测试。[构建和测试](https://github.com/Alina-qiu/learning_planet/actions/runs/45066343158) · [后续提交与检查](https://github.com/Alina-qiu/learning_planet/pull/1)
+提交 `40f8c7e` 的十项远程检查全部通过，包括 846 项 Flutter 测试、409 项数据库检查、14 项迁移升级、9 项备份恢复、iOS SDK 27.2 未签名 Debug 和 Release 编译，以及三组 iPhone/iPad 模拟器测试。macOS 也已执行 35 项原生提醒策略检查。[构建和测试](https://github.com/Alina-qiu/learning_planet/actions/runs/45072276369) · [后续提交与检查](https://github.com/Alina-qiu/learning_planet/pull/1)
 
 上一版修复了三处用户流程。
 

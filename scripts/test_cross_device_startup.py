@@ -71,9 +71,11 @@ class StartupTests(unittest.TestCase):
                     runner.SERVER_RESULT.write_text(json.dumps(proof), encoding="utf-8")
                     state["phase"] = "reader-confirmed"
                     events.append("restored reader")
-            elif "drive" in args:
+            elif "scripts/run_android_simulator_flow.py" in args:
                 self.assertFalse(state["iphone"])
                 self.assertTrue(state["avd"])
+                self.assertEqual(args[args.index("--serial") + 1], runner.SERIAL)
+                self.assertEqual(args[args.index("--driver") + 1], runner.DRIVER)
                 self.assertIn("both routes",events)
                 report("android", {**base, **paid, "device":"android"})
                 state["phase"] = "writer-complete"

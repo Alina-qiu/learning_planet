@@ -28,10 +28,12 @@ class _AccountDeletionGateState extends ConsumerState<AccountDeletionGate>
       _scheduleParentExpiry(until);
     }, fireImmediately: true);
     if (ref.read(accountDeletionRepositoryProvider) != null) {
-      _timer = Timer.periodic(
-        const Duration(seconds: 30),
-        (_) => ref.invalidate(accountDeletionStatusProvider),
-      );
+      _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+        // A cold offline check can take longer than a polling interval.
+        if (!ref.read(accountDeletionStatusProvider).isLoading) {
+          ref.invalidate(accountDeletionStatusProvider);
+        }
+      });
     }
   }
 

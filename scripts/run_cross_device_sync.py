@@ -31,6 +31,8 @@ UI_STAGES = {*PHASES, "/scenario", "/otp", "email sign-in screen", "enabled OTP 
              "completed task", "confirmed wallet", "home from the offline iPhone session"}
 REPORT_STAGES = {"fixture", "email_login", "restore_offline_session", "load_family_task_and_wallet",
                  "cached_before_shutdown", "reconnect", "complete_task", "confirm_task_and_wallet", "confirmed"}
+ANDROID_DRIVER_STAGES = {"APK metadata", "installation", "activity launch", "app PID", "VM discovery",
+                         "VM forwarding", "Dart driver", "cleanup"}
 
 
 def require(condition, message):
@@ -235,6 +237,13 @@ def read_report(path, name):
     return result
 
 
+def ui_timeout(log):
+    for match in re.finditer(r"Timed out waiting for ([a-zA-Z /-]{1,60})(?=\r?$|\\[nr])", log, re.MULTILINE):
+        if match[1] in UI_STAGES:
+            return match[1]
+    return None
+
+
 def driver_failure(path, name, status, phase, report=None):
     log = path.read_text(encoding="utf-8", errors="replace")
     message = f"{name} {status} in {phase}"
@@ -249,9 +258,19 @@ def driver_failure(path, name, status, phase, report=None):
                  if data.get(key) is True]
         if facts:
             message += ", confirmed " + ", ".join(facts)
-    for match in re.finditer(r"Timed out waiting for ([a-zA-Z /-]{1,60})(?:\r?\n|$)", log):
-        if match.group(1) in UI_STAGES:
-            return message + ", timeout at " + match.group(1)
+    stages = [s for s in re.findall(r"^Android driver stage: ([A-Za-z ]+)\r?$", log, re.MULTILINE)
+              if s in ANDROID_DRIVER_STAGES]
+    if stages:
+        message += ", Android driver stage " + stages[-1]
+    label = ui_timeout(log)
+    if label:
+        return message + ", timeout at " + label
+    direct_failure = re.search(r"^Android driver failure: (command (?:timed out|could not start|exited -?\d{1,3})|"
+                               r"no launchable app in APK|APK installation not confirmed|could not read device clock|"
+                               r"activity launch failed|app PID not found|VM discovery timed out|app process changed|"
+                               r"no host port allocated|could not release app or forward)\r?$", log, re.MULTILINE)
+    if direct_failure:
+        return f"{message} ({direct_failure[1]})"
     for text, detail in (("Dart VM service was not announced", "Dart VM discovery timed out"),
                          ("timed out after 1200 seconds", "Dart driver timed out"),
                          ("failed to install", "app installation failed"),
@@ -266,7 +285,6 @@ def run():
     sdk = Path(os.environ.get("ANDROID_HOME") or os.environ["ANDROID_SDK_ROOT"])
     adb = sdk / "platform-tools/adb"
     emulator = sdk / "emulator/emulator"
-    flutter = Path(os.environ["FLUTTER_ROOT"]) / "bin/flutter"
     plist = Path("build/ios/iphonesimulator/Runner.app/Info.plist")
     require(APK.is_file() and plist.is_file(), "Prebuilt app missing")
     bundle = plistlib.loads(plist.read_bytes())["CFBundleIdentifier"]
@@ -439,9 +457,8 @@ def run():
                 return code == 0 and all([f"tcp:{port}", f"tcp:{port}"] in routes for port in ports)
             probe("Android reverse verification", adb_device + ["reverse", "--list"], accept=mapped, health=android_alive)
             print("Android boot, transport and both reverse mappings confirmed; launching the writer", flush=True)
-            android = drive("Android writer", [flutter, "drive", "--no-dds", "--debug", "--no-pub", "-d", SERIAL,
-                            f"--use-application-binary={APK}", f"--driver={DRIVER}",
-                            "--target=integration_test/cross_device_sync_test.dart"],
+            android = drive("Android writer", [sys.executable, "scripts/run_android_simulator_flow.py",
+                            "--serial", SERIAL, "--apk", str(APK), "--driver", DRIVER],
                             "writer-complete", reports["android"], android_alive)
             require(android.get("completed") is True and android.get("task_id") == initial.get("task_id"),
                     "Android writer report incomplete or wrong task")
