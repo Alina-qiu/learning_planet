@@ -65,10 +65,16 @@ class _AccountDeletionScreenState extends ConsumerState<AccountDeletionScreen> {
 
   bool _authorized(Map<String, dynamic> family, DateTime now) =>
       family['authorized'] == true &&
-      (DateTime.tryParse(
-            family['authorized_until'] as String? ?? '',
-          )?.isAfter(now) ??
-          false);
+      ((family['authorization_deadline'] as DateTime?)?.isAfter(now) ?? false);
+
+  bool _allAuthorized(DateTime now) =>
+      _families?.every((family) => _authorized(family, now)) ?? false;
+
+  void _requireCurrentAuthorizations() {
+    if (!_allAuthorized(ref.read(parentAuthorizationNowProvider)())) {
+      throw StateError('家庭授权已过期，请重新验证家长 PIN');
+    }
+  }
 
   Future<void> _verify(Map<String, dynamic> family) async {
     var input = '';
@@ -114,6 +120,7 @@ class _AccountDeletionScreenState extends ConsumerState<AccountDeletionScreen> {
   }
 
   Future<void> _previewScope() async {
+    _requireCurrentAuthorizations();
     final preview = await repo.preview();
     if (mounted) {
       setState(() {
@@ -126,6 +133,7 @@ class _AccountDeletionScreenState extends ConsumerState<AccountDeletionScreen> {
   }
 
   Future<void> _request() async {
+    _requireCurrentAuthorizations();
     _submittedScope ??= Map<String, dynamic>.from(_preview!['scope'] as Map);
     _requestId ??= const Uuid().v4();
     try {
@@ -163,9 +171,8 @@ class _AccountDeletionScreenState extends ConsumerState<AccountDeletionScreen> {
   Widget build(BuildContext context) {
     final now =
         ref.watch(authorizationClockProvider).valueOrNull ?? DateTime.now();
-    final authorized =
-        _families != null &&
-        _families!.every((family) => _authorized(family, now));
+    final leaseNow = ref.watch(parentAuthorizationNowProvider)();
+    final authorized = _allAuthorized(leaseNow);
     final scope = _preview?['scope'] as Map?;
     final status = _status;
     return Scaffold(
@@ -244,7 +251,9 @@ class _AccountDeletionScreenState extends ConsumerState<AccountDeletionScreen> {
                 ),
                 trailing: TextButton(
                   onPressed: _busy ? null : () => _verify(family),
-                  child: Text(_authorized(family, now) ? 'PIN 已验证' : '验证 PIN'),
+                  child: Text(
+                    _authorized(family, leaseNow) ? 'PIN 已验证' : '验证 PIN',
+                  ),
                 ),
               ),
             OutlinedButton(

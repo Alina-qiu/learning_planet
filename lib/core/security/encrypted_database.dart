@@ -90,7 +90,9 @@ class EncryptedDatabase {
     if (!file.existsSync() || file.lengthSync() == 0) {
       throw const LocalDataException('本机数据文件不完整，资料已保留。');
     }
-    final db = sqlite3.open(file.path, mode: OpenMode.readOnly);
+    // SQLite may need to roll back an interrupted transaction before the first
+    // schema read. Only open the existing file, and let SQLite own recovery.
+    final db = sqlite3.open(file.path, mode: OpenMode.readWrite);
     try {
       configure(db, key);
       final rows = db.select('PRAGMA integrity_check');

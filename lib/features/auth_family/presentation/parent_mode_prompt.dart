@@ -47,8 +47,11 @@ Future<void> enterParentMode(
         .verifyParentPin(familyId: familyId, pin: pin);
     if (!context.mounted || !current()) return;
     if (result.verified) {
-      if (result.authorizedUntil == null) {
-        throw StateError('请先部署服务端 PIN 授权迁移');
+      if (!(result.authorizedUntil?.isAfter(
+            ref.read(parentAuthorizationNowProvider)(),
+          ) ??
+          false)) {
+        throw StateError('家长授权未生效或已过期，请重新验证');
       }
       ref.read(parentAuthorizedUntilProvider.notifier).state =
           result.authorizedUntil;
@@ -96,10 +99,14 @@ Future<void> enterParentMode(
         final verified = await ref
             .read(familyRepositoryProvider)
             .verifyParentPin(familyId: familyId, pin: pin);
-        if (!verified.verified || verified.authorizedUntil == null) {
+        if (!current()) return;
+        if (!verified.verified ||
+            !(verified.authorizedUntil?.isAfter(
+                  ref.read(parentAuthorizationNowProvider)(),
+                ) ??
+                false)) {
           throw StateError('服务端未授予家长授权');
         }
-        if (!current()) return;
         ref.read(parentAuthorizedUntilProvider.notifier).state =
             verified.authorizedUntil;
         ref.read(parentFamilyIdProvider.notifier).state = familyId;

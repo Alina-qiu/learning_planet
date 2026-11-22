@@ -3,23 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../auth_family/application/family_providers.dart';
 import '../application/task_providers.dart';
 import '../application/task_start_provider.dart';
-import '../data/task_repository.dart';
 import '../data/offline_task_repository.dart';
-import '../domain/task_start_origin.dart';
-import '../data/schedule_repository.dart';
 import '../domain/task.dart';
 import '../domain/task_item.dart';
 import 'schedule_management_screen.dart';
 import 'task_sync_banner.dart';
 import 'task_presentation.dart';
+import 'task_actions.dart';
 import 'task_note_screen.dart';
 import 'task_time_correction_screen.dart';
 import '../../reports/data/report_repository.dart';
-import '../../growth/presentation/task_feedback.dart';
 import '../../growth/data/feedback_preferences.dart';
 import '../../wrong_questions/data/review_repository.dart';
 import '../../wrong_questions/presentation/review_hub_screen.dart';
-import '../../wrong_questions/presentation/review_session_screen.dart';
 
 class TaskManagementScreen extends ConsumerStatefulWidget {
   const TaskManagementScreen({
@@ -38,30 +34,13 @@ class TaskManagementScreen extends ConsumerStatefulWidget {
       _TaskManagementScreenState();
 }
 
-class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
-  bool _busy = false;
-  final _celebratedTasks = <String>{};
-  Future<void> _perform(Future<void> Function() operation) async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      await operation();
-      if (!mounted) return;
-      ref.invalidate(tasksProvider(widget.childId));
-      ref.invalidate(walletProvider(widget.childId));
-      ref.invalidate(remindersProvider(widget.childId));
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('操作失败：$error')));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _manualComplete(TaskItem task) => _perform(() async {
+class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen>
+    with TaskActions<TaskManagementScreen> {
+  @override
+  String get childId => widget.childId;
+  @override
+  String? get familyId => widget.familyId;
+  Future<void> _manualComplete(TaskItem task) => runTaskAction(() async {
     var input = '';
     final reason = await showDialog<String>(
       context: context,
@@ -89,7 +68,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
     }
     await ref.read(taskRepositoryProvider).manualComplete(task.id, reason);
   });
-  Future<void> _correctTime(TaskItem task) => _perform(() async {
+  Future<void> _correctTime(TaskItem task) => runTaskAction(() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => TaskTimeCorrectionScreen(
@@ -109,56 +88,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
     }
     if (mounted) ref.invalidate(learningReportProvider);
   });
-  Future<void> _complete(TaskItem task) => _perform(() async {
-    final repository = ref.read(taskRepositoryProvider);
-    await repository.complete(task.id);
-    if (!mounted ||
-        !identical(repository, ref.read(taskRepositoryProvider)) ||
-        !_celebratedTasks.add(task.id)) {
-      return;
-    }
-    // Completion can move the row out of the viewport. Confirm the durable
-    // local result immediately, without waiting for a remote reward receipt.
-    showTaskCompletionFeedback(
-      context,
-      ref,
-      pending: repository is OfflineTaskRepository,
-    );
-  });
-  Future<void> _transition(TaskItem task) => _perform(() async {
-    if (task.sourceType == 'automatic_wrong_review') {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ReviewSessionScreen(
-            taskId: task.id,
-            childId: widget.childId,
-            familyId: widget.familyId,
-          ),
-        ),
-      );
-      return;
-    }
-    if (task.isTerminal) return;
-    final repository = ref.read(taskRepositoryProvider);
-    switch (task.status) {
-      case TaskStatus.ready:
-      case TaskStatus.scheduled:
-        await startTaskWithOrigin(
-          repository,
-          task.id,
-          ref.read(taskStartOriginProvider(widget.familyId)),
-        );
-      case TaskStatus.inProgress:
-        await repository.pause(task.id);
-      case TaskStatus.paused:
-        await repository.resume(task.id);
-      case TaskStatus.completed:
-      case TaskStatus.skipped:
-      case TaskStatus.abandoned:
-        return;
-    }
-  });
-  Future<void> _abandon(TaskItem task) => _perform(() async {
+  Future<void> _abandon(TaskItem task) => runTaskAction(() async {
     if (!await confirmTaskAbandon(
           context,
           review: task.sourceType == 'automatic_wrong_review',
@@ -188,10 +118,11 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
   @override
   Widget build(BuildContext context) {
     ref.watch(feedbackPreferencesProvider);
+    final origin = ref.watch(taskStartOriginProvider(widget.familyId));
     final authorized =
         widget.familyId != null &&
         ref.watch(activeParentFamilyProvider) == widget.familyId;
-    final now = ref.watch(authorizationClockProvider).value ?? DateTime.now();
+    final now = ref.watch(taskDisplayTimeProvider(widget.childId));
     final zone = ref
         .watch(familiesProvider)
         .valueOrNull
@@ -209,7 +140,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
             IconButton(
               tooltip: '错题与拼音复习',
               icon: const Icon(Icons.school_outlined),
-              onPressed: _busy
+              onPressed: taskActionBusy
                   ? null
                   : () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -223,14 +154,14 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
           if (widget.familyId != null)
             IconButton(
               tooltip: '周期模板、长期计划与提醒',
-              onPressed: _busy ? null : _schedules,
+              onPressed: taskActionBusy ? null : _schedules,
               icon: const Icon(Icons.event_repeat),
             ),
         ],
       ),
       floatingActionButton: authorized
           ? FloatingActionButton.extended(
-              onPressed: _busy ? null : _schedules,
+              onPressed: taskActionBusy ? null : _schedules,
               icon: const Icon(Icons.add_task),
               label: const Text('新建任务'),
             )
@@ -249,7 +180,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
               SliverToBoxAdapter(
                 child: TaskSyncBanner(childId: widget.childId),
               ),
-              if (_busy)
+              if (taskActionBusy)
                 const SliverToBoxAdapter(child: LinearProgressIndicator()),
               ref
                   .watch(tasksProvider(widget.childId))
@@ -273,6 +204,11 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                               return const Center(child: Text('还没有任务'));
                             }
                             final task = ordered[index];
+                            final elapsed = now != null
+                                ? task.elapsedSeconds(now)
+                                : task.status == TaskStatus.inProgress
+                                ? null
+                                : task.accumulatedSeconds;
                             final review =
                                 task.sourceType == 'automatic_wrong_review';
                             final record = review && task.isTerminal;
@@ -295,7 +231,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                                           ? '已跳过\n'
                                           : ''}'
                                       '${task.status == TaskStatus.abandoned ? '' : '完成奖励 +${task.coinReward} 金币 · +${task.xpReward} XP\n'}'
-                                      '${task.elapsedSeconds(now) ~/ 60} 分钟 / 最低 ${(task.minimumSeconds / 60).ceil()} 分钟'
+                                      '${elapsed == null ? '等待时间校准' : '${elapsed ~/ 60} 分钟'} / 最低 ${(task.minimumSeconds / 60).ceil()} 分钟'
                                       '${task.expectedMinutes == null ? '' : '\n目标 ${task.expectedMinutes} 分钟（超时不扣分）'}'
                                       '${taskWindow(task, zone).isEmpty ? '' : '\n${taskWindow(task, zone)}'}'
                                       '${task.status == TaskStatus.abandoned ? '\n已放弃 · 保留计时，不发放完成奖励' : ''}'
@@ -308,7 +244,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                                         if (widget.familyId != null)
                                           IconButton(
                                             tooltip: '补充说明',
-                                            onPressed: _busy
+                                            onPressed: taskActionBusy
                                                 ? null
                                                 : () => Navigator.of(context).push(
                                                     MaterialPageRoute<void>(
@@ -332,7 +268,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                                         if (!task.isTerminal)
                                           IconButton(
                                             tooltip: '放弃任务',
-                                            onPressed: _busy
+                                            onPressed: taskActionBusy
                                                 ? null
                                                 : () => _abandon(task),
                                             icon: const Icon(
@@ -343,7 +279,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                                             widget.familyId != null)
                                           IconButton(
                                             tooltip: '家长纠正计时',
-                                            onPressed: _busy
+                                            onPressed: taskActionBusy
                                                 ? null
                                                 : () => _correctTime(task),
                                             icon: const Icon(Icons.more_time),
@@ -357,9 +293,9 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                                           IconButton(
                                             tooltip: '完成',
                                             enableFeedback: false,
-                                            onPressed: _busy
+                                            onPressed: taskActionBusy
                                                 ? null
-                                                : () => _complete(task),
+                                                : () => completeTask(task),
                                             icon: const Icon(Icons.task_alt),
                                           ),
                                         if (authorized &&
@@ -370,7 +306,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                                             task.status != TaskStatus.skipped)
                                           IconButton(
                                             tooltip: '家长补签',
-                                            onPressed: _busy
+                                            onPressed: taskActionBusy
                                                 ? null
                                                 : () => _manualComplete(task),
                                             icon: const Icon(
@@ -379,41 +315,12 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen> {
                                           ),
                                         FilledButton.tonal(
                                           onPressed:
-                                              _busy ||
+                                              taskActionBusy ||
                                                   (task.isTerminal && !review)
                                               ? null
-                                              : () => _transition(task),
+                                              : () => advanceTask(task),
                                           child: Text(
-                                            record
-                                                ? '查看记录'
-                                                : task.status ==
-                                                      TaskStatus.abandoned
-                                                ? '已放弃'
-                                                : task.sourceType ==
-                                                      'automatic_wrong_review'
-                                                ? '去复习'
-                                                : switch (task.status) {
-                                                    TaskStatus.scheduled ||
-                                                    TaskStatus.ready =>
-                                                      ref.watch(
-                                                                taskStartOriginProvider(
-                                                                  widget
-                                                                      .familyId,
-                                                                ),
-                                                              ) ==
-                                                              TaskStartOrigin
-                                                                  .parentAssisted
-                                                          ? '家长代开始'
-                                                          : '开始',
-                                                    TaskStatus.inProgress =>
-                                                      '暂停',
-                                                    TaskStatus.paused => '继续',
-                                                    TaskStatus.completed =>
-                                                      '已完成',
-                                                    TaskStatus.skipped => '已跳过',
-                                                    TaskStatus.abandoned =>
-                                                      '已放弃',
-                                                  },
+                                            taskActionLabel(task, origin),
                                           ),
                                         ),
                                       ],

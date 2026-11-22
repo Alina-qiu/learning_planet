@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../domain/family.dart';
+import '../domain/parent_authorization_clock.dart';
 
 abstract interface class FamilyRepository {
   Future<void> revokeParentAuthorization();
@@ -215,17 +216,22 @@ class SupabaseFamilyRepository implements FamilyRepository {
     required String familyId,
     required String pin,
   }) async {
+    final requestStart = ParentAuthorizationClock.device.now();
+    final owner = _client.auth.currentUser?.id;
     final response = await _client.rpc<List<dynamic>>(
-      'verify_parent_pin',
+      'verify_parent_pin_timed',
       params: {'target_family_id': familyId, 'candidate_pin': pin},
     );
+    if (_client.auth.currentUser?.id != owner) {
+      throw StateError('登录状态已变化，请重新验证');
+    }
     final row = response.single as Map<String, dynamic>;
     return ParentPinVerification(
       verified: row['verified'] as bool,
       remainingAttempts: row['remaining_attempts'] as int,
       authorizedUntil: row['authorized_until'] == null
           ? null
-          : DateTime.parse(row['authorized_until'] as String),
+          : ParentAuthorizationClock.deadline(requestStart, row),
       retryAt: row['retry_at'] == null
           ? null
           : DateTime.parse(row['retry_at'] as String),

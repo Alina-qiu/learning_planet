@@ -77,7 +77,9 @@ final childQuestionSubmissionsProvider = Provider<ChildQuestionSubmissions?>((
         ref.read(signingOutProvider) ? null : client.auth.currentUser?.id,
     parent: (family) =>
         ref.read(activeParentFamilyProvider) == family &&
-        (ref.read(parentAuthorizedUntilProvider)?.isAfter(DateTime.now()) ??
+        (ref
+                .read(parentAuthorizedUntilProvider)
+                ?.isAfter(ref.read(parentAuthorizationNowProvider)()) ??
             false),
     revision: () => ref.read(parentAuthorizationRevisionProvider),
   );

@@ -16,6 +16,7 @@ import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'package:learning_planet/features/tasks/data/notification_scheduler.dart';
 
 import 'widget_test.dart' as fixture;
+import 'account_deletion_test.dart' show FakeAccountDeletion;
 
 const _private = 'private-backend-payload-token';
 const _denied = PostgrestException(
@@ -79,6 +80,17 @@ class _Notifications extends DisabledNotificationScheduler {
   }
 }
 
+class _PendingAccountStatus extends FakeAccountDeletion {
+  final reads = <Completer<Map<String, dynamic>?>>[];
+
+  @override
+  Future<Map<String, dynamic>?> status() {
+    final request = Completer<Map<String, dynamic>?>();
+    reads.add(request);
+    return request.future;
+  }
+}
+
 class _Harness {
   final auth = _Auth();
   final family = _Family();
@@ -121,6 +133,54 @@ void _expectNoRawFailure() {
 }
 
 void main() {
+  testWidgets(
+    'refreshing the same account while checking its status still opens home',
+    (tester) async {
+      final auth = _Auth(), status = _PendingAccountStatus();
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await auth.changes.close();
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authRepositoryProvider.overrideWithValue(auth),
+            accountDeletionRepositoryProvider.overrideWithValue(status),
+            familyRepositoryProvider.overrideWithValue(_Family()),
+            taskRepositoryProvider.overrideWithValue(
+              fixture.FakeTaskRepository(),
+            ),
+            notificationSchedulerProvider.overrideWithValue(_Notifications()),
+          ],
+          child: const MaterialApp(home: AuthGate()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(status.reads, hasLength(1));
+      for (var i = 0; i < 3; i++) {
+        auth.changes.add(
+          AuthSession(userId: 'parent-1', email: 'parent$i@example.test'),
+        );
+        await tester.pump();
+        await tester.pump();
+      }
+      expect(status.reads, hasLength(1));
+      status.reads.single.complete(null);
+      await tester.pumpAndSettle();
+      expect(find.text('今日任务'), findsOneWidget);
+      auth.currentSession = const AuthSession(userId: 'parent-2');
+      auth.changes.add(auth.currentSession);
+      await tester.pump();
+      await tester.pump();
+      expect(status.reads, hasLength(2));
+      expect(find.text('今日任务'), findsNothing);
+      status.reads.last.complete(null);
+      await tester.pumpAndSettle();
+      expect(find.text('今日任务'), findsOneWidget);
+    },
+  );
+
   testWidgets(
     'family rejection hides database payload and retry restores home',
     (tester) async {

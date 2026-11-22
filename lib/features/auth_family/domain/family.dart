@@ -79,5 +79,7 @@ class ParentPinVerification {
   final bool verified;
   final int remainingAttempts;
   final DateTime? retryAt;
+
+  /// In-memory deadline on ParentAuthorizationClock’s timeline.
   final DateTime? authorizedUntil;
 }

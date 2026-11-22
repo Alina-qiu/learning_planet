@@ -139,7 +139,7 @@ void main() {
       await tester.pumpAndSettle();
       final action = find.descendant(
         of: card,
-        matching: find.byType(FilledButton),
+        matching: find.widgetWithText(TextButton, '查看任务'),
       );
       final bounds = tester.getRect(action);
       expect(

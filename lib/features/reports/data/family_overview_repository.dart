@@ -21,9 +21,9 @@ final familyOverviewRepositoryProvider = Provider<FamilyOverviewRepository>((
 final familyOverviewProvider = FutureProvider.autoDispose
     .family<FamilyOverview, String>((ref, family) {
       ref.watch(parentAuthorizationRevisionProvider);
-      final session = ref.watch(authSessionProvider).valueOrNull;
+      final account = ref.watch(authAccountIdProvider);
       if (ref.watch(signingOutProvider) ||
-          session == null ||
+          account == null ||
           ref.watch(activeParentFamilyProvider) != family) {
         throw StateError('请返回首页验证家长 PIN');
       }

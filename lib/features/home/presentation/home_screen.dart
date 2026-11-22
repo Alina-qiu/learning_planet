@@ -3,12 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../auth_family/domain/family.dart';
 import '../../auth_family/presentation/child_profile_fields.dart';
 import '../../tasks/application/task_providers.dart';
-import '../../tasks/domain/task.dart';
-import '../../tasks/domain/task_item.dart';
-import '../../tasks/presentation/task_presentation.dart';
+import '../../tasks/data/schedule_repository.dart';
+import 'home_task_list.dart';
 import '../../tasks/presentation/task_sync_banner.dart';
 import '../../wrong_questions/presentation/review_hub_screen.dart';
-import '../../wrong_questions/presentation/review_session_screen.dart';
 import '../../economy/presentation/economy_screen.dart';
 import '../../economy/domain/xp_progress.dart';
 import '../../reports/presentation/learning_report_screen.dart';
@@ -49,6 +47,7 @@ class HomeScreen extends ConsumerWidget {
     ref.invalidate(tasksProvider(selectedChildId));
     ref.invalidate(walletProvider(selectedChildId));
     ref.invalidate(familyTodayProvider(selectedChildId));
+    ref.invalidate(remindersProvider(selectedChildId));
     ref.invalidate(growthProvider(selectedChildId));
     await Future.wait([
       ref.read(tasksProvider(selectedChildId).future),
@@ -59,9 +58,7 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(feedbackPreferencesProvider);
-    final tasks = ref.watch(tasksProvider(selectedChildId));
     final wallet = ref.watch(walletProvider(selectedChildId));
-    final familyToday = ref.watch(familyTodayProvider(selectedChildId));
     final growth = ref.watch(growthProvider(selectedChildId));
     return Scaffold(
       appBar: AppBar(
@@ -290,124 +287,13 @@ class HomeScreen extends ConsumerWidget {
               ),
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                sliver: tasks.when(
-                  data: (items) {
-                    if (familyToday.hasError) {
-                      return SliverToBoxAdapter(
-                        child: Text('家庭日期读取失败：${familyToday.error}'),
-                      );
-                    }
-                    final value = familyToday.value;
-                    if (value == null) {
-                      return const SliverToBoxAdapter(
-                        child: LinearProgressIndicator(),
-                      );
-                    }
-                    final today = DateUtils.dateOnly(value);
-                    final visible = items
-                        .where(
-                          (task) =>
-                              !DateUtils.dateOnly(
-                                task.dueDate,
-                              ).isAfter(today) &&
-                              (!task.isTerminal ||
-                                  DateUtils.isSameDay(task.dueDate, today)),
-                        )
-                        .toList();
-                    if (visible.isEmpty) {
-                      return const SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Text('暂无到期任务'),
-                        ),
-                      );
-                    }
-                    final ordered = TaskItem.ordered(visible);
-                    final indices = {
-                      for (var i = 0; i < ordered.length; i++)
-                        'home-task:$selectedChildId:${ordered[i].id}': i,
-                    };
-                    return SliverList.builder(
-                      itemCount: ordered.length,
-                      findChildIndexCallback: (key) =>
-                          key is ValueKey<String> ? indices[key.value] : null,
-                      itemBuilder: (context, index) {
-                        final task = ordered[index];
-                        final review =
-                            task.sourceType == 'automatic_wrong_review';
-                        final record = review && task.isTerminal;
-                        return Card(
-                          key: ValueKey(
-                            'home-task:$selectedChildId:${task.id}',
-                          ),
-                          margin: const EdgeInsets.only(bottom: 10),
-                          child: ListTile(
-                            title: TaskHeading(task: task),
-                            subtitle: Text(
-                              task.status == TaskStatus.abandoned
-                                  ? '已放弃 · 保留有效时长，不扣已有奖励'
-                                  : review
-                                  ? '${record
-                                        ? task.status == TaskStatus.completed
-                                              ? '已完成 · '
-                                              : '已跳过 · '
-                                        : ''}自动错题/拼音复习 · 全部作答后按结果发奖${task.expectedMinutes == null ? '' : '\n目标 ${task.expectedMinutes} 分钟'}'
-                                  : '+${task.coinReward} 金币 · +${task.xpReward} XP',
-                            ),
-                            trailing: FilledButton.tonal(
-                              onPressed: task.isTerminal && !review
-                                  ? null
-                                  : !review
-                                  ? onManageTasks
-                                  : () async {
-                                      await Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) => ReviewSessionScreen(
-                                            taskId: task.id,
-                                            childId: selectedChildId,
-                                            familyId: children
-                                                .firstWhere(
-                                                  (c) =>
-                                                      c.id == selectedChildId,
-                                                )
-                                                .familyId,
-                                          ),
-                                        ),
-                                      );
-                                      if (context.mounted) {
-                                        ref.invalidate(
-                                          tasksProvider(selectedChildId),
-                                        );
-                                        ref.invalidate(
-                                          walletProvider(selectedChildId),
-                                        );
-                                      }
-                                    },
-                              child: Text(
-                                record
-                                    ? '查看记录'
-                                    : task.status == TaskStatus.abandoned
-                                    ? '已放弃'
-                                    : task.status == TaskStatus.skipped
-                                    ? '已跳过'
-                                    : task.status == TaskStatus.completed
-                                    ? '已完成'
-                                    : task.sourceType ==
-                                          'automatic_wrong_review'
-                                    ? '去复习'
-                                    : '查看任务',
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                  loading: () => const SliverToBoxAdapter(
-                    child: LinearProgressIndicator(),
-                  ),
-                  error: (_, __) =>
-                      const SliverToBoxAdapter(child: Text('任务读取失败，请下拉重试')),
+                sliver: HomeTaskList(
+                  key: ValueKey(selectedChildId),
+                  childId: selectedChildId,
+                  familyId: children
+                      .firstWhere((child) => child.id == selectedChildId)
+                      .familyId,
+                  onManageTasks: onManageTasks,
                 ),
               ),
             ],

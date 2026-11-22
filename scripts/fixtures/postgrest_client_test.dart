@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:learning_planet/core/offline/offline_store.dart';
 import 'package:learning_planet/features/auth_family/data/family_repository.dart';
 import 'package:learning_planet/features/auth_family/data/family_time_repository.dart';
+import 'package:learning_planet/features/auth_family/domain/parent_authorization_clock.dart';
 import 'package:learning_planet/features/tasks/data/offline_task_repository.dart';
 import 'package:learning_planet/features/tasks/data/task_repository.dart';
 import 'package:learning_planet/features/tasks/data/task_sync_remote.dart';
@@ -145,7 +146,12 @@ void main() {
         pin: '2468',
       );
       expect(verification.verified, isTrue);
-      expect(verification.authorizedUntil!.isAfter(DateTime.now()), isTrue);
+      expect(
+        verification.authorizedUntil!.isAfter(
+          ParentAuthorizationClock.device.now(),
+        ),
+        isTrue,
+      );
       expect(await SupabaseFamilyRepository(other).loadFamilies(), isEmpty);
       await expectLater(
         SupabaseFamilyRepository(
@@ -327,7 +333,7 @@ void main() {
   );
 
   test(
-    'file outbox survives restart and a lost HTTP answer reply without duplicate rewards',
+    'file outbox survives restart, clock correction and a lost HTTP answer reply without duplicate rewards',
     () async {
       final id = await child('离线 HTTP');
       final transport = FaultTransport();
@@ -344,6 +350,7 @@ void main() {
       );
       final file = File('${directory.path}/outbox.sqlite');
       var store = OfflineStore(NativeDatabase(file));
+      var deviceClockOffset = const Duration(days: 1);
       late OfflineTaskRepository tasks;
       late CachedReviewRepository reviews;
       void repositories() {
@@ -352,6 +359,7 @@ void main() {
           remote: SupabaseTaskSyncRemote(client),
           live: SupabaseTaskRepository(client),
           accountId: () => client.auth.currentUser?.id,
+          clock: () => DateTime.now().add(deviceClockOffset),
           autoSync: false,
         )..setForeground(false);
         reviews = CachedReviewRepository(
@@ -395,6 +403,11 @@ void main() {
         await tasks.synchronize(id);
         expect(transport.lostReplies, 1);
         expect((await SupabaseTaskRepository(parent).loadWallet(id)).coins, 15);
+        await tasks.dispose();
+        await store.close();
+        deviceClockOffset = Duration.zero;
+        store = OfflineStore(NativeDatabase(file));
+        repositories();
         await tasks.synchronize(id);
         expect(await store.commands(owner), isEmpty);
         expect((await tasks.loadWallet(id)).coins, 15);
@@ -456,6 +469,45 @@ void main() {
         ),
       );
       expect((await families.loadFamilies()).single.id, family);
+      final params = {'target_family_id': family, 'candidate_pin': '2468'};
+      final legacy =
+          (await parent.rpc<List<dynamic>>(
+                'verify_parent_pin',
+                params: params,
+              )).single
+              as Map<String, dynamic>;
+      expect(
+        legacy.keys,
+        unorderedEquals([
+          'verified',
+          'remaining_attempts',
+          'retry_at',
+          'authorized_until',
+        ]),
+      );
+      expect(legacy['verified'], isTrue);
+      final timed =
+          (await parent.rpc<List<dynamic>>(
+                'verify_parent_pin_timed',
+                params: params,
+              )).single
+              as Map<String, dynamic>;
+      expect(timed['verified'], isTrue);
+      final serverNow = DateTime.parse(timed['server_now'] as String);
+      final expires = DateTime.parse(timed['authorized_until'] as String);
+      expect(
+        expires.difference(serverNow).inSeconds,
+        inInclusiveRange(599, 600),
+      );
+      final context =
+          (await parent.rpc<List<dynamic>>('account_deletion_context')).single
+              as Map<String, dynamic>;
+      expect(context['id'], family);
+      expect(context['authorized'], isTrue);
+      expect(DateTime.parse(context['authorized_until'] as String), expires);
+      final checkedAt = DateTime.parse(context['server_now'] as String);
+      expect(checkedAt.isBefore(serverNow), isFalse);
+      expect(checkedAt.isBefore(expires), isTrue);
       final renewed = await families.verifyParentPin(
         familyId: family,
         pin: '2468',

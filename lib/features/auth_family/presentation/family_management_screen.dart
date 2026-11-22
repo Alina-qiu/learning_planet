@@ -143,7 +143,9 @@ class _FamilyManagementScreenState
       if (!context.mounted || !current()) return;
       if (!verified.verified ||
           verified.authorizedUntil == null ||
-          !verified.authorizedUntil!.isAfter(DateTime.now())) {
+          !verified.authorizedUntil!.isAfter(
+            ref.read(parentAuthorizationNowProvider)(),
+          )) {
         clearLocalParentAuthorization(ref);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PIN 已保存，但未取得有效家长授权。请返回首页重新验证 PIN。')),

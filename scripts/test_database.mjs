@@ -1143,9 +1143,20 @@ try {
     assert.equal((rows[1].scheduled_at - rows[0].scheduled_at) / 3600000, 23);
     await login();
   });
+  await check('PIN validity and account deletion share the authoritative server time', async () => {
+    const {rows:[grant]} = await client.query("select * from public.verify_parent_pin_timed($1,'1234')", [family]);
+    assert.equal(grant.verified, true);
+    const remaining = grant.authorized_until - grant.server_now;
+    assert.ok(remaining > 590000 && remaining <= 600000);
+    const context = (await scalar('select public.account_deletion_context()')).find(f => f.id === family);
+    assert.equal(context.authorized, true);
+    assert.equal(Date.parse(context.authorized_until), grant.authorized_until.getTime());
+    assert.ok(Date.parse(context.server_now) >= grant.server_now.getTime());
+  });
+
   await check('five PIN failures lock verification and revoke elevation', async () => {
     for (let i = 0; i < 5; i++) {
-      const row = (await client.query("select * from public.verify_parent_pin($1,'0000')", [family])).rows[0];
+      const row = (await client.query("select * from public.verify_parent_pin_timed($1,'0000')", [family])).rows[0];
       assert.equal(row.verified, false);
       assert.equal(row.remaining_attempts, 4-i);
       if (i===4) assert.ok(row.retry_at);

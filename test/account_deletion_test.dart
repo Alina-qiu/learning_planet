@@ -24,9 +24,7 @@ class FakeAccountDeletion implements AccountDeletionRepository {
       'name': '我的家庭',
       'owned': true,
       'authorized': pin,
-      'authorized_until': DateTime.now()
-          .add(const Duration(minutes: 5))
-          .toIso8601String(),
+      'authorization_deadline': DateTime.now().add(const Duration(minutes: 5)),
     },
   ];
   @override
@@ -150,12 +148,16 @@ void main() {
     Map<String, dynamic>? status,
     Stream<DateTime>? clock,
   }) async {
+    var leaseTime = DateTime.now();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          parentAuthorizationNowProvider.overrideWithValue(() => leaseTime),
           accountDeletionRepositoryProvider.overrideWithValue(repo),
           authorizationClockProvider.overrideWith(
-            (ref) => clock ?? Stream.value(DateTime.now()),
+            (ref) => (clock ?? Stream.value(DateTime.now())).map(
+              (at) => leaseTime = at,
+            ),
           ),
           notificationSchedulerProvider.overrideWithValue(
             const DisabledNotificationScheduler(),

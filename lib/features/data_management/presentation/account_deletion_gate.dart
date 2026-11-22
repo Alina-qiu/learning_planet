@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../auth_family/presentation/app_sign_out.dart';
+import '../../auth_family/application/family_providers.dart';
 import '../../auth_family/presentation/family_gate.dart';
 import '../../auth_family/presentation/entry_recovery_screen.dart';
 import '../../tasks/data/notification_scheduler.dart';
@@ -18,10 +19,14 @@ class AccountDeletionGate extends ConsumerStatefulWidget {
 class _AccountDeletionGateState extends ConsumerState<AccountDeletionGate>
     with WidgetsBindingObserver {
   Timer? _timer;
+  Timer? _parentExpiry;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ref.listenManual(parentAuthorizedUntilProvider, (_, until) {
+      _scheduleParentExpiry(until);
+    }, fireImmediately: true);
     if (ref.read(accountDeletionRepositoryProvider) != null) {
       _timer = Timer.periodic(
         const Duration(seconds: 30),
@@ -33,13 +38,31 @@ class _AccountDeletionGateState extends ConsumerState<AccountDeletionGate>
   @override
   void dispose() {
     _timer?.cancel();
+    _parentExpiry?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _scheduleParentExpiry(DateTime? until) {
+    _parentExpiry?.cancel();
+    if (until == null) return;
+    final remaining = until.difference(
+      ref.read(parentAuthorizationNowProvider)(),
+    );
+    if (remaining <= Duration.zero) return;
+    _parentExpiry = Timer(remaining, () {
+      ref.invalidate(activeParentFamilyProvider);
+      // A platform timer may wake slightly before the continuous-clock deadline.
+      _scheduleParentExpiry(until);
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      ref.invalidate(authorizationClockProvider);
+      ref.invalidate(activeParentFamilyProvider);
+      _scheduleParentExpiry(ref.read(parentAuthorizedUntilProvider));
       ref.invalidate(accountDeletionStatusProvider);
     }
   }

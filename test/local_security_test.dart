@@ -111,6 +111,102 @@ void main() {
   tearDown(() async => directory.delete(recursive: true));
 
   test(
+    'startup recovers a hot journal even after a wrong key attempt',
+    () async {
+      final committed = {
+        'command_id': 'saved',
+        'task_id': 'task',
+        'answer': marker,
+      };
+      final store = await openEncrypted(directory, secrets);
+      await store.enqueue('parent', 'child', committed);
+      await store.write('parent', 'last-commit', {'answer': marker});
+      await store.close();
+      final key = secrets.values[EncryptedDatabase.keyName]!;
+      final failedLaunch = await directory.createTemp('wrong-key-');
+      final cleanLaunch = await directory.createTemp('first-try-');
+      final writer = sqlite3.open(finalFile().path, mode: OpenMode.readWrite);
+      try {
+        EncryptedDatabase.configure(writer, key);
+        writer.execute('PRAGMA journal_mode = DELETE');
+        writer.execute('PRAGMA synchronous = FULL');
+        writer.execute('PRAGMA cache_size = 3');
+        writer.execute('PRAGMA cache_spill = ON');
+        writer.execute(
+          'CREATE TABLE spill(id INTEGER PRIMARY KEY, value TEXT)',
+        );
+        final saved = marker.padRight(3500, 'a');
+        writer.execute(
+          '''
+        WITH RECURSIVE ids(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM ids WHERE id<64)
+        INSERT INTO spill SELECT id, ? FROM ids''',
+          [saved],
+        );
+        writer.execute('BEGIN IMMEDIATE');
+        writer.execute("DELETE FROM task_outbox WHERE command_id='saved'");
+        writer.execute(
+          "UPDATE offline_cache SET payload='{}' WHERE cache_key='last-commit'",
+        );
+        writer.execute('UPDATE spill SET value=?', [
+          imageMarker.padRight(3500, 'b'),
+        ]);
+        final journal = File('${finalFile().path}-journal');
+        // A nonzero magic header distinguishes a synced rollback journal from
+        // one SQLite created but never had to spill dirty pages for.
+        expect(journal.readAsBytesSync().take(8), [
+          0xd9,
+          0xd5,
+          0x05,
+          0xf9,
+          0x20,
+          0xa1,
+          0x63,
+          0xd7,
+        ]);
+        expectNoPlaintext(finalFile());
+        expectNoPlaintext(journal);
+        for (final crash in [cleanLaunch, failedLaunch]) {
+          final path = '${crash.path}/${EncryptedDatabase.fileName}';
+          finalFile().copySync(path);
+          journal.copySync('$path-journal');
+        }
+      } finally {
+        writer.close();
+      }
+      secrets.values[EncryptedDatabase.keyName] = fixedKey;
+      await expectLater(
+        openEncrypted(failedLaunch, secrets),
+        throwsA(isA<LocalDataException>()),
+      );
+      secrets.values[EncryptedDatabase.keyName] = key;
+      for (final crash in [cleanLaunch, failedLaunch]) {
+        final recovered = await openEncrypted(crash, secrets);
+        try {
+          expect(await recovered.read('parent', 'last-commit'), {
+            'answer': marker,
+          });
+          final commands = await recovered.commands('parent');
+          expect(commands.single['command'], committed);
+          expect(commands.single['state'], 'pending');
+          final rows = await recovered
+              .customSelect('SELECT value FROM spill')
+              .get();
+          expect(rows, hasLength(64));
+          expect(
+            rows.every(
+              (row) => row.read<String>('value') == marker.padRight(3500, 'a'),
+            ),
+            isTrue,
+          );
+        } finally {
+          await recovered.close();
+        }
+        expectNoPlaintext(File('${crash.path}/${EncryptedDatabase.fileName}'));
+      }
+    },
+  );
+
+  test(
     'real bundled cipher persists all tables and rejects missing or wrong keys',
     () async {
       final store = await openEncrypted(directory, secrets);

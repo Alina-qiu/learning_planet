@@ -2,19 +2,29 @@
 
 核对日期为 2026-11-23。本文汇总当前交付范围及验收进度，[PROGRESS.md](PROGRESS.md)保留各轮历史。
 
-**目前可交付Android本地调试包，尚不能认定整个App开发和验收完成。** 核心业务已有实现及本机测试，但云端、iOS、华为鸿蒙4.2/iPhone、完整性能和连续家庭使用尚未验收；另有下文列出的已知实现缺口与待决策范围。没有以测试数量推算功能完成百分比。
+**Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。华为鸿蒙 4.2 和 iPhone 的安装、真实推送、生产性能、云端部署及连续家庭使用仍待验证。
 
 需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，SHA256 `4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`；本轮重新核对文件摘要，前一轮已重提正文并确认与读取内容一致。
 
-本轮修复了三处用户流程。
+## 当前开发进度
+
+冒险大厅支持直接开始、暂停、继续和完成普通任务。孩子可以在任务卡看到有效时长；最低时长、离线待确认和自动复习的逐题判定继续由相应的任务流程处理。
+
+设备校时后，重新打开应用首次联网会核对之前未收到回执的操作。同一账号刷新令牌时，客户端现在保留正在执行的账号状态和家庭概览查询。迁移 071 向新版客户端返回家长 PIN 的服务器时间，手机用包含休眠时间的单调时钟计算剩余授权，退回前台也会检查期限。
+
+应用在数据库写入期间被系统终止后，重开会由 SQLite 回滚未提交的写入，再校验加密库并恢复已提交的数据。已用保留原数据库和回滚日志的 API 36 模拟器覆盖安装验证，进入原家庭后仍有 35 金币和原账本记录。
+
+本版在 Windows 通过全部 842 项 Flutter 测试和静态分析，核心行覆盖率 90.62%。本机 PostgreSQL 通过 405 项检查和 14 项有数据升级检查。PostgREST 16.2 处理了 99 次实际 HTTP 请求，覆盖新版 PIN、旧客户端兼容和设备校时后重放原命令。
+
+最近一次已完成的十项远程检查对应提交 `a5dcade`，包括 834 项 Flutter 测试、404 项数据库检查、iOS SDK 27.2 的 Debug 和 Release 编译，以及三个 iOS 模拟器目标。当前源码的构建记录按提交保存在草稿 PR 中。[上版 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45049143322) · [草稿 PR](https://github.com/Alina-qiu/learning_planet/pull/1)
+
+上一版修复了三处用户流程。
 
 - 家长手工录入或编辑错题时，保存失败可在原页重试。数据库用同一次保存的请求标识识别重复提交，服务器已落库而手机未收到回执时也只保存一次。服务端提示 PIN 授权已过期时，编辑页会遮住草稿，家长可当场重新验证并继续编辑。错题编辑区也会避开系统底部与侧边导航栏，窄屏和双倍字号均可滚动到保存按钮。
 - 练习卷历史、预览和下载使用数据库时间判断 30 天保留期。手机日期提前或落后均按服务器结果处理。读取失败时可重试。
 - 周期任务按家庭日历日校验日期跨度，支持从开始日选择完整周期、将开始日改回，以及输入中文逗号分隔的自定义日期。
 
-新版客户端需要迁移 069 和 070。上一个提交 `2da781f` 的 10 项 CI 均已通过，含 823 项 Flutter、403 项数据库、iOS 27.2 SDK 未签名编译及三个模拟器上的离线任务流程。当前分支的构建结果见草稿 PR。[上版 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/43369796685) · [草稿 PR](https://github.com/Alina-qiu/learning_planet/pull/1)
-
-本机完整 Flutter 测试 834 项、数据库检查 404 项和静态分析均通过，核心行覆盖率 90.79%。PostgREST 实际处理 96 次 HTTP 请求，验证已提交的保存请求在丢失回执后可安全重试。14 项历史数据升级检查通过。PDF 联调通过 3 项客户端测试与 4 组服务测试，包括读取原文件、阻止过期访问以及清理对象。当前可用的本机安装包与运行条件见[Android 构建记录](ANDROID_BUILD.md)。
+旧版提交 `a5dcade` 的本机验证也包含核心行覆盖率 90.79%、96 次实际 PostgREST 请求、14 项历史升级检查，以及 3 项客户端和 4 组服务端 PDF 联调。这版用迁移 069 判断练习卷期限，用迁移 070 恢复错题保存。当前可用的安装包与运行条件见[Android 构建记录](ANDROID_BUILD.md)。
 
 本轮修复[奖励页大字号和窄窗口适配](ECONOMY_ACCESSIBILITY.md)：摘要与待确认请求随页面滚动，避开系统安全区域；新增5项，完整823项Flutter测试通过。用户已确认暂时没有可连接的测试手机，真机验收继续保留，未用窗口模拟结果替代。
 
@@ -34,7 +44,7 @@
 |---|---|---|
 | 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS Debug/Release](IOS_BUILD.md)已通过CI未签名编译及资源检查，尚未签名或真机运行 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
-| 后端 | Supabase PostgreSQL/Auth/Storage，72 份业务迁移至 070 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
+| 后端 | Supabase PostgreSQL/Auth/Storage，73 份业务迁移至 071 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
@@ -73,7 +83,7 @@
 | TSK-04 状态转换/禁止孩子撤销 | `lib/features/tasks/domain/task_state_machine.dart`、[实际任务流程](LOCAL_DEBUG.md) | 双端并发操作实机验收 |
 | TSK-05 家长补签或纠正 | 补签及[计时纠正](TASK_TIME_CORRECTIONS.md)有原因、审计和版本检查 | 是否还包含撤回误完成，用户尚未答复；不能把这一扩展视为已实现 |
 | TSK-06 智能提醒 | [本地通知](LOCAL_NOTIFICATIONS.md)、[原生授权场景](../build/integration_results/notifications-granted.json) | 用户选择[收到后复查的远程方案](TASK_REMOTE_PUSH.md)，已实现且Swift策略/构建通过，真实供应商与真机仍待验证；可能漏提醒，不能保证系统最终展示时刻 |
-| TSK-07 每日自动复习 | [自动完成](REVIEW_AUTO_COMPLETION.md)、[实际复习流程](../build/local_review_results/ui-flow.json)，唯一日期任务/冻结题目 | 托管00:05调度、两端及长期跨日验证 |
+| TSK-07 每日自动复习 | [自动完成](REVIEW_AUTO_COMPLETION.md)、[实际复习流程](../build/local_review_results/ui-flow.json)，每个孩子每天只有一项自动复习 | 当前在生成时固定题集。开始前是否补入新到期题仍待确认；托管 00:05 调度和跨端流程待验证 |
 | ERR-01 拍照/多图/裁剪 | [OCR管理](OCR_MANAGEMENT.md)、[原生多选报告](../build/integration_results/image-import-native.json)、[中断草稿](OCR_INTERRUPTION.md) | 真机相机权限、系统回收期间选择恢复及真实图片 |
 | ERR-02 逐字段校对 | [字段校对](OCR_FIELD_CORRECTION.md)、[源图片变更](OCR_SOURCE_CHANGES.md) | 真实教材复杂版式与识别质量，不能以合成图片代替 |
 | ERR-03 学科/知识点 | [题目目录](QUESTION_CATALOG_PAGINATION.md)、`lib/features/wrong_questions/presentation/review_question_editor.dart` | 双设备编辑与真实数据规模 |
@@ -96,7 +106,7 @@
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
 | 7.1–7.3 AI契约/审核/隐私 | [AI分析](AI_ANALYSIS.md)、[相似题](SIMILAR_QUESTIONS.md)、[上传提示](WORKSHEET_ACCESSIBILITY.md) | 实际供应商配置、预算和保留策略、教材质量评测；端侧自动模糊未实现，PRD将其列为可选 |
-| 8 数据模型/状态机 | 72 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
+| 8 数据模型/状态机 | 73 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
 | 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实HMS/APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
 | 12 / 15 迭代与原型 | MVP及多项V1.1/V1.2能力已有实现；当前验收基于真实App与服务测试 | V2学习伙伴、家庭协作、成熟动画按PRD验证后决定，不用加入新模块替代当前验收 |
@@ -107,7 +117,7 @@
 |---|---|---|
 | 冷启动<3秒、列表<1.5秒、反馈<500ms | [性能记录](APP_PERFORMANCE.md)：合成数据任务列表/本机完成提示有观测；生产入口profile配置页中位数约4.27秒 | 没有完整真实首页达标证据。图形表面等待不能直接归因到通知插件CPU；没有以跳过清理改善分数 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
-| 事务、幂等、冲突 | 当前823项Flutter、403项数据库检查；真实并发80条离线命令及重复退款报告通过 | 目标云端负载、长时间运行及双端实机 |
+| 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | 实际APK前台及重开后分别14.422秒/7.087秒发起同步 | 本机回环连接断开不代表无线网络、后台或两端实机 |
 | 加密、RLS、密钥隔离 | 加密库、模拟器KeyStore、私有Storage/签名链接、账号隔离与权限回归 | iOS/真机备份与物理清理、目标部署配置审查 |
 | 最少收集、按孩子导出/删除、关闭AI | 对应仓库、迁移及真实本机删除流程 | 云端保留期限与供应商政策、真实导出/删除完成时间 |
@@ -116,19 +126,21 @@
 
 ## AC-01至AC-11验收结论
 
-| 编号 | 当前证据 | 最终验收状态 |
+按第 13 节逐项核对通过条件。下表给出各项已经覆盖的环境；目标手机与部署环境的验证列在第 9 节及下一阶段。
+
+| 编号 | 当前证据 | PRD 场景状态 |
 |---|---|---|
-| AC-01 Android/iOS同步且只奖励一次 | 真实本机多会话及幂等证据 | **未完成**：缺少Android到iOS实机流程 |
-| AC-02 重复提交只有一条奖励 | 数据库重放、实际App重复同步、并发报告 | 本机范围通过；云端/实机待验收 |
-| AC-03 改时不重复生成或领奖 | 服务端日期、唯一约束、命令重放测试 | 真实设备改时与托管跨日待验收 |
-| AC-04 离线打卡、上线余额一致 | [实际复习](../build/local_review_results/ui-flow.json)、[自动同步](../build/auto_sync_device_results/walkthrough.json) | API36本机服务范围通过；两端无线网络待验收 |
-| AC-05 拒绝兑换退回冻结金币 | [奖励HTTP报告](../build/economy_integration/results.json)、数据库及并发退款 | 本机范围通过；真实云端/手机待验收 |
-| AC-06 调账明细可追溯 | [实际界面报告](../build/wallet_details_results/walkthrough-20261106.json)，金额/账本ID不变 | API36本机服务范围通过；两端待验收 |
-| AC-07 PDF顺序/答案开关/预览一致 | 真实PDF、原字节预览/下载和页面截图 | 本机服务范围通过；两端系统导出待验收 |
-| AC-08 多孩子隔离 | 两孩子四会话并发、RLS及缓存范围测试 | 本机范围通过；跨端真实切换待验收 |
+| AC-01 Android/iOS同步且只奖励一次 | Android 和 iOS 分别有离线任务验证 | 待两端连接同一个服务，Android 完成后由 iOS 恢复联网核对状态和奖励 |
+| AC-02 重复提交只有一条奖励 | [并发报告](../build/concurrency_integration/results.json)记录 80 条命令重放、4 次丢回执及每个孩子的账本行数 | 本机服务重放场景通过 |
+| AC-03 改时不重复生成或领奖 | API 36 模拟器产生三天连续奖励，系统日期分别拨快、拨慢 48 小时，冷启动并重新从本机服务读取，核对原任务、奖励与账本 ID | 系统改时场景在 Android 模拟器与本机服务通过 |
+| AC-04 离线打卡、上线余额一致 | [自动同步](../build/auto_sync_device_results/walkthrough.json)记录待同步操作、联网确认后 50 金币 / 40 XP 和稳定的四条账本 ID | API 36 模拟器连接本机服务的场景通过 |
+| AC-05 拒绝兑换退回冻结金币 | [奖励 HTTP 报告](../build/economy_integration/results.json)及[并发退款](../build/concurrency_integration/results.json)，八次并发退款只入账一次 | 本机服务场景通过 |
+| AC-06 调账明细可追溯 | [实际界面报告](../build/wallet_details_results/walkthrough-20261106.json)记录 300 金币调账、操作者、时间和原因，重查时两条账本 ID 相同 | API 36 模拟器连接本机服务的场景通过 |
+| AC-07 PDF顺序/答案开关/预览一致 | [实际 PDF 联调](PDF_INTEGRATION.md)核对题目顺序和答案页，客户端比较预览与导出的文件字节 | 本机渲染与客户端读取场景通过 |
+| AC-08 多孩子隔离 | [界面切换回归](../test/child_switch_isolation_test.dart)在一次切换中核对任务、钱包和错题，控制旧孩子的响应先后返回；[并发报告](../build/concurrency_integration/results.json)核对真实服务 | 界面层与服务层的本地场景通过 |
 | AC-09 安静时段不推送、不扣分 | Android实际闹钟过滤、静默与奖励回归 | **未完成验收**：已按用户选择改为收到后校验，Swift策略与构建已通过，仍待真实供应商/目标手机 |
 | AC-10 清楚说明并在承诺期限内注销 | 本机真实Auth/Storage/S3删除与失败恢复 | **未完成**：托管调度与真实承诺期限无证据 |
-| AC-11 三题唯一复习、全部作答自动结算 | 数据库规则及实际三题离线/重开/结算场景 | 本机范围通过；托管定时/跨端改时及真实周期待验收 |
+| AC-11 三题唯一复习、全部作答自动结算 | 数据库验证生成器重跑和零题不生成，API 36 已实际完成三题离线作答、重开和结算 | 仍需在同一家庭串联跨端登录、设备改时和生成器重跑，核对同一任务与逐题结果 |
 
 ## 本次检查结果及下一阶段
 
@@ -142,7 +154,7 @@
 
 较早的机器盘点记录见[状态核对结果](../build/acceptance_audit/current.json)，明确记录目标未完成；它只索引该轮文件与历史运行证据，不包含后续恢复测试和此次界面适配，也不是新的端到端测试报告。README的旧阶段说明已原文归档到[历史状态](README_STATUS_HISTORY.md)。
 
-本机当前为Windows，ADB设备列表为空；iOS未签名编译已通过远程macOS完成，尚无签名安装和iPhone运行证据。用户此前明确暂未准备云端项目，撤回误完成范围仍待答复。
+本机使用 Windows 和 Android 模拟器。用户暂时没有可连接的华为测试手机，也未准备开发用 Supabase 项目。iOS 编译和模拟器检查在远程 macOS 上执行；签名安装仍需专用测试条件。
 
 下一阶段需保留完整目标，按以下依赖推进：
 

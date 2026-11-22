@@ -237,6 +237,7 @@ void main() {
     final now = DateTime.utc(2026, 9, 16);
     final container = ProviderContainer(
       overrides: [
+        parentAuthorizationNowProvider.overrideWithValue(() => now),
         authorizationClockProvider.overrideWith((ref) => Stream.value(now)),
       ],
     );

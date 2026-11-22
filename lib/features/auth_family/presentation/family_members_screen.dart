@@ -28,7 +28,9 @@ class _FamilyMembersScreenState extends ConsumerState<FamilyMembersScreen> {
   bool get _authorized =>
       ref.read(activeParentFamilyProvider) == widget.familyId &&
       !ref.read(signingOutProvider) &&
-      (ref.read(parentAuthorizedUntilProvider)?.isAfter(DateTime.now()) ??
+      (ref
+              .read(parentAuthorizedUntilProvider)
+              ?.isAfter(ref.read(parentAuthorizationNowProvider)()) ??
           false);
 
   @override

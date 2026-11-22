@@ -741,6 +741,34 @@ void main() {
   });
 
   test(
+    'cold start retries an unacknowledged completion after a device clock correction',
+    () async {
+      final serverTime = now;
+      remote = FakeTaskRemote(() => serverTime)..seed('child');
+      await repository.dispose();
+      now = serverTime.add(const Duration(days: 1));
+      repository = make()..setForeground(false);
+      await repository.synchronize('child');
+      await repository.start('task-child');
+      await repository.synchronize('child');
+      await repository.complete('task-child');
+      remote.failAfterCommit = true;
+      await repository.synchronize('child');
+      final pending = (await store.commands('user-a')).single;
+      expect(pending['next_attempt'], greaterThan(now.millisecondsSinceEpoch));
+      expect(remote.wallets['child']!['coin_balance'], 110);
+
+      await repository.dispose();
+      now = serverTime;
+      repository = make()..setForeground(false);
+      await repository.synchronize('child');
+      expect(await store.commands('user-a'), isEmpty);
+      expect(remote.requests.last['command_id'], pending['command_id']);
+      expect((await repository.loadWallet('child')).coins, 110);
+    },
+  );
+
+  test(
     'family cache allows offline entry but never hides a known permission denial',
     () async {
       await store.write('user-a', 'families', {

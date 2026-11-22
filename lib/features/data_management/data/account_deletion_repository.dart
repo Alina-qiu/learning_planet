@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/offline/network_failure.dart';
 import '../../auth_family/application/auth_providers.dart';
+import '../../auth_family/domain/parent_authorization_clock.dart';
 import '../../tasks/application/task_providers.dart';
 import '../../tasks/data/offline_task_repository.dart';
 
@@ -28,7 +29,7 @@ final accountDeletionRepositoryProvider = Provider<AccountDeletionRepository?>((
 final accountDeletionStatusProvider = FutureProvider<Map<String, dynamic>?>((
   ref,
 ) {
-  ref.watch(authSessionProvider);
+  ref.watch(authAccountIdProvider);
   return ref.watch(accountDeletionRepositoryProvider)?.status();
 });
 
@@ -48,10 +49,24 @@ class SupabaseAccountDeletionRepository implements AccountDeletionRepository {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> context() async =>
-      (await _rpc<List<dynamic>>(
-        'account_deletion_context',
-      )).cast<Map<String, dynamic>>();
+  Future<List<Map<String, dynamic>>> context() async {
+    final started = ParentAuthorizationClock.device.now();
+    final rows = (await _rpc<List<dynamic>>(
+      'account_deletion_context',
+    )).cast<Map<String, dynamic>>();
+    return [
+      for (final row in rows)
+        {
+          ...row,
+          if (row['authorized'] == true && row['authorized_until'] != null)
+            'authorization_deadline': ParentAuthorizationClock.deadline(
+              started,
+              row,
+            ),
+        },
+    ];
+  }
+
   @override
   Future<Map<String, dynamic>> preview() => _rpc('preview_account_deletion');
   @override

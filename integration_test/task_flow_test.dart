@@ -10,6 +10,7 @@ import 'package:learning_planet/app/app.dart';
 import 'package:learning_planet/core/offline/offline_store.dart';
 import 'package:learning_planet/core/security/device_secrets.dart';
 import 'package:learning_planet/core/security/encrypted_database.dart';
+import 'package:learning_planet/features/auth_family/domain/parent_authorization_clock.dart';
 import 'package:learning_planet/features/tasks/data/offline_task_repository.dart';
 import 'package:learning_planet/features/tasks/domain/task.dart';
 import 'package:learning_planet/features/tasks/presentation/task_management_screen.dart';
@@ -125,6 +126,8 @@ void main() {
     };
     binding.reportData = report;
     try {
+      final grantClock = ParentAuthorizationClock.device;
+      final openedAt = grantClock.now();
       store = OfflineStore(await EncryptedDatabase.open(run, secrets));
       await store.write(
         workloadOwner,
@@ -256,6 +259,8 @@ void main() {
       );
       expect((await repository.loadWallet(workloadChild)).coins, 100);
       report['encrypted_reopen_preserves_command_and_projection'] = true;
+      expect(grantClock.now().isAfter(openedAt), isTrue);
+      report['native_authorization_clock_advanced'] = true;
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       if (!remote.waiting.isCompleted) remote.waiting.complete();

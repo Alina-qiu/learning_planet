@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/family_repository.dart';
@@ -6,6 +7,7 @@ import '../data/family_members_repository.dart';
 import '../data/offline_family_repository.dart';
 import 'auth_providers.dart';
 import '../domain/family.dart' as domain;
+import '../domain/parent_authorization_clock.dart';
 
 final familyRepositoryProvider = Provider<FamilyRepository>(
   (ref) => throw UnimplementedError('FamilyRepository must be overridden.'),
@@ -32,7 +34,9 @@ final familyMembersRepositoryProvider = Provider<FamilyMembersRepository?>((
     isAuthorized: (family) =>
         !ref.read(signingOutProvider) &&
         ref.read(activeParentFamilyProvider) == family &&
-        (ref.read(parentAuthorizedUntilProvider)?.isAfter(DateTime.now()) ??
+        (ref
+                .read(parentAuthorizedUntilProvider)
+                ?.isAfter(ref.read(parentAuthorizationNowProvider)()) ??
             false),
     authorizationRevision: () => ref.read(parentAuthorizationRevisionProvider),
   );
@@ -49,15 +53,18 @@ final parentAuthorizationRevisionProvider = StateProvider<int>((ref) => 0);
 
 final parentFamilyIdProvider = StateProvider<String?>((ref) => null);
 
+final parentAuthorizationNowProvider = Provider<DateTime Function()>(
+  (ref) => ParentAuthorizationClock.device.now,
+);
+
 final parentAuthorizedUntilProvider = StateProvider<DateTime?>((ref) => null);
 final authorizationClockProvider = StreamProvider<DateTime>((ref) async* {
   yield DateTime.now();
   yield* Stream.periodic(const Duration(seconds: 1), (_) => DateTime.now());
 });
 final activeParentFamilyProvider = Provider<String?>((ref) {
-  final now = ref.watch(authorizationClockProvider).value ?? DateTime.now();
   final until = ref.watch(parentAuthorizedUntilProvider);
-  return ref.watch(parentModeProvider) && until != null && now.isBefore(until)
-      ? ref.watch(parentFamilyIdProvider)
-      : null;
+  if (!ref.watch(parentModeProvider) || until == null) return null;
+  if (!until.isAfter(ref.watch(parentAuthorizationNowProvider)())) return null;
+  return ref.watch(parentFamilyIdProvider);
 });

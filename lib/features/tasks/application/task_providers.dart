@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../auth_family/application/family_providers.dart';
 import '../data/task_repository.dart';
 import '../data/offline_task_repository.dart';
 import '../domain/task_sync_state.dart';
@@ -55,6 +56,19 @@ final tasksProvider = FutureProvider.family<List<TaskItem>, String>((
 ) {
   ref.watch(taskSyncStateProvider);
   return ref.watch(taskRepositoryProvider).loadTasks(childId);
+});
+
+final taskDisplayTimeProvider = Provider.autoDispose.family<DateTime?, String>((
+  ref,
+  child,
+) {
+  final tick = ref.watch(authorizationClockProvider);
+  final repository = ref.watch(taskRepositoryProvider);
+  if (repository is OfflineTaskRepository) {
+    ref.watch(tasksProvider(child));
+    return repository.displayTime(child);
+  }
+  return tick.valueOrNull ?? DateTime.now();
 });
 
 final taskSyncStateProvider = StreamProvider<TaskSyncState>((ref) async* {

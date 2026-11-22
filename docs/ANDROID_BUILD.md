@@ -1,5 +1,18 @@
 # Android 调试构建
 
+## 2026-11-23 冒险大厅与设备改时
+
+本版可以在冒险大厅直接操作普通任务。任务卡显示有效计时，离线完成后显示待同步。校时后重开会继续核对服务端回执；数据库写入被中断时，重新打开会恢复最后一次已提交的数据。
+
+两个包都使用调试签名。联调版通过 USB 转发连接电脑上的临时服务，可登录、建家庭并操作任务。普通版用于验证未配置服务时的启动页。SHA-256 校验文件在安装包旁，临时服务需加载至迁移 071。[本机联调步骤](LOCAL_DEBUG.md)
+
+| 安装包 | Android 应用 ID | SHA-256 |
+|---|---|---|
+| `build/app/outputs/flutter-apk/app-local-debug.apk` | `com.learningplanet.learning_planet.local` | `f50d03f22ae0e69f2a5fac839f008238b83b5c91dd815af8d28801c39e92ffde` |
+| `build/app/outputs/flutter-apk/app-debug.apk` | `com.learningplanet.learning_planet` | `bf89ca188aa18f3572447cdd90ab1f2a2d643170dfdfdce928bd9ef9022ce9dd` |
+
+升级验证保留了原模拟器的数据库、回滚日志和账号会话。恢复后钱包仍为 35 金币、0 冻结和 5 XP。将系统日期拨快及拨慢两天，应用都能进入原家庭并成功同步，三天连续奖励仍只有一条。模拟器为 Android API 36，华为鸿蒙 4.2 真机待验收。
+
 ## 2026-11-23 错题、任务日期与组卷调试包
 
 本版包含手工错题保存重试、周期任务日期选择、按服务器时间读取练习卷三项修复。两个安装包与构建时生成的 SHA-256 文件一起保存在 `build/app/outputs/flutter-apk/`。

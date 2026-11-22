@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:learning_planet/core/offline/offline_store.dart';
 import 'package:learning_planet/features/auth_family/data/family_repository.dart';
+import 'package:learning_planet/features/auth_family/domain/parent_authorization_clock.dart';
 import 'package:learning_planet/features/data_management/data/account_deletion_repository.dart';
 import 'package:learning_planet/features/data_management/data/child_deletion_repository.dart';
 import 'package:learning_planet/features/tasks/data/offline_task_repository.dart';
@@ -362,7 +363,12 @@ void main() {
       backend.handle = (r) {
         if (r.url.path.endsWith('/account_deletion_context')) {
           return MockSupabase.json(r, [
-            {'family_id': 'family'},
+            {
+              'id': 'family',
+              'authorized': true,
+              'server_now': '2040-01-01T00:00:00Z',
+              'authorized_until': '2040-01-01T00:02:00Z',
+            },
           ]);
         }
         if (r.url.path.endsWith('/preview_account_deletion')) {
@@ -387,7 +393,12 @@ void main() {
         await store.write(MockSupabase.firstUser, 'ai-request:$child', {
           'private': 'fixture',
         });
-        expect(await repo.context(), hasLength(1));
+        final deadline =
+            (await repo.context()).single['authorization_deadline'] as DateTime;
+        final remaining = deadline.difference(
+          ParentAuthorizationClock.device.now(),
+        );
+        expect(remaining.inSeconds, inInclusiveRange(118, 120));
         final scope = await repo.preview();
         await expectLater(
           repo.request(job, scope),
@@ -453,13 +464,12 @@ void main() {
             },
           ]);
         }
-        if (r.url.path.endsWith('/verify_parent_pin')) {
+        if (r.url.path.endsWith('/verify_parent_pin_timed')) {
           return MockSupabase.json(r, [
             {
               'verified': true,
-              'authorized_until': DateTime.now()
-                  .add(const Duration(minutes: 5))
-                  .toIso8601String(),
+              'server_now': '2001-03-02T00:00:00Z',
+              'authorized_until': '2001-03-02T00:05:00Z',
               'retry_at': null,
               'remaining_attempts': 5,
             },
@@ -477,10 +487,12 @@ void main() {
       expect(await repo.loadDeletedChildIds(), hasLength(502));
       await repo.setParentPin(familyId: 'f1', pin: '1234');
       await repo.inviteParent(familyId: 'f1', email: 'other@example.test');
-      expect(
-        (await repo.verifyParentPin(familyId: 'f1', pin: '1234')).verified,
-        isTrue,
+      final pin = await repo.verifyParentPin(familyId: 'f1', pin: '1234');
+      expect(pin.verified, isTrue);
+      final remaining = pin.authorizedUntil!.difference(
+        ParentAuthorizationClock.device.now(),
       );
+      expect(remaining.inSeconds, inInclusiveRange(298, 300));
       await repo.revokeParentAuthorization();
       backend.handle = (r) => MockSupabase.denied(r);
       await expectLater(

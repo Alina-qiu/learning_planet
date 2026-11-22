@@ -19,6 +19,26 @@ import '../../wrong_questions/domain/review_confidence.dart';
 import 'task_repository.dart';
 import 'task_sync_remote.dart';
 
+class _TaskClockAnchor {
+  const _TaskClockAnchor(this.received, this.server);
+  final DateTime received, server;
+
+  static _TaskClockAnchor? fromSnapshot(Map<String, dynamic> snapshot) {
+    final received = DateTime.tryParse(
+      snapshot['received_at'] as String? ?? '',
+    );
+    final server = DateTime.tryParse(snapshot['server_at'] as String? ?? '');
+    return received == null || server == null
+        ? null
+        : _TaskClockAnchor(received, server);
+  }
+
+  DateTime? at(DateTime deviceTime) {
+    final elapsed = deviceTime.difference(received);
+    return elapsed.inSeconds < -2 ? null : server.add(elapsed);
+  }
+}
+
 /// All child transitions use a write-ahead outbox, online and offline alike.
 class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   OfflineTaskRepository({
@@ -52,6 +72,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   final _remoteDeletions = StreamController<String>.broadcast();
   Stream<String> get remoteDeletions => _remoteDeletions.stream;
   final _lastAttempt = <String, DateTime>{};
+  final _displayClocks = <String, _TaskClockAnchor>{};
   Future<void> _tail = Future.value();
   Future<void>? _inFlight;
   String? _syncOwner, _syncChild;
@@ -77,6 +98,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     _owner = accountId();
     _activeChild = null;
     _lastAttempt.clear();
+    _displayClocks.clear();
     _emit(const TaskSyncState());
   }
 
@@ -85,6 +107,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     _syncAgain = false;
     await store.removeAccountData(owner, jobId);
     _lastAttempt.clear();
+    _displayClocks.clear();
     _emit(const TaskSyncState());
   }
 
@@ -92,6 +115,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     if (_activeChild == childId) _activeChild = null;
     _syncAgain = false;
     _lastAttempt.remove(childId);
+    _displayClocks.remove(childId);
     await store.removeChildData(childId);
     if (notifyUi && !_disposed) _remoteDeletions.add(childId);
     if (accountId() != null) await _publish(_account(), TaskSyncPhase.synced);
@@ -260,10 +284,15 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   }
 
   DateTime _anchoredNow(Map<String, dynamic> snapshot) {
-    final received = DateTime.parse(snapshot['received_at'] as String);
-    final elapsed = clock().difference(received);
-    if (elapsed.inSeconds < -2) throw StateError('设备时间发生倒退，请联网校准后重试');
-    return DateTime.parse(snapshot['server_at'] as String).add(elapsed);
+    final anchor = _TaskClockAnchor.fromSnapshot(snapshot);
+    if (anchor == null) throw StateError('缺少任务时间快照，请联网校准后重试');
+    return anchor.at(clock()) ?? (throw StateError('设备时间发生倒退，请联网校准后重试'));
+  }
+
+  /// The same snapshot used to display these tasks, read without I/O on ticks.
+  DateTime? displayTime(String childId) {
+    if (_disposed || _owner == null || _owner != accountId()) return null;
+    return _displayClocks[childId]?.at(clock());
   }
 
   Future<String> _prepare(String childId) async {
@@ -311,6 +340,12 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
         tasks[task.id] = _project(task, command);
       }
       _check(owner);
+      final anchor = _TaskClockAnchor.fromSnapshot(cache);
+      if (anchor == null) {
+        _displayClocks.remove(childId);
+      } else {
+        _displayClocks[childId] = anchor;
+      }
       return TaskItem.ordered(tasks.values);
     });
   }
@@ -742,8 +777,12 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
       if (_activeChild == childId) _activeChild = null;
       return;
     }
-    final recovering =
-        _state.phase == TaskSyncPhase.offline || _state.message != null;
+    // A persisted retry deadline uses the previous process's device clock.
+    // On first contact, replay pending IDs against the fresh server snapshot.
+    final retryPendingNow =
+        _lastAttempt.isEmpty ||
+        _state.phase == TaskSyncPhase.offline ||
+        _state.message != null;
     _lastAttempt[childId] = clock();
     await _publish(owner, TaskSyncPhase.syncing);
     final diagnosticScope = _diagnostics.capture(),
@@ -776,7 +815,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
         if (await store.isChildDeleted(row['child_id'] as String)) continue;
         final taskId = row['task_id'] as String;
         if (row['state'] != 'pending' || blocked.contains(taskId)) continue;
-        if (!recovering &&
+        if (!retryPendingNow &&
             (row['next_attempt'] as int) > clock().millisecondsSinceEpoch) {
           blocked.add(taskId);
           continue;
