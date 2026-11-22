@@ -63,23 +63,81 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  sync:
-    needs: fixtures
+  ios-fixture:
     runs-on: macos-15-intel
-    timeout-minutes: 80
+    timeout-minutes: 35
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: cross-device-test-tools
-          path: build/cross-device
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.4'
           channel: stable
           cache: true
+      - name: Select a build target on iOS 18.5
+        run: python3 scripts/select_cross_device_iphone.py
+      - run: flutter pub get
+      - name: Build standalone iOS simulator driver app
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          for attempt in 1 2; do
+            if flutter build ios --simulator --debug --no-pub --publish-port -d "$SIMULATOR_ID" \
+                --target=integration_test/cross_device_sync_test.dart \
+                --dart-define=LOCAL_BACKEND=true \
+                --dart-define=SUPABASE_URL=http://127.0.0.1:54325 \
+                --dart-define=SUPABASE_ANON_KEY=sb_publishable_cross_device_loopback_fixture \
+                2>&1 | tee "$RUNNER_TEMP/cross-device-build.log"; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" = 2 ] || ! grep -Fq 'Could not resolve host: dl.google.com' "$RUNNER_TEMP/cross-device-build.log"; then
+              exit "$status"
+            fi
+            echo 'Retrying the Google CocoaPods download after a DNS failure'
+          done
+      - name: Archive the simulator app with its executable modes and symlinks
+        run: |
+          test -x build/ios/iphonesimulator/Runner.app/Runner
+          tar -czf "$RUNNER_TEMP/ios-fixture.tar.gz" -C build/ios/iphonesimulator Runner.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-device-ios-fixture
+          path: ${{ runner.temp }}/ios-fixture.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  sync:
+    needs: [fixtures, ios-fixture]
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-device-test-tools
+          path: build/cross-device
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-device-ios-fixture
+          path: ${{ runner.temp }}
+      - name: Restore the prebuilt simulator app
+        run: |
+          mkdir -p build/ios/iphonesimulator
+          tar -xzpf "$RUNNER_TEMP/ios-fixture.tar.gz" -C build/ios/iphonesimulator
+          test -x build/ios/iphonesimulator/Runner.app/Runner
+          plutil -lint build/ios/iphonesimulator/Runner.app/Info.plist
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -96,44 +154,26 @@ jobs:
           sdkmanager --install 'emulator' 'platform-tools' 'system-images;android-29;default;x86_64'
           echo no | avdmanager create avd --name cross-device-android \
             --package 'system-images;android-29;default;x86_64' --device 'pixel_2'
-      - name: Prepare disposable backend binaries
+      - run: npm ci
+      - name: Check simulator and backend startup handling
+        run: python3 scripts/test_cross_device_startup.py
+      - name: Install and verify disposable backend binaries before boot
         run: |
-          chmod +x build/cross-device/auth
-          build/cross-device/auth version
+          install -m 755 build/cross-device/auth "$RUNNER_TEMP/cross-device-auth"
+          "$RUNNER_TEMP/cross-device-auth" version
           curl -fsSL --retry 3 https://github.com/PostgREST/postgrest/releases/download/v16.2/postgrest-v16.2-macos-x86-64.tar.xz -o "$RUNNER_TEMP/postgrest.tar.xz"
           echo "b69938d92a6a73a56732038bbc37383eeb26d6e554dba66d6a0410a96a493cda  $RUNNER_TEMP/postgrest.tar.xz" | shasum -a 256 -c -
           tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP"
+          if [ ! -e /usr/local/opt/libpq/lib/libpq.5.dylib ]; then
+            brew install libpq
+          fi
+          "$RUNNER_TEMP/postgrest" --version
           echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest" >> "$GITHUB_ENV"
-          echo "GOTRUE_BIN=$PWD/build/cross-device/auth" >> "$GITHUB_ENV"
-          npm ci
-      - name: Select an iPhone on iOS 18.5
-        run: |
-          python3 - <<'PY'
-          import json, os, subprocess
-          devices = json.loads(subprocess.check_output(["xcrun","simctl","list","devices","available","--json"]))["devices"]
-          candidates = [device for device in devices.get("com.apple.CoreSimulator.SimRuntime.iOS-18-5", [])
-                        if device["isAvailable"] and device["name"].startswith("iPhone ")]
-          if not candidates:
-              raise SystemExit("No iPhone simulator with iOS 18.5")
-          device = max(candidates, key=lambda item: item["name"])
-          with open(os.environ["GITHUB_ENV"], "a") as destination:
-              destination.write("SIMULATOR_ID=" + device["udid"] + "\n")
-          print(device["name"])
-          PY
-      - run: flutter pub get
-      - name: Build standalone iOS simulator driver app
-        timeout-minutes: 18
-        run: |
-          flutter build ios --simulator --debug --no-pub --publish-port -d "$SIMULATOR_ID" \
-            --target=integration_test/cross_device_sync_test.dart \
-            --dart-define=LOCAL_BACKEND=true \
-            --dart-define=SUPABASE_URL=http://127.0.0.1:54325 \
-            --dart-define=SUPABASE_ANON_KEY=sb_publishable_cross_device_loopback_fixture
-      - name: Boot selected iPhone
-        timeout-minutes: 8
-        run: xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          echo "GOTRUE_BIN=$RUNNER_TEMP/cross-device-auth" >> "$GITHUB_ENV"
+      - name: Select a local iPhone on iOS 18.5 for the paired run
+        run: python3 scripts/select_cross_device_iphone.py
       - name: Exercise the two apps against one database
-        timeout-minutes: 47
+        timeout-minutes: 55
         run: python3 scripts/run_cross_device_sync.py
       - uses: actions/upload-artifact@v4
         if: always()

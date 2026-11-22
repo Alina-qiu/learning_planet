@@ -3,9 +3,43 @@ import {randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
+import {constants as osConstants} from 'node:os';
+import {resolve} from 'node:path';
 import {startTestDatabase} from './database.mjs';
 import {localMailbox} from './local_mailbox.mjs';
 import {freePort, listen, closeServer, forwardHttp, isolatedEnv, localProcess, signedJwt, startPostgrest} from './http_test_tools.mjs';
+
+// A cold verifier on a hosted Mac can take longer than the local default.
+// A failed process can print paths or configuration. Only report OS identifiers
+// and a fixed diagnostic category from its stderr.
+function checkAuthVersion(binary) {
+  const timeout = Number(process.env.AUTH_VERSION_TIMEOUT_MS ?? 10000);
+  if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 180000) throw new Error('Invalid AUTH_VERSION_TIMEOUT_MS');
+  const result = spawnSync(binary, ['version'], {encoding:'utf8', windowsHide:true, timeout, killSignal:'SIGKILL'});
+  if (result.error || result.status !== 0) {
+    const errno = result.error ? (Object.hasOwn(osConstants.errno, result.error.code) ? result.error.code : 'OTHER') : 'none';
+    const signal = result.signal ? (Object.hasOwn(osConstants.signals, result.signal) ? result.signal : 'OTHER') : 'none';
+    const exit = Number.isInteger(result.status) ? result.status : 'none';
+    let stderr = 'none';
+    for (const line of (result.stderr ?? '').split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      if (/dyld|library not loaded|symbol not found/i.test(line)) stderr = 'loader';
+      else if (/exec format error|bad cpu type/i.test(line)) stderr = 'architecture';
+      else if (/out of memory|cannot allocate memory|resource temporarily unavailable/i.test(line)) stderr = 'resources';
+      else if (/permission denied|operation not permitted/i.test(line)) stderr = 'permission';
+      else stderr = 'unclassified';
+      break;
+    }
+    throw new Error(`GoTrue version probe failed: errno=${errno} exit=${exit} signal=${signal} timeout_ms=${timeout} stderr=${stderr}`);
+  }
+  const version = result.stdout.trim();
+  if (!/^v2\.196\.0(?:-windows-local)?$/.test(version)) throw new Error('Expected pinned Auth v2.196.0');
+  return version;
+}
+
+function startupStage(stage) {
+  if (process.env.CROSS_DEVICE_STARTUP_STAGES === '1') console.log('AC01_BACKEND_STAGE ' + stage);
+}
 
 export async function withAuthBackend(run, {createStorage, verifyTraffic = true, tokenLifetimeSeconds = 1800, localCredentials, restoreDatabase} = {}) {
   if (!Number.isInteger(tokenLifetimeSeconds) || tokenLifetimeSeconds < 60 || tokenLifetimeSeconds > 86400) {
@@ -17,7 +51,9 @@ export async function withAuthBackend(run, {createStorage, verifyTraffic = true,
     || localCredentials.createdAt+315360000 <= Math.floor(Date.now()/1000))) {
     throw new Error('Invalid or expired isolated local credentials');
   }
-  const binary = process.env.GOTRUE_BIN ?? 'auth';
+  const configuredBinary = process.env.GOTRUE_BIN ?? 'auth';
+  // Later migrations change cwd. Probe and launch the same executable.
+  const binary = /[/\\]/.test(configuredBinary) ? resolve(configuredBinary) : configuredBinary;
   const configuration = await readFile('supabase/config.toml', 'utf8');
   function setting(section, key) {
     let current = '';
@@ -45,10 +81,10 @@ export async function withAuthBackend(run, {createStorage, verifyTraffic = true,
   let authRequests = 0, restRequests = 0, storageRequests = 0, unexpectedPaths = 0;
   let quiesced = false;
   try {
-    const version = spawnSync(binary, ['version'], {encoding: 'utf8', windowsHide: true, timeout: 10000});
-    if (version.error || version.status !== 0) throw new Error('Set GOTRUE_BIN to the prepared Auth executable');
-    if (!/^v2\.196\.0(?:-windows-local)?$/.test(version.stdout.trim())) throw new Error('Expected pinned Auth v2.196.0');
-    console.log(`GoTrue ${version.stdout.trim()}; project email settings; loopback SMTP only`);
+    startupStage('auth-version');
+    const version = checkAuthVersion(binary);
+    console.log(`GoTrue ${version}; project email settings; loopback SMTP only`);
+    startupStage('loopback-services');
     mailbox = await localMailbox();
     authPort = await freePort();
     gateway = createServer((incoming, outgoing) => {
@@ -91,6 +127,7 @@ export async function withAuthBackend(run, {createStorage, verifyTraffic = true,
       GOTRUE_RATE_LIMIT_EMAIL_SENT: '1000', GOTRUE_LOG_LEVEL: 'error',
     });
     storage = await createStorage?.({secret, url});
+    startupStage('database');
     database = await startTestDatabase({port: await freePort(), restoreDatabase, bootstrapStorage: storage?.bootstrap, bootstrapAuth: async ({client, port, directory, restored}) => {
       if (!restored) await client.query(`
         create role supabase_auth_admin login noinherit nocreatedb nocreaterole nosuperuser password 'auth-test-only';
@@ -105,11 +142,14 @@ export async function withAuthBackend(run, {createStorage, verifyTraffic = true,
     }});
     const count = (await database.client.query('select count(*)::integer as count from auth.schema_migrations')).rows[0].count;
     console.log(`GoTrue real schema: ${count} migrations; no synthetic users`);
+    startupStage('auth-health');
     auth = localProcess(binary, ['serve'], {env: authEnv, cwd: database.directory, name: 'GoTrue'});
     await auth.ready(`http://127.0.0.1:${authPort}/health`);
+    startupStage('postgrest');
     rest = await startPostgrest(database, secret);
     const issuedAt=localCredentials?.createdAt ?? Math.floor(Date.now()/1000);
     const expiresAt=issuedAt+(localCredentials ? 315360000 : tokenLifetimeSeconds);
+    startupStage('scenario');
     await run({url, anon: signedJwt(secret, {role: 'anon',iat:issuedAt,exp:expiresAt}), mailboxKey}, {
       database, secret, storage,
       async quiesce() {

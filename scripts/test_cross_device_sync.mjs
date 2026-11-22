@@ -153,4 +153,6 @@ async function run(config, {database}) {
 
 await mkdir(directory,{recursive:true});
 await writeFile(directory+'/server.json',JSON.stringify({passed:false,status:'starting'})+'\n');
-await withAuthBackend(run);
+// The backend is ready before either simulator cold-boots. Keep the fixture
+// anon JWT valid through both boots and the existing 45-minute scenario timer.
+await withAuthBackend(run, {tokenLifetimeSeconds:3600});
