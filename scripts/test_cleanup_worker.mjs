@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { executeCleanup } from '../supabase/functions/_shared/cleanup_worker.mjs';
+import { claimFileBatch, executeCleanup } from '../supabase/functions/_shared/cleanup_worker.mjs';
 const family = '10000000-0000-0000-0000-000000000001';
 const draft = '20000000-0000-0000-0000-000000000001';
 const path = `${family}/${draft}/original.jpg`;
@@ -100,4 +100,54 @@ for (const info of [
   assert.equal(f.events.at(-1).at(-1),'STORAGE_VERIFY_FAILED');
   assert.ok(!JSON.stringify(f.events).includes('private network details'));
 }
-console.log('All 24 cleanup worker checks passed. Storage API is injected, not a cloud integration test.');
+{
+  const f = fixture();
+  const page = {...f.claim, file_offset: 0, file_total: 2};
+  const nextFile = {...page.manifest[0], path: path.replace('original', 'processed')};
+  const confirm = async current => {
+    f.events.push(['confirm', current.file_offset]);
+    if (current.file_offset === 1) throw new Error('lost acknowledgement');
+    return {...page, file_offset: 1, manifest: [nextFile]};
+  };
+  assert.equal(await executeCleanup(page, f.storage, f.finish, confirm), 'failed');
+  assert.deepEqual(f.events.map(e => e[0]), ['remove', 'exists', 'confirm', 'remove', 'exists', 'confirm', 'finish']);
+  assert.equal(f.events.at(-1).at(-1), 'CLEANUP_FINISH_FAILED');
+  f.events.length = 0;
+  const resumed = {...page, lease_token: 'new', file_offset: 1, manifest: [nextFile]};
+  assert.equal(await executeCleanup(resumed, f.storage, f.finish, async current =>
+    ({...current, file_offset: 2, manifest: []})), 'completed');
+  assert.deepEqual(f.events.filter(e => e[0] === 'exists').map(e => e[1]), [nextFile.path]);
+}
+for (const [total, deadline, pages] of [[20, Infinity, 16], [3, 0, 1]]) {
+  const f = fixture();
+  const page = {...f.claim, file_offset: 0, file_total: total};
+  const result = await executeCleanup(page, f.storage, f.finish, async (current, yieldLease) => {
+    const offset = current.file_offset + 1;
+    assert.equal(yieldLease, offset === pages);
+    return {...current, file_offset: offset, status: yieldLease ? 'queued' : 'claimed'};
+  }, deadline);
+  assert.equal(result, 'queued');
+  assert.equal(f.events.filter(e => e[0] === 'exists').length, pages);
+  assert.equal(f.events.some(e => e[0] === 'finish'), false);
+}
+{
+  const f = fixture();
+  const page = {...f.claim, manifest: [], file_offset: 0, file_total: 0};
+  assert.equal(await executeCleanup(page, f.storage, f.finish), 'completed');
+  assert.deepEqual(f.events.map(e => e[0]), ['finish']);
+}
+for (const code of ['PGRST202', '42501', 'PGRST000']) {
+  const calls = [];
+  const rpc = async (name, args) => {
+    calls.push([name,args]);
+    return 'batch_size' in args ? {error:{code}} : {data:'legacy'};
+  };
+  const result = await claimFileBatch({rpc}, 'account', 'job');
+  assert.equal(calls.length, code === 'PGRST202' ? 2 : 1);
+  assert.deepEqual(calls[0], ['claim_account_deletion', {target_job_id:'job', batch_size:16}]);
+  if (code === 'PGRST202') {
+    assert.deepEqual(calls[1], ['claim_account_deletion', {target_job_id:'job'}]);
+    assert.equal(result.data, 'legacy');
+  } else assert.equal(result.error.code, code);
+}
+console.log('Cleanup worker checks passed, including lost acknowledgements, bounded runs and rolling upgrade compatibility.');

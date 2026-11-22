@@ -69,9 +69,33 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
     return draft;
   }
   let blockStorage = false, loseAuthReply = false, lostAuthReplies = 0, blockedRemoves = 0;
+  let batchTrace;
   const claimStates = [];
   const gatewayPort = Number(new URL(url).port);
   const faultProxy = createServer((incoming, outgoing) => {
+    const trace = batchTrace;
+    if (trace && incoming.url === '/rest/v1/rpc/confirm_cleanup_batch') {
+      // Hold the old worker's second checkpoint and then the replacement worker's
+      // first checkpoint. Their real Storage DELETE and absence probes have finished.
+      const held = trace.holds.get(++trace.confirmations);
+      if (held) {
+        held.release = () => forwardHttp(incoming, outgoing, gatewayPort, '');
+        outgoing.once('finish', () => { held.status = outgoing.statusCode; });
+        return;
+      }
+    }
+    if (trace && incoming.url.startsWith('/storage/v1/object/')) {
+      const path = decodeURIComponent(new URL(incoming.url, url).pathname).slice('/storage/v1/object/'.length);
+      if (incoming.method === 'HEAD') trace.probes.push(path);
+      if (incoming.method === 'DELETE') {
+        const chunks = [];
+        incoming.on('data', chunk => chunks.push(chunk));
+        incoming.on('end', () => {
+          const {prefixes} = JSON.parse(Buffer.concat(chunks));
+          trace.removes.push(...prefixes.map(name => path + '/' + name));
+        });
+      }
+    }
     if (incoming.url === '/rest/v1/rpc/claim_account_deletion') {
       const upstream = upstreamRequest({hostname: '127.0.0.1', port: gatewayPort, path: incoming.url,
         method: incoming.method, headers: incoming.headers}, response => {
@@ -148,6 +172,74 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
     throw new Error(`Worker did not reach ${expected}: ${row?.status}/${row?.error_code}`);
   }
   function passed(message) { checks++; console.log(`PASS ${message}`); }
+  function traceBatches(holds = []) {
+    return {holds: new Map(holds), confirmations: 0, probes: [], removes: []};
+  }
+  async function waitFor(check, description) {
+    for (let attempt = 0; attempt < 600; attempt++) {
+      if (check()) return;
+      await delay(50);
+    }
+    throw Error('Timed out waiting for ' + description);
+  }
+
+  // Only the synthetic job's lease clock is advanced. All work, storage checks
+  // and checkpoint writes are issued by the real Edge workers through HTTP.
+  async function resumeAcrossLease(table, jobId, ownerId, keepObjects, runWorker, finalStatus) {
+    const old = {}, replacement = {};
+    const trace = traceBatches([[2, old], [3, replacement]]);
+    const start = await state(table, jobId);
+    const names = start.manifest.map(file => file.bucket + '/' + file.path);
+    assert.equal(new Set(names).size, names.length);
+    batchTrace = trace;
+    function release(held) {
+      if (held.release) { held.release(); held.release = null; }
+    }
+    try {
+      assert.equal((await runWorker()).status, 202);
+      await waitFor(() => old.release, 'the second batch checkpoint in ' + table);
+      const pending = await state(table, jobId);
+      const committed = pending.verified_files;
+      assert.equal(pending.status, 'running');
+      assert.ok(committed > 0 && names.length > 2 * committed, 'Fixture must span at least three pages');
+      assert.equal(pending.attempts, start.attempts + 1);
+      assert.deepEqual(pending.manifest, start.manifest);
+      const checkedBeforeReclaim = trace.probes.length, removedBeforeReclaim = trace.removes.length;
+      assert.deepEqual(trace.probes.toSorted(), names.slice(0, 2 * committed).toSorted());
+      assert.deepEqual(trace.removes.toSorted(), names.slice(0, 2 * committed).toSorted());
+      assert.equal((await sql.query('select count(*)::int n from auth.users where id=$1', [ownerId])).rows[0].n, 1);
+      const objects = await storage.inspectObjects();
+      assert.deepEqual(objects.filter(row => keepObjects.some(keep => keep.key === row.key)), keepObjects);
+      if (table === 'cleanup_jobs') {
+        for (const file of pending.manifest.slice(2 * committed)) {
+          assert.ok(objects.some(row => row.key.includes(file.path)), 'Untouched final-page object disappeared');
+        }
+      }
+      await sql.query(`update public.${table} set lease_until=now()-interval '1 second' where id=$1`, [jobId]);
+      assert.equal((await runWorker()).status, 202);
+      await waitFor(() => replacement.release, 'a reclaimed batch checkpoint in ' + table);
+      const reclaimed = await state(table, jobId);
+      assert.equal(reclaimed.verified_files, committed, 'Unconfirmed paths must still be pending');
+      assert.equal(reclaimed.attempts, pending.attempts + 1);
+      assert.notEqual(reclaimed.lease_token, pending.lease_token);
+      release(old);
+      await waitFor(() => old.status, 'rejection of the expired lease');
+      assert.ok(old.status >= 400 && old.status < 500, 'Old worker advanced a checkpoint');
+      assert.equal((await state(table, jobId)).verified_files, committed);
+      release(replacement);
+      const finished = await until(table, jobId, finalStatus, pending.attempts);
+      // The uncommitted second page is intentionally replayed. The committed
+      // first page must never be removed or probed again by this job.
+      const expected = names.slice(committed).toSorted();
+      assert.deepEqual(trace.probes.slice(checkedBeforeReclaim).toSorted(), expected);
+      assert.deepEqual(trace.removes.slice(removedBeforeReclaim).toSorted(), expected);
+      passed(`${table}: ${names.length} real paths, ${committed} checkpointed; reclaimed ${expected.length}, stale HTTP ${old.status}; preserved unrelated S3 digests`);
+      return finished;
+    } finally {
+      batchTrace = null;
+      release(old); release(replacement);
+    }
+  }
   try {
     await listen(faultProxy);
     const cleanup = await edge('cleanup'), deletion = await edge('account');
@@ -158,15 +250,21 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
     assert.equal((await rpc('verify_parent_pin', owner.token, {target_family_id: unrelated.id, candidate_pin: '2468'}))[0].verified, true);
     const sibling = await rpc('create_child_profile', owner.token, {target_family_id: own.id, child_nickname: 'Sibling', child_grade: 2,
       preferences: {textbook_labels: {}, avatar_key: 'star'}});
-    const target = await images(owner, own.child), siblingImage = await images(owner, sibling);
+    const target = await images(owner, own.child), siblingDrafts = [], sharedDrafts = [];
     const keep = [await images(other, unrelated.child), await images(other, unrelated.child)];
-    const shared = await images(owner, unrelated.child);
+    // Each draft has two distinct real objects. Exercise the production page
+    // size (16), including a partially filled final page.
+    for (let n = 0; n < 17; n++) {
+      siblingDrafts.push(await images(owner, sibling));
+      sharedDrafts.push(await images(owner, unrelated.child));
+    }
+    const siblingImage = siblingDrafts[0], shared = sharedDrafts[0];
     const keepIds = keep.map(draft => draft.id);
     const before = await storage.inspectObjects();
-    assert.equal(before.length, 10);
+    assert.equal(before.length, 74);
     const preserved = before.filter(object => keepIds.some(id => object.key.includes(id)));
     assert.equal(preserved.length, 4);
-    passed('real Auth users, accepted family invitation and ten S3 images prepared through public APIs');
+    passed('real Auth users, accepted family invitation and 74 S3 images prepared through public APIs');
 
     const preview = await rpc('preview_child_deletion', owner.token, {target_child_id: own.child});
     const childJob = randomUUID(), request = {target_child_id: own.child, request_id: childJob, expected_counts: preview.counts, confirmation: '永久删除孩子'};
@@ -190,7 +288,7 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
       throw error;
     }
     const afterChild = await storage.inspectObjects();
-    assert.equal(afterChild.length, 8);
+    assert.equal(afterChild.length, before.length - 2);
     assert.ok(afterChild.every(object => !object.key.includes(target.id)));
     assert.ok([400, 404].includes((await fetch(target.signed)).status));
     assert.equal((await fetch(siblingImage.signed)).status, 200);
@@ -199,7 +297,7 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
     passed('real cleanup removes both image bytes and metadata; sibling and other-family images survive');
 
     const {scope} = await rpc('preview_account_deletion', owner.token), accountJob = randomUUID();
-    assert.equal(scope.shared_uploads, 1);
+    assert.equal(scope.shared_uploads, sharedDrafts.length);
     assert.equal(await rpc('request_account_deletion', owner.token, {request_id: accountJob, expected_scope: scope, confirmation: '永久注销我的账号'}), accountJob);
     assert.equal((await deletion(other.token, {mode: 'drain'})).status, 403);
     const early = await deletion(owner.token, {user_id: other.id, job_id: randomUUID()});
@@ -226,13 +324,13 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
 
     blockStorage = false;
     await sql.query("update public.cleanup_jobs set next_attempt_at=now()-interval '1 second' where id=any($1::uuid[])", [childJobs]);
-    assert.equal((await cleanup(service, {mode: 'drain'})).status, 202);
-    await Promise.all(childJobs.map((id, index) => until('cleanup_jobs', id, 'completed', cleanupFailures[index].attempts)));
-    assert.deepEqual(await storage.inspectObjects(), afterChild.filter(object => !object.key.includes(siblingImage.id)));
+    await resumeAcrossLease('cleanup_jobs', childJobs[0], owner.id, preserved,
+      () => cleanup(service, {mode:'drain'}), 'completed');
+    assert.deepEqual(await storage.inspectObjects(), afterChild.filter(object => !siblingDrafts.some(d => object.key.includes(d.id))));
     loseAuthReply = true;
     await sql.query("update public.account_deletion_jobs set next_attempt_at=now()-interval '1 second' where id=$1", [accountJob]);
-    assert.equal((await deletion(service, {mode: 'drain'})).status, 202);
-    const failedAuth = await until('account_deletion_jobs', accountJob, 'failed');
+    const failedAuth = await resumeAcrossLease('account_deletion_jobs', accountJob, owner.id, preserved,
+      () => deletion(service, {mode:'drain'}), 'failed');
     assert.equal(failedAuth.error_code, 'AUTH_DELETE_FAILED');
     assert.equal(lostAuthReplies, 1);
     assert.equal((await sql.query('select count(*)::int n from auth.users where id=$1', [owner.id])).rows[0].n, 0);
@@ -240,8 +338,13 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
     passed('Auth delete really commits before an injected lost reply, without deleting unrelated images');
 
     await sql.query("update public.account_deletion_jobs set next_attempt_at=now()-interval '1 second' where id=$1", [accountJob]);
+    const authRetryTrace = traceBatches();
+    batchTrace = authRetryTrace;
     assert.equal((await deletion(service, {mode: 'drain'})).status, 202);
     const complete = await until('account_deletion_jobs', accountJob, 'completed', failedAuth.attempts);
+    batchTrace = null;
+    assert.deepEqual(authRetryTrace.probes, [], 'Retrying an Auth receipt must not recheck already verified files');
+    assert.deepEqual(authRetryTrace.removes, []);
     assert.deepEqual(complete.manifest, []);
     assert.ok([401, 403, 404].includes((await api('/auth/v1/user', owner.token)).status));
     assert.ok([400, 401].includes((await api('/auth/v1/token?grant_type=refresh_token', anon, {method: 'POST', body: {refresh_token: owner.refresh}})).status));
@@ -252,7 +355,7 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
     assert.equal(repeated.status, 202); assert.equal(repeated.data.jobs, 0);
     passed('missing-user retry finalizes once, clears the manifest and rejects deleted credentials');
     const retained = await api(`/rest/v1/wrong_questions?select=id,final_text&child_id=eq.${unrelated.child}`, other.token);
-    assert.equal(retained.status, 200); assert.equal(retained.data.length, 3);
+    assert.equal(retained.status, 200); assert.equal(retained.data.length, keep.length + sharedDrafts.length);
     assert.equal(retained.data.find(question => question.id === shared.question).final_text, '2+2=?');
     assert.ok([400,404].includes((await fetch(shared.signed)).status));
     const reuse = await api('/rest/v1/rpc/begin_question_media_upload', other.token, {method:'POST', body:{

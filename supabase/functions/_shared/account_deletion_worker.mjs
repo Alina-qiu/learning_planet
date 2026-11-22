@@ -1,8 +1,8 @@
-import {executeCleanup} from './cleanup_worker.mjs';
+import {cleanupDeadline, confirmFileBatch, executeCleanup} from './cleanup_worker.mjs';
 
 // Only a service-authorized SQL claim supplies the account identity and manifest.
 // Auth deletion is last, and SQL verifies absence independently before completion.
-export async function executeAccountDeletion(claim, admin) {
+export async function executeAccountDeletion(claim, admin, deadline = cleanupDeadline()) {
   if (claim.status !== 'claimed') return claim.status;
   const finish = async (code) => {
     const {error} = await admin.rpc('finish_account_deletion', {
@@ -13,7 +13,8 @@ export async function executeAccountDeletion(claim, admin) {
   let fileFailure = null;
   const cleanup = await executeCleanup(claim, admin.storage, async (_id, _token, code) => {
     fileFailure = code;
-  });
+  }, (page, yieldLease) => confirmFileBatch(admin, 'account', page, yieldLease), deadline);
+  if (cleanup === 'queued') return 'queued';
   if (cleanup !== 'completed') {
     await finish(fileFailure ?? 'STORAGE_VERIFY_FAILED');
     return 'failed';

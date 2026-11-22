@@ -12,6 +12,8 @@
 
 同一测试家庭在 Android API 36、API 29 分别登录。API 36 断网作答 3 题，API 29 在同步前仍显示原状态。恢复连接后，两端显示同一条已完成的复习任务；3 道题分别记为正确、错误、正确，各有 1 次作答记录，金币和 XP 分别增加 30。零题孩子没有生成任务。下表区分本机服务、模拟器与目标真机的验收范围。
 
+注销含有大量图片的账号时，已核验的文件会随批次保存在数据库。执行超时后，新进程可缩小批次并接着处理。孩子清理和账号注销都已用真实本机对象存储验证过期租约、迟到确认和文件归属隔离。[删除联调](PRIVACY_INTEGRATION.md)
+
 冒险大厅支持直接开始、暂停、继续和完成普通任务。孩子可以在任务卡看到有效时长；最低时长、离线待确认和自动复习的逐题判定继续由相应的任务流程处理。
 
 设备校时后，重新打开应用首次联网会核对之前未收到回执的操作。同一账号刷新令牌时，客户端现在保留正在执行的账号状态和家庭概览查询。迁移 071 向新版客户端返回家长 PIN 的服务器时间，手机用包含休眠时间的单调时钟计算剩余授权，退回前台也会检查期限。
@@ -48,7 +50,7 @@
 |---|---|---|
 | 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS Debug/Release](IOS_BUILD.md)已通过CI未签名编译及资源检查，尚未签名或真机运行 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
-| 后端 | Supabase PostgreSQL/Auth/Storage，73 份业务迁移至 071 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
+| 后端 | Supabase PostgreSQL/Auth/Storage，74 份业务迁移至 072 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
@@ -110,7 +112,7 @@
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
 | 7.1–7.3 AI契约/审核/隐私 | [AI分析](AI_ANALYSIS.md)、[相似题](SIMILAR_QUESTIONS.md)、[上传提示](WORKSHEET_ACCESSIBILITY.md) | 实际供应商配置、预算和保留策略、教材质量评测；端侧自动模糊未实现，PRD将其列为可选 |
-| 8 数据模型/状态机 | 73 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
+| 8 数据模型/状态机 | 74 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
 | 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实HMS/APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
 | 12 / 15 迭代与原型 | MVP及多项V1.1/V1.2能力已有实现；当前验收基于真实App与服务测试 | V2学习伙伴、家庭协作、成熟动画按PRD验证后决定，不用加入新模块替代当前验收 |
@@ -143,8 +145,8 @@
 | AC-07 PDF顺序/答案开关/预览一致 | [实际 PDF 联调](PDF_INTEGRATION.md)核对题目顺序和答案页，客户端比较预览与导出的文件字节 | 本机渲染与客户端读取场景通过 |
 | AC-08 多孩子隔离 | [界面切换回归](../test/child_switch_isolation_test.dart)在一次切换中核对任务、钱包和错题，控制旧孩子的响应先后返回；[并发报告](../build/concurrency_integration/results.json)核对真实服务 | 界面层与服务层的本地场景通过 |
 | AC-09 安静时段不推送、不扣分 | Android实际闹钟过滤、静默与奖励回归 | **未完成验收**：已按用户选择改为收到后校验，Swift策略与构建已通过，仍待真实供应商/目标手机 |
-| AC-10 清楚说明并在承诺期限内注销 | 本机真实Auth/Storage/S3删除与失败恢复 | **未完成**：托管调度与真实承诺期限无证据 |
-| AC-11 三题唯一复习、全部作答自动结算 | API 36 与 API 29 对同一家庭独立登录；生成器重跑、零题孩子、系统拨时、离线冷启和联网后逐题核账已在本机串联 | 两台 Android 模拟器与本机服务已验证。快钟断网冷启的回归另列于本轮设备记录 |
+| AC-10 清楚说明并在承诺期限内注销 | [真实删除联调](PRIVACY_INTEGRATION.md)核对 74 个 S3 对象、两个过期租约、分页续办和其他成员的文件摘要 | 本机注销与中断恢复通过。目标环境的调度和 24 小时清理时限仍待验收 |
+| AC-11 三题唯一复习、全部作答自动结算 | API 36 与 API 29 对同一家庭独立登录。生成器重跑、零题孩子、系统拨快和拨慢 48 小时、离线冷启与逐题账本均有[同一家庭的验收记录](../build/ac11-device-acceptance/summary.json) | 两台 Android 模拟器连接本机服务通过。新版覆盖安装后保留三道答案和五项待同步操作，重放后任务及账本 ID 均相同 |
 
 ## 本次检查结果及下一阶段
 

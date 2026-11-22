@@ -45,4 +45,17 @@ await check('untrusted path is rejected before any Storage or Auth call',async()
   const {calls,admin}=setup();assert.equal(await executeAccountDeletion({...claim,manifest:[{bucket:'wrong-question-images',path:'../other'}]},admin),'failed');
   assert.equal(calls.length,1);assert.equal(calls[0][1].failure_code,'INVALID_MANIFEST');
 });
+await check('a verified intermediate page can yield without starting Auth deletion or failure backoff',async()=>{
+  const {calls,admin}=setup();
+  admin.rpc=async(name,args)=>{
+    calls.push([name,args]);
+    assert.equal(name,'confirm_cleanup_batch');
+    assert.equal(args.yield_lease,true);
+    assert.equal(args.job_kind,'account');
+    return {data:{id:claim.id,status:'queued',file_offset:1,file_total:2}};
+  };
+  const page={...claim,file_offset:0,file_total:2};
+  assert.equal(await executeAccountDeletion(page,admin,0),'queued');
+  assert.deepEqual(calls.map(c=>Array.isArray(c)?c[0]:c),['remove','verify','confirm_cleanup_batch']);
+});
 console.log(`All ${passed} account worker checks passed (injected APIs only).`);

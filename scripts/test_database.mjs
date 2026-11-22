@@ -8,6 +8,7 @@ import { growthCases } from './test_growth_cases.mjs';
 import { exportCases } from './test_export_cases.mjs';
 import { childDeletionCases } from './test_child_deletion_cases.mjs';
 import { accountDeletionCases } from './test_account_deletion_cases.mjs';
+import { cleanupProgressCases } from './test_cleanup_progress_cases.mjs';
 import { taskPreferencesCases } from './test_task_preferences_cases.mjs';
 import { rewardInventoryCases } from './test_reward_inventory_cases.mjs';
 import { onboardingCases } from './test_onboarding_cases.mjs';
@@ -1226,6 +1227,7 @@ try {
   await familyTimezoneCases({client,scalar,login,denied,check,otherUid});
   await worksheetVersionCases({client,scalar,login,denied,check,otherUid});
   await walletAdjustmentDetailsCases({client,scalar,login,denied,check});
+  await cleanupProgressCases({client,scalar,login,check,family,uid});
   await accountDeletionCases({client,scalar,login,denied,check,otherUid});
   console.log(`All ${passed} database checks passed.`);
 } finally {

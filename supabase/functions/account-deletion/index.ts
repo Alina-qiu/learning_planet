@@ -1,5 +1,6 @@
 import {createClient} from 'npm:@supabase/supabase-js@2.99.1';
 import {executeAccountDeletion} from '../_shared/account_deletion_worker.mjs';
+import {claimFileBatch, cleanupDeadline} from '../_shared/cleanup_worker.mjs';
 declare const EdgeRuntime: {waitUntil(task: Promise<unknown>): void};
 
 const headers = {
@@ -44,10 +45,12 @@ Deno.serve(async (request) => {
       ids = [data.id];
     }
     EdgeRuntime.waitUntil((async () => {
+      const deadline = cleanupDeadline();
       for (const id of ids) {
-        const {data: claim, error} = await admin.rpc('claim_account_deletion', {target_job_id: id});
+        if (performance.now() >= deadline) break;
+        const {data: claim, error} = await claimFileBatch(admin, 'account', id);
         if (error) continue;
-        await executeAccountDeletion(claim, admin).catch(() => console.error('ACCOUNT_DELETION_LEASE_REQUIRES_RETRY'));
+        await executeAccountDeletion(claim, admin, deadline).catch(() => console.error('ACCOUNT_DELETION_LEASE_REQUIRES_RETRY'));
       }
     })());
     return response(202, {status: 'accepted', jobs: ids.length});

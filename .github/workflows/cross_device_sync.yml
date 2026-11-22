@@ -89,6 +89,8 @@ jobs:
           java-version: '17'
           distribution: temurin
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
       - name: Prepare Android 10 x86_64 emulator
         run: |
           sdkmanager --install 'emulator' 'platform-tools' 'system-images;android-29;default;x86_64'
