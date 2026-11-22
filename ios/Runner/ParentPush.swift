@@ -15,6 +15,7 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
   private let planKey = "task_push_plan_v1"
   private var ids: [String] { taskReminders ? ["task-remote-v1"] : ["parent-remote-v1-redemption", "parent-remote-v1-weekly"] }
   private var pendingTokens: [(Int64, FlutterResult)] = []
+  private var clockSample: PushDeliveryPolicy.ClockSample?
   private var pendingAdds = 0
   private var disabledCallbacks: [(Int64, FlutterResult)] = []
   private var revision: Int64 { (store.object(forKey: revisionKey) as? NSNumber)?.int64Value ?? 0 }
@@ -56,6 +57,14 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
       "revision": revision, "enabled": store.dictionary(forKey: key) != nil])
     case "startup" where UIApplication.shared.applicationState == .background: result(revision)
     case "startup", "disable": disable(result)
+    case "beginClockSample":
+      let input = call.arguments as? [String: Any] ?? [:]
+      guard number(input, "revision") == revision else { result(nil); return }
+      let now = clock()
+      guard !now.boot.isEmpty else { result(nil); return }
+      let sample = PushDeliveryPolicy.ClockSample(revision: revision, boot: now.boot, elapsed: now.elapsed)
+      clockSample = sample
+      result(sample.id)
     case "enable": enable(call.arguments as? [String: Any] ?? [:], result)
     case "plan" where taskReminders:
       let input = call.arguments as? [String: Any] ?? [:]
@@ -75,6 +84,7 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
     let next = revision + 1
     guard next > 0 && next <= 9_007_199_254_740_991 else { error(result); return }
     store.set(next, forKey: revisionKey)
+    clockSample = nil
     store.removeObject(forKey: key)
     if taskReminders { store.removeObject(forKey: planKey) }
     let saved = store.synchronize()
@@ -108,12 +118,15 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
           let nonce = input["scope_nonce"] as? String, self.matches(nonce, self.uuid),
           let server = self.number(input, "server_ms"), (1_000_000_000_000...9_999_999_999_999).contains(server),
           let expires = self.number(input, "expires_ms"), (1...2_592_001_000).contains(expires - server),
-          let rtt = self.number(input, "rtt_ms"), (0...10000).contains(rtt),
-          let version = self.number(input, "settings_version"), version > 0, !now.boot.isEmpty else { result(false); return }
+          let rtt = self.clockSample?.uncertainty(id: input["clock_sample"] as? String, revision: expected,
+            boot: now.boot, elapsed: now.elapsed),
+          let version = self.number(input, "settings_version"), version > 0 else { result(false); return }
+        self.clockSample = nil
         let previous = self.store.dictionary(forKey: self.key)
         let seen: [String] = (previous?["nonce"] as? String) == nonce ? (previous?["seen"] as? [String] ?? []) : []
         guard seen.count <= 1000 else { result(false); return }
-        let persisted: [String: Any] = ["nonce": nonce, "server": server, "expires": expires, "rtt": rtt,
+        let persisted: [String: Any] = ["clock_version": PushDeliveryPolicy.clockVersion,
+          "nonce": nonce, "server": server, "expires": expires, "rtt": rtt,
           "settings": version, "wall": now.wall, "elapsed": now.elapsed, "boot": now.boot, "seen": seen]
         self.store.set(persisted, forKey: self.key)
         if self.store.synchronize() { result(true) } else { self.store.removeObject(forKey: self.key); self.error(result) }

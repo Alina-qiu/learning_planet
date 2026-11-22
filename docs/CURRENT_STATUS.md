@@ -8,7 +8,7 @@
 
 ## 当前开发进度
 
-跨端同步补上了两处恢复逻辑。应用回到前台会忽略后台前发出的旧快照并补拉新数据。断网重开时，GoTrue 的临时刷新失败会保留已恢复的本机账号；服务端拒绝刷新凭证时仍会退出。Windows 完整 Flutter 测试 844 项通过，核心行覆盖率 90.67%。本轮可安装的两个包见[Android 构建记录](ANDROID_BUILD.md)。
+Windows 完整 Flutter 测试 846 项通过，核心行覆盖率 90.69%。应用回到前台后会补拉任务和余额，断网重开时可继续使用已恢复的本机账号。iPhone 任务和家长提醒的服务器校时现覆盖系统权限查询与主线程等待。如果收到消息时的时间范围可能跨入安静时段，应用会抑制提醒。升级前保存的校时记录需在前台重新校准。[Android 调试包](ANDROID_BUILD.md) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
 
 同一测试家庭在 Android API 36、API 29 分别登录。API 36 断网作答 3 题，API 29 在同步前仍显示原状态。恢复连接后，两端显示同一条已完成的复习任务；3 道题分别记为正确、错误、正确，各有 1 次作答记录，金币和 XP 分别增加 30。零题孩子没有生成任务。下表区分本机服务、模拟器与目标真机的验收范围。
 
@@ -22,7 +22,7 @@
 
 上一版在 Windows 通过全部 842 项 Flutter 测试和静态分析，核心行覆盖率 90.62%。本机 PostgreSQL 通过 405 项检查和 14 项有数据升级检查。PostgREST 16.2 处理了 99 次实际 HTTP 请求，覆盖新版 PIN、旧客户端兼容和设备校时后重放原命令。
 
-已完成的十项远程检查对应提交 `1ed05d8`，包括 842 项 Flutter 测试、405 项数据库检查、iOS SDK 27.2 的 Debug 和 Release 编译，以及三个 iOS 模拟器目标。当前源码的构建记录按提交保存在草稿 PR 中。[上版 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45055359455) · [草稿 PR](https://github.com/Alina-qiu/learning_planet/pull/1)
+提交 `d605194` 的十项远程检查全部通过，包括 844 项 Flutter 测试、409 项数据库检查、14 项迁移升级、9 项备份恢复、iOS SDK 27.2 未签名 Debug 和 Release 编译，以及三组 iPhone/iPad 模拟器测试。[构建和测试](https://github.com/Alina-qiu/learning_planet/actions/runs/45066343158) · [后续提交与检查](https://github.com/Alina-qiu/learning_planet/pull/1)
 
 上一版修复了三处用户流程。
 
@@ -89,7 +89,7 @@
 | TSK-04 状态转换/禁止孩子撤销 | `lib/features/tasks/domain/task_state_machine.dart`、[实际任务流程](LOCAL_DEBUG.md) | 双端并发操作实机验收 |
 | TSK-05 家长补签或纠正 | 补签及[计时纠正](TASK_TIME_CORRECTIONS.md)有原因、审计和版本检查 | 是否还包含撤回误完成，用户尚未答复；不能把这一扩展视为已实现 |
 | TSK-06 智能提醒 | [本地通知](LOCAL_NOTIFICATIONS.md)、[原生授权场景](../build/integration_results/notifications-granted.json) | 用户选择[收到后复查的远程方案](TASK_REMOTE_PUSH.md)，已实现且Swift策略/构建通过，真实供应商与真机仍待验证；可能漏提醒，不能保证系统最终展示时刻 |
-| TSK-07 每日自动复习 | [自动完成](REVIEW_AUTO_COMPLETION.md)、[实际复习流程](../build/local_review_results/ui-flow.json)，每个孩子每天只有一项自动复习 | 当前在生成时固定题集。开始前是否补入新到期题仍待确认；托管 00:05 调度和跨端流程待验证 |
+| TSK-07 每日自动复习 | [自动完成](REVIEW_AUTO_COMPLETION.md)、[两台 Android 模拟器逐题结算](../build/ac11-device-acceptance/summary.json)。每个孩子每天最多生成一项自动复习任务 | 当前在生成时固定题集。开始前是否补入新到期题仍待确认。托管环境家庭时区 00:05 调度及目标手机待验证 |
 | ERR-01 拍照/多图/裁剪 | [OCR管理](OCR_MANAGEMENT.md)、[原生多选报告](../build/integration_results/image-import-native.json)、[中断草稿](OCR_INTERRUPTION.md) | 真机相机权限、系统回收期间选择恢复及真实图片 |
 | ERR-02 逐字段校对 | [字段校对](OCR_FIELD_CORRECTION.md)、[源图片变更](OCR_SOURCE_CHANGES.md) | 真实教材复杂版式与识别质量，不能以合成图片代替 |
 | ERR-03 学科/知识点 | [题目目录](QUESTION_CATALOG_PAGINATION.md)、`lib/features/wrong_questions/presentation/review_question_editor.dart` | 双设备编辑与真实数据规模 |

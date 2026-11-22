@@ -35,6 +35,9 @@ class MethodChannelTaskPush implements TaskPushNative {
   Future<String?> token(int revision) =>
       channel.invokeMethod<String>('token', {'revision': revision});
   @override
+  Future<String> beginClockSample(int revision) =>
+      beginIosPushClockSample(channel, revision);
+  @override
   Future<bool> enable(Map<String, dynamic> gate) async =>
       await channel.invokeMethod<bool>('enable', gate) == true;
   @override
@@ -358,7 +361,8 @@ class RemoteTaskPush {
       if (token == null || token.isEmpty) {
         throw StateError('暂未取得 iPhone 远程提醒授权，请重试。');
       }
-      final watch = Stopwatch()..start();
+      final sample = await native.beginClockSample(revision);
+      check();
       final reply = await remote.call(
         active ? 'renew_task_push_device' : 'activate_task_push_device',
         {..._capability(identity), 'push_token': token},
@@ -368,8 +372,7 @@ class RemoteTaskPush {
       final server = DateTime.parse(reply['server_time'] as String),
           expires = DateTime.parse(reply['expires_at'] as String);
       final policyVersion = reply['settings_version'];
-      if (watch.elapsedMilliseconds > 10000 ||
-          !expires.isAfter(server) ||
+      if (!expires.isAfter(server) ||
           expires.difference(server) > const Duration(days: 30, seconds: 1) ||
           policyVersion is! int ||
           policyVersion < 1) {
@@ -391,7 +394,7 @@ class RemoteTaskPush {
         'scope_nonce': identity['nonce'],
         'server_ms': server.millisecondsSinceEpoch,
         'expires_ms': expires.millisecondsSinceEpoch,
-        'rtt_ms': watch.elapsedMilliseconds,
+        'clock_sample': sample,
         'settings_version': policyVersion,
       })) {
         throw StateError('任务提醒接收校验未能启用。');

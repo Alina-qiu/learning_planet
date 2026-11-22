@@ -32,7 +32,21 @@ abstract interface class ParentPushNative {
   Future<Map<String, dynamic>> availability();
   Future<int> disable({bool startup = false});
   Future<String?> token(int revision);
+  Future<String> beginClockSample(int revision);
   Future<bool> enable(Map<String, dynamic> gate);
+}
+
+/// The native sample stays on the installation. Only its one-use ID crosses
+/// the channel, and it is never sent to the registration server.
+Future<String> beginIosPushClockSample(
+  MethodChannel channel,
+  int revision,
+) async {
+  final id = await channel.invokeMethod<String>('beginClockSample', {
+    'revision': revision,
+  });
+  if (id == null || id.isEmpty) throw StateError('提醒时间未能校准，请重试。');
+  return id;
 }
 
 class MethodChannelParentPush implements ParentPushNative {
@@ -57,6 +71,9 @@ class MethodChannelParentPush implements ParentPushNative {
   @override
   Future<String?> token(int revision) =>
       channel.invokeMethod<String>('token', {'revision': revision});
+  @override
+  Future<String> beginClockSample(int revision) =>
+      beginIosPushClockSample(channel, revision);
   @override
   Future<bool> enable(Map<String, dynamic> gate) async =>
       await channel.invokeMethod<bool>('enable', gate) == true;
@@ -384,6 +401,10 @@ class RemoteParentPush extends ChangeNotifier {
       final token = await native.token(revision);
       if (token == null || token.isEmpty) throw StateError('暂未取得后台提醒授权，请重试。');
       if (!current()) throw StateError('后台提醒授权已变化。');
+      final sample = row['transport'] == 'apns'
+          ? await native.beginClockSample(revision)
+          : null;
+      if (!current()) throw StateError('后台提醒授权已变化。');
       final watch = Stopwatch()..start();
       final enabled = await remote.call('activate_parent_push_device', {
         ..._capability(row),
@@ -397,7 +418,7 @@ class RemoteParentPush extends ChangeNotifier {
         await _write({...row, 'state': 'enabled', 'native_revision': revision});
       });
       if (!current() ||
-          !await _enableGate(revision, enabled, settings, watch)) {
+          !await _enableGate(revision, enabled, settings, watch, sample)) {
         throw StateError('后台提醒范围已变化，请重试。');
       }
       if (!current()) throw StateError('后台提醒授权已变化。');
@@ -433,6 +454,7 @@ class RemoteParentPush extends ChangeNotifier {
     Map<String, dynamic> reply,
     ParentNotificationSettings settings,
     Stopwatch watch,
+    String? sample,
   ) async {
     final now = DateTime.parse(reply['server_time'] as String).toUtc();
     final expires = DateTime.parse(reply['expires_at'] as String).toUtc();
@@ -446,7 +468,10 @@ class RemoteParentPush extends ChangeNotifier {
       'scope_nonce': reply['scope_nonce'],
       'server_ms': now.millisecondsSinceEpoch,
       'expires_ms': expires.millisecondsSinceEpoch,
-      'rtt_ms': watch.elapsedMilliseconds,
+      if (sample == null)
+        'rtt_ms': watch.elapsedMilliseconds
+      else
+        'clock_sample': sample,
       'settings_version': settings.version,
     });
   }
@@ -481,6 +506,10 @@ class RemoteParentPush extends ChangeNotifier {
       if (revision == null || !current()) return;
       final token = await native.token(revision);
       if (token == null || !current()) return;
+      final sample = row['transport'] == 'apns'
+          ? await native.beginClockSample(revision)
+          : null;
+      if (!current()) return;
       final watch = Stopwatch()..start();
       final reply = await remote.call('renew_parent_push_device', {
         ..._capability(row),
@@ -493,7 +522,7 @@ class RemoteParentPush extends ChangeNotifier {
         await _write({...row, 'native_revision': revision});
       });
       if (!current()) return;
-      if (!await _enableGate(revision, reply, settings, watch)) {
+      if (!await _enableGate(revision, reply, settings, watch, sample)) {
         if (current()) await disable();
         return;
       }

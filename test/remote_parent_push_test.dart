@@ -11,6 +11,7 @@ import 'package:learning_planet/features/notifications/domain/parent_notificatio
 import 'package:learning_planet/features/notifications/presentation/remote_push_lifecycle.dart';
 import 'package:learning_planet/features/auth_family/data/auth_repository.dart';
 import 'package:learning_planet/features/tasks/data/notification_scheduler.dart';
+import 'package:learning_planet/features/tasks/data/remote_task_push.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'support/mock_supabase.dart';
@@ -41,6 +42,7 @@ class Secrets implements DeviceSecrets {
 
 class Native implements ParentPushNative {
   int revision = 0, tokenCalls = 0, enables = 0;
+  int samples = 0;
   bool enabled = false, configured = true, available = true, permit = true;
   String transport = 'hms';
   String? deviceToken = 'device-token';
@@ -67,6 +69,14 @@ class Native implements ParentPushNative {
   Future<String?> token(int expected) async {
     tokenCalls++;
     return expected == revision && permit ? deviceToken : null;
+  }
+
+  @override
+  Future<String> beginClockSample(int expected) async {
+    if (transport != 'apns' || expected != revision) {
+      throw StateError('invalid sample');
+    }
+    return 'sample-${++samples}';
   }
 
   @override
@@ -287,10 +297,46 @@ void main() {
       expect(h.row['native_revision'], h.native.revision);
       expect(h.native.gate!['scope_nonce'], h.row['nonce']);
       expect(h.native.gate!['settings_version'], 2);
+      expect(h.native.gate!['rtt_ms'], isA<int>());
+      expect(h.native.samples, 0);
       expect(await h.push.status('family'), RemotePushStatus.enabled);
       expect(await h.push.status('another'), RemotePushStatus.disabled);
       await h.push.setScope('parent:parent-a:family');
       expect(h.native.enabled, true);
+    },
+  );
+
+  test(
+    'APNs samples before activation and recalibrates existing opt-in',
+    () async {
+      final h = Harness();
+      h.native.transport = 'apns';
+      h.remote.intercept = (name, params) {
+        final reply = h.remote.reply(name, params);
+        if (name == 'prepare_parent_push_device') return reply;
+        expect(h.native.samples, name == 'activate_parent_push_device' ? 1 : 2);
+        expect(params.containsKey('clock_sample'), false);
+        return {...reply, 'transport': 'apns'};
+      };
+      await h.enable();
+      expect(h.native.gate!['clock_sample'], 'sample-1');
+      expect(h.native.gate!.containsKey('rtt_ms'), false);
+      final version = h.row['version'];
+      h.push = h.controller();
+      h.pin = false;
+      await h.push.initialize();
+      await h.push.setScope('parent:parent-a:family');
+      await h.push.refresh('family', settings);
+      expect(h.native.gate!['clock_sample'], 'sample-2');
+      expect(h.row['version'], version);
+      await h.push.refresh('family', settings);
+      expect(h.remote.calls, [
+        'prepare_parent_push_device',
+        'activate_parent_push_device',
+        'renew_parent_push_device',
+      ]);
+      expect(h.native.samples, 2);
+      expect(h.native.tokenCalls, 2);
     },
   );
 
@@ -738,6 +784,26 @@ void main() {
         'intent_version': 3,
       });
       await expectLater(remote.revoke(capability), throwsFormatException);
+    },
+  );
+
+  test(
+    'both iOS channels require a native sample for the same revision',
+    () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      for (final (channel, native) in <(MethodChannel, ParentPushNative)>[
+        (MethodChannelParentPush.channel, const MethodChannelParentPush()),
+        (MethodChannelTaskPush.channel, const MethodChannelTaskPush()),
+      ]) {
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          expect(call.method, 'beginClockSample');
+          return call.arguments['revision'] == 7 ? 'opaque-id' : null;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+        expect(await native.beginClockSample(7), 'opaque-id');
+        await expectLater(native.beginClockSample(6), throwsStateError);
+      }
     },
   );
 

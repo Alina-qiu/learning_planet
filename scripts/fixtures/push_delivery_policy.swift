@@ -5,7 +5,8 @@ import Foundation
     let now: Int64 = 1_793_937_600_000 // 2026-11-06T04:00:00Z
     let id = "10000000-0000-4000-8000-000000000001"
     let nonce = "10000000-0000-4000-8000-000000000002"
-    let gate: [String: Any] = ["nonce": nonce, "seen": [String](), "settings": 3,
+    let gate: [String: Any] = ["clock_version": PushDeliveryPolicy.clockVersion,
+      "nonce": nonce, "seen": [String](), "settings": 3,
       "server": now, "expires": now + 2_592_000_000, "rtt": 100,
       "wall": now, "elapsed": 1000, "boot": "boot-a"]
     let data = ["version": "task-push-v1", "kind": "task", "message_id": id, "scope_nonce": nonce,
@@ -48,6 +49,40 @@ import Foundation
     check(PushDeliveryPolicy.plan([invalid]) == nil, "boolean not timestamp")
     var parent = data;parent.removeValue(forKey: "scheduled_ms");parent["version"] = "parent-push-v1";parent["kind"] = "weekly"
     check(PushDeliveryPolicy.allows(parent, gate: gate, clock: (now, 1000, "boot-a")), "parent path remains independent")
+    var old = gate; old.removeValue(forKey: "clock_version")
+    check(!allowed(data, old), "legacy task clock cannot authorize background receipt")
+    check(!PushDeliveryPolicy.allows(parent, gate: old, clock: (now, 1000, "boot-a")), "legacy parent clock rejected")
+    let sample = PushDeliveryPolicy.ClockSample(revision: 4, boot: "boot-a", elapsed: 1000)
+    func width(_ elapsed: Int64, _ boot: String = "boot-a", _ revision: Int64 = 4, _ id: String? = nil) -> Int64? {
+      sample.uncertainty(id: id ?? sample.id, revision: revision, boot: boot, elapsed: elapsed)
+    }
+    check(width(4050) == 3050, "RPC and delayed native settings callback both count")
+    check(width(11000) == 10000 && width(11001) == nil, "native window limit")
+    check(width(999) == nil && width(1050, "boot-b") == nil, "reset or reboot during RPC rejected")
+    check(width(1050, "boot-a", 5) == nil && width(1050, "boot-a", 4, "other") == nil, "foreign sample rejected")
+    // Only 50 ms elapsed before Dart dispatched enable. Native authorization
+    // and the main queue take another 3 s. Receipt occurs 100 ms into quiet.
+    var delayedGate = gate
+    delayedGate["server"] = now - 20000; delayedGate["elapsed"] = 4050; delayedGate["wall"] = now - 17000
+    delayedGate["expires"] = now + 86_400_000
+    delayedGate["rtt"] = width(4050)!
+    var delayedTask = data
+    delayedTask["quiet_start"] = "12:00:00"; delayedTask["quiet_end"] = "13:00:00"
+    delayedTask["issued_ms"] = String(now - 18000); delayedTask["expires_ms"] = String(now + 42000)
+    let receipt = (wall: now + 100, elapsed: Int64(4050 + 17100), boot: "boot-a")
+    var truncated = delayedGate; truncated["rtt"] = 50
+    check(PushDeliveryPolicy.allows(delayedTask, gate: truncated, clock: receipt, task: true, plan: plan),
+      "a truncated calibration window reproduces delivery 100 ms into quiet")
+    check(!PushDeliveryPolicy.allows(delayedTask, gate: delayedGate, clock: receipt, task: true, plan: plan),
+      "task received after quiet starts is suppressed")
+    check(!PushDeliveryPolicy.allows(delayedTask, gate: delayedGate, clock: receipt, task: true, plan: plan, allowSeen: true),
+      "foreground recheck includes the complete calibration window")
+    var delayedParent = delayedTask
+    delayedParent.removeValue(forKey: "scheduled_ms"); delayedParent["version"] = "parent-push-v1"; delayedParent["kind"] = "weekly"
+    check(!PushDeliveryPolicy.allows(delayedParent, gate: delayedGate, clock: receipt), "delayed parent receipt is suppressed")
+    let earlier = (wall: now - 5000, elapsed: Int64(4050 + 12000), boot: "boot-a")
+    check(PushDeliveryPolicy.allows(delayedTask, gate: delayedGate, clock: earlier, task: true, plan: plan),
+      "ordinary daytime delivery remains possible with the same native delay")
     print("All \(count) native push policy checks passed.")
   }
 }

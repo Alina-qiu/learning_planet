@@ -37,6 +37,8 @@ class Secrets implements DeviceSecrets {
 
 class Native implements TaskPushNative {
   int revision = 0, enables = 0;
+  int samples = 0;
+  String? sample;
   bool enabled = false, permit = true, backgroundStartup = false;
   List<Map<String, Object>> slots = [];
   Map<String, dynamic>? gate;
@@ -53,6 +55,7 @@ class Native implements TaskPushNative {
   Future<int> disable({bool startup = false}) async {
     if (startup && backgroundStartup) return revision;
     enabled = false;
+    sample = null;
     slots = [];
     return ++revision;
   }
@@ -60,6 +63,12 @@ class Native implements TaskPushNative {
   @override
   Future<String?> token(int revision) async =>
       revision == this.revision && permit ? 'ab' * 32 : null;
+  @override
+  Future<String> beginClockSample(int revision) async {
+    if (revision != this.revision) throw StateError('stale revision');
+    return sample = 'sample-${++samples}';
+  }
+
   @override
   Future<bool> plan(int revision, List<Map<String, Object>> slots) async {
     if (revision != this.revision) return false;
@@ -72,7 +81,13 @@ class Native implements TaskPushNative {
     final held = heldEnable;
     heldEnable = null;
     if (held != null) await held.future;
-    if (gate['revision'] != revision || !permit) return false;
+    if (gate['revision'] != revision ||
+        !permit ||
+        sample == null ||
+        sample != gate['clock_sample']) {
+      return false;
+    }
+    sample = null;
     this.gate = Map.of(gate);
     enabled = true;
     enables++;

@@ -4,6 +4,23 @@ import CoreFoundation
 // Pure policy shared by background receipt and foreground presentation. Time
 // comes from a server anchor advanced by the native continuous clock.
 enum PushDeliveryPolicy {
+  static let clockVersion = 2
+
+  // Same-boot continuous time includes suspension, RPC, MethodChannel
+  // scheduling, secure writes and the native notification-settings callback.
+  struct ClockSample {
+    let id = UUID().uuidString
+    let revision: Int64
+    let boot: String
+    let elapsed: Int64
+
+    func uncertainty(id: String?, revision: Int64, boot: String, elapsed: Int64) -> Int64? {
+      guard id == self.id, revision == self.revision, !boot.isEmpty, boot == self.boot,
+        self.elapsed >= 0, elapsed >= self.elapsed else { return nil }
+      let width = elapsed - self.elapsed
+      return width <= 10000 ? width : nil
+    }
+  }
   static func number(_ row: [String: Any], _ field: String) -> Int64? {
     guard let n = row[field] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
       n.doubleValue.isFinite, n.doubleValue.rounded() == n.doubleValue,
@@ -59,7 +76,10 @@ enum PushDeliveryPolicy {
     var fields: Set<String> = ["version", "message_id", "scope_nonce", "kind", "issued_ms", "expires_ms", "timezone", "quiet_start", "quiet_end", "settings_version"]
     if task { fields.insert("scheduled_ms") }
     let uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    guard Set(data.keys) == fields, data["version"] == (task ? "task-push-v1" : "parent-push-v1"),
+    // Keep the old opt-in so foreground renewal can reuse its registration.
+    // A pre-upgrade anchor omitted native delays and cannot authorize display.
+    guard number(row, "clock_version") == Int64(clockVersion),
+      Set(data.keys) == fields, data["version"] == (task ? "task-push-v1" : "parent-push-v1"),
       let nonce = row["nonce"] as? String, nonce == data["scope_nonce"], matches(nonce, uuid),
       let id = data["message_id"], matches(id, uuid), let seen = row["seen"] as? [String],
       seen.count <= 1000, allowSeen || !seen.contains(id),

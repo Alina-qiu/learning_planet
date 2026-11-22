@@ -8,13 +8,23 @@ void main() {
     'foreground resume renews the native clock and device token before the twelve-hour lease refresh',
     () async {
       final h = Harness();
+      h.remote.intercept = (name, params) {
+        if (name != 'prepare_task_push_device') {
+          expect(h.native.sample, isNotNull);
+        }
+        expect(params, isNot(contains('clock_sample')));
+        return h.remote.reply(name, params);
+      };
       await h.enable();
       await h.push.synchronize(child, slots);
       expect(h.remote.calls.length, 2);
+      expect(h.native.samples, 1);
       h.push.resumed();
       await h.push.synchronize(child, slots);
       expect(h.remote.calls.last, 'renew_task_push_device');
       expect(h.remote.calls.length, 3);
+      expect(h.native.samples, 2);
+      expect(h.native.gate!['clock_sample'], 'sample-2');
       expect(h.native.enabled, isTrue);
     },
   );
@@ -54,6 +64,8 @@ void main() {
       expect(h.row['state'], 'enabled');
       expect(h.native.enabled, isTrue);
       expect(h.native.gate!['settings_version'], 3);
+      expect(h.native.gate!['clock_sample'], isA<String>());
+      expect(h.native.gate, isNot(contains('rtt_ms')));
       expect(h.native.slots, slots);
       final encoded = jsonEncode(h.native.gate);
       expect(encoded, isNot(contains(child)));
