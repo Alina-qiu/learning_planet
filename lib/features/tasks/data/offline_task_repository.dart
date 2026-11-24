@@ -100,7 +100,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     _activeChild = null;
     _lastAttempt.clear();
     _displayClocks.clear();
-    _emit(const TaskSyncState());
+    _emit(TaskSyncState(dataRevision: _state.dataRevision + 1));
   }
 
   Future<void> forgetAccount(String owner, String jobId) async {
@@ -109,7 +109,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     await store.removeAccountData(owner, jobId);
     _lastAttempt.clear();
     _displayClocks.clear();
-    _emit(const TaskSyncState());
+    _emit(TaskSyncState(dataRevision: _state.dataRevision + 1));
   }
 
   Future<void> forgetChild(String childId, {bool notifyUi = false}) async {
@@ -173,6 +173,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     String owner,
     TaskSyncPhase phase, {
     String? message,
+    bool dataChanged = true,
   }) async {
     final rows = await store.commands(owner);
     _check(owner);
@@ -189,6 +190,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
         conflicts: conflicts,
         message: message,
         revision: _state.revision + 1,
+        dataRevision: _state.dataRevision + (dataChanged ? 1 : 0),
         pendingTaskIds: {
           for (final row in rows)
             if (row['state'] == 'pending') row['task_id'] as String,
@@ -792,7 +794,9 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
         _state.phase == TaskSyncPhase.offline ||
         _state.message != null;
     _lastAttempt[childId] = clock();
-    await _publish(owner, TaskSyncPhase.syncing);
+    // The request has started, but the local snapshot and command queue are
+    // still the same. Keep their readers mounted while the server responds.
+    await _publish(owner, TaskSyncPhase.syncing, dataChanged: false);
     final diagnosticScope = _diagnostics.capture(),
         watch = Stopwatch()..start();
     var diagnosticOutcome = DiagnosticOutcome.ok;

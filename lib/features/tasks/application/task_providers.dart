@@ -7,11 +7,15 @@ import '../domain/task_sync_state.dart';
 import '../domain/task_item.dart';
 import '../domain/wallet_summary.dart';
 
+final _taskDataRevision = taskSyncStateProvider.select(
+  (sync) => sync.whenData((state) => state.dataRevision),
+);
+
 final taskFamilyTimezoneProvider = FutureProvider.family<String?, String>((
   ref,
   child,
 ) {
-  ref.watch(taskSyncStateProvider);
+  ref.watch(_taskDataRevision);
   final repository = ref.watch(taskRepositoryProvider);
   return repository is OfflineTaskRepository
       ? repository.cachedFamilyTimezone(child)
@@ -24,7 +28,7 @@ final familyTodayProvider = FutureProvider.family<DateTime, String>((
 ) async {
   final repository = ref.watch(taskRepositoryProvider);
   if (repository is OfflineTaskRepository) {
-    ref.watch(taskSyncStateProvider);
+    ref.watch(_taskDataRevision);
     return repository.today(childId);
   }
   if (repository is SupabaseTaskRepository) {
@@ -42,7 +46,7 @@ final walletProvider = FutureProvider.family<WalletSummary, String>((
   ref,
   childId,
 ) {
-  ref.watch(taskSyncStateProvider);
+  ref.watch(_taskDataRevision);
   return ref.watch(taskRepositoryProvider).loadWallet(childId);
 });
 
@@ -54,7 +58,7 @@ final tasksProvider = FutureProvider.family<List<TaskItem>, String>((
   ref,
   childId,
 ) {
-  ref.watch(taskSyncStateProvider);
+  ref.watch(_taskDataRevision);
   return ref.watch(taskRepositoryProvider).loadTasks(childId);
 });
 

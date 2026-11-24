@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
 
+import 'package:flutter/foundation.dart' show debugPrintSynchronously;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -194,7 +195,12 @@ Future<void> _selectChild(
   String family,
 ) async {
   final screen = find.byType(HomeScreen);
-  final home = tester.widget<HomeScreen>(screen);
+  late HomeScreen home;
+  await _until(tester, 'home with the fixture child', () {
+    if (screen.evaluate().length != 1) return false;
+    home = tester.widget<HomeScreen>(screen);
+    return home.children.any((profile) => profile.id == child);
+  });
   expect(
     home.children.singleWhere((profile) => profile.id == child).familyId,
     family,
@@ -217,17 +223,19 @@ Future<void> _selectChild(
 
 /// Scroll within the sliver's extent. Overscrolling the top would manually
 /// refresh data and invalidate the automatic reconnection assertion.
-Future<void> _show(
+Future<void> showFixtureTarget(
   WidgetTester tester,
   Finder scroll,
   Finder target,
   String stage, {
   bool bottom = false,
+  bool Function()? matches,
 }) async {
   await _until(tester, stage, () {
-    if (target.evaluate().isNotEmpty) return true;
+    if (target.evaluate().length == 1 && (matches?.call() ?? true)) return true;
     if (scroll.evaluate().isEmpty) return false;
     final position = tester.state<ScrollableState>(scroll.first).position;
+    if (!position.hasPixels || !position.hasContentDimensions) return false;
     final offset = bottom ? position.maxScrollExtent : position.minScrollExtent;
     if (offset.isFinite && position.pixels != offset) position.jumpTo(offset);
     return false;
@@ -252,9 +260,36 @@ Future<void> _tapTaskAction(
   await tester.tap(button);
 }
 
+String fixtureFailureMark(FlutterErrorDetails details) {
+  final kind = switch (details.exception) {
+    TestFailure() => 'assertion',
+    StateError() => 'state',
+    TypeError() => 'type',
+    FlutterError() => 'framework',
+    _ => 'other',
+  };
+  final line = RegExp(
+    r'\bcross_device_sync_test\.dart:([1-9]\d{0,3}):\d+',
+  ).firstMatch(details.stack?.toString() ?? '')?.group(1);
+  return 'AC01_UI_FAILURE kind=$kind line=${line ?? 'unknown'}';
+}
+
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  if (Platform.isAndroid) unawaited(_sendAndroidOutcome(binding));
+  if (Platform.isAndroid) {
+    // Keep the binding's normal failure reporting. Send only a category and
+    // fixture source line through the existing restricted logcat stream.
+    final original = reportTestException;
+    var recorded = false;
+    reportTestException = (details, description) {
+      if (!recorded) {
+        recorded = true;
+        debugPrintSynchronously(fixtureFailureMark(details));
+      }
+      original(details, description);
+    };
+    unawaited(_sendAndroidOutcome(binding));
+  }
   testWidgets(
     'AC-01 Android completes, iOS reconnects to the same task and wallet',
     (tester) async {
@@ -333,9 +368,17 @@ void main() {
       final start = onCard('开始'), done = onCard('已完成');
       final initialWallet = find.text('金币 0 · 冻结 0 · XP 0');
       final paidWallet = find.text('金币 $coins · 冻结 0 · XP $xp');
-      await _show(tester, scroll, initialWallet, 'initial wallet');
-      await _show(tester, scroll, start, 'ready task', bottom: true);
-      expect(onCard(scenario['title'] as String), findsOneWidget);
+      await showFixtureTarget(tester, scroll, initialWallet, 'initial wallet');
+      final title = onCard(scenario['title'] as String);
+      await showFixtureTarget(
+        tester,
+        scroll,
+        start,
+        'ready task',
+        bottom: true,
+        matches: () =>
+            card.evaluate().length == 1 && title.evaluate().length == 1,
+      );
       report['ready_with_zero_wallet'] = true;
       if (reader && !restoring) {
         await control.mark('reader-ready', task);
@@ -355,12 +398,24 @@ void main() {
         await control.stage(report, 'complete_task');
         await _tapTaskAction(tester, start, 'enabled start action');
         final finish = onCard('完成');
-        await _show(tester, scroll, finish, 'in-progress task', bottom: true);
+        await showFixtureTarget(
+          tester,
+          scroll,
+          finish,
+          'in-progress task',
+          bottom: true,
+        );
         await _tapTaskAction(tester, finish, 'enabled completion action');
       }
       await control.stage(report, 'confirm_task_and_wallet');
-      await _show(tester, scroll, done, 'completed task', bottom: true);
-      await _show(tester, scroll, paidWallet, 'confirmed wallet');
+      await showFixtureTarget(
+        tester,
+        scroll,
+        done,
+        'completed task',
+        bottom: true,
+      );
+      await showFixtureTarget(tester, scroll, paidWallet, 'confirmed wallet');
       report.addAll({'completed': true, 'coins': coins, 'xp': xp});
       await control.mark(reader ? 'reader-confirmed' : 'writer-complete', task);
       await control.stage(report, 'confirmed');

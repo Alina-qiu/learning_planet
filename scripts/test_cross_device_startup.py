@@ -75,7 +75,7 @@ class StartupTests(unittest.TestCase):
             elif "logcat" in args:
                 self.assertTrue(state["avd"])
                 self.assertIn("both routes", events)
-                self.assertEqual(args[args.index("-e") + 1], runner.STARTUP_MARK)
+                self.assertEqual(args[args.index("-e") + 1], runner.ANDROID_LOG_FILTER)
                 self.assertEqual(args[-3:], ["LP_STARTUP:I", "flutter:I", "*:S"])
                 self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
                 events.append("capture startup marks")
@@ -222,8 +222,13 @@ class StartupTests(unittest.TestCase):
                                "LP_STARTUP source=dart stage=first_frame elapsed_us=4 outcome=ok\n"
                                "LP_STARTUP source=dart stage=credentials elapsed_us=7 outcome=error\n"
                                "LP_STARTUP source=dart stage=credentials elapsed_us=7 outcome=ok private_marker\n"
-                               "source=android stage=private_marker elapsed_us=1 outcome=ok\n", encoding="utf8")
-            self.assertEqual(runner.startup_summary(logfile), "android.activity_create=ok,dart.first_frame=ok,dart.credentials=error")
+                               "source=android stage=private_marker elapsed_us=1 outcome=ok\n"
+                               "AC01_UI_FAILURE kind=private_marker line=14\n"
+                               "AC01_UI_FAILURE kind=state line=14 private_marker\n"
+                               "AC01_UI_FAILURE kind=state line=235\n"
+                               "AC01_UI_FAILURE kind=other line=unknown\n", encoding="utf8")
+            self.assertEqual(runner.startup_summary(logfile),
+                             "android.activity_create=ok,dart.first_frame=ok,dart.credentials=error failure_kind=state fixture_line=235")
 
     def test_occupied_serial_or_port_stops_before_boot(self):
         for occupied in ("port", "serial"):

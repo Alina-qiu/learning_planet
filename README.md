@@ -4,18 +4,18 @@
 
 ## 项目状态
 
-截至2026-11-12，Android本地调试包可构建，iOS Debug/Release已通过macOS CI未签名编译与资源检查；任务、自动复习、金币/XP、兑换、错题/OCR、PDF、成长、报告和家庭管理已有实现及本机验证。**整个App尚未完成最终验收**，不能以构建和测试通过代替云端及指定手机运行。
+截至 2026-11-24，**Android 本机联调包已可试用**。没有测试手机时，可在电脑的 Android 模拟器里登录、创建家庭、完成任务和复习错题。iOS 已通过未签名 Debug、Release 编译及 iPhone、iPad 模拟器检查。目标手机和云端服务仍待验收。
 
 - [当前需求覆盖与逐项验收](docs/CURRENT_STATUS.md)：ACC、TSK、ERR、AC-01至AC-11、非功能要求及剩余依赖。
-- [当前Android安装包](docs/ANDROID_BUILD.md)与[本机联调方法](docs/LOCAL_DEBUG.md)：普通包只作启动验证；本机包需电脑服务及USB端口转发，临时后端重启为空库。
-- [测试记录](docs/TESTING.md)：最近已完成的应用代码验证为`1b82843`的[八项CI](https://github.com/Alina-qiu/learning_planet/actions/runs/43183293457)，823项Flutter、403项数据库、24项通知策略及30项诊断日志检查通过，CI核心覆盖率90.79%。后续[iOS兼容性矩阵](docs/IOS_COMPATIBILITY.md)结果见PR Checks。
+- 试用请选择 `app-local-debug.apk`，通过 ADB 端口转发连接电脑上的测试服务。服务每次启动都会建立空数据库。[当前 Android 安装包](docs/ANDROID_BUILD.md) · [启动服务和模拟器](docs/LOCAL_DEBUG.md)
+- 常规 CI 覆盖 Flutter、Android 构建、iOS 未签名构建与模拟器、数据库升级和备份恢复。同一家庭的 Android 与 iPhone 同步另设独立验收。[当前分支检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) · [历史测试记录](docs/TESTING.md)
 - [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：草稿PR已公开，包含iOS Debug/Release未签名构建、Android构建、数据库/HTTP/Storage及iOS模拟器运行检查；后续提交结果见PR的Checks。
 - [本机备份恢复演练](docs/BACKUP_RESTORE.md)：新环境恢复数据库与私有图片/PDF，9项检查通过；目标云端备份仍待验收。
 - [开发历史](docs/PROGRESS.md)、[技术架构](docs/ARCHITECTURE.md)与[完整计划](docs/DEVELOPMENT_PLAN.md)。
 
 主要剩余项为云端部署、iOS签名安装、华为鸿蒙4.2/iPhone端到端验证、iOS收到远程提醒后的安静时段检查、真实设备性能、模型评测和四周家庭试用。家长补签和计时纠正已实现，是否扩展为撤回误完成仍待确认。
 
-最近代码改动包括[奖励页横屏/平板与双倍字号适配](docs/ECONOMY_ACCESSIBILITY.md)、[iPhone任务远程提醒](docs/TASK_REMOTE_PUSH.md)、[iOS诊断日志策略及跨进程恢复验证](docs/RUNTIME_DIAGNOSTICS.md#ios诊断日志的原生策略检查)、[首页与任务列表字号/安全区域](docs/TASK_ACCESSIBILITY.md)、[组卷适配与上传隐私提示](docs/WORKSHEET_ACCESSIBILITY.md)、[图片导入中断保护](docs/OCR_INTERRUPTION.md)和[更换图片后重新校对](docs/OCR_SOURCE_CHANGES.md)。原README的逐轮状态已保留到[历史记录](docs/README_STATUS_HISTORY.md)，以免旧测试数量和旧待办被误读为当前结论。
+此前版本还覆盖了[奖励页横屏和大字号](docs/ECONOMY_ACCESSIBILITY.md)、[iPhone 任务提醒](docs/TASK_REMOTE_PUSH.md)、[iOS 诊断与跨进程恢复](docs/RUNTIME_DIAGNOSTICS.md)、[任务列表安全区域](docs/TASK_ACCESSIBILITY.md)、[组卷与上传隐私提示](docs/WORKSHEET_ACCESSIBILITY.md)、[图片导入中断](docs/OCR_INTERRUPTION.md)及[更换图片后重新校对](docs/OCR_SOURCE_CHANGES.md)。[历史记录](docs/README_STATUS_HISTORY.md)
 
 ## 技术栈
 
