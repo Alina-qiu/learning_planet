@@ -17,45 +17,114 @@ bool taskMotionEnabled(BuildContext context, FeedbackPreferences preferences) =>
     !MediaQuery.disableAnimationsOf(context) &&
     !MediaQuery.accessibleNavigationOf(context);
 
-/// Called only after a durable completion succeeds, never from a refresh/replay.
-void showTaskCompletionFeedback(
-  BuildContext context,
-  WidgetRef ref, {
-  required bool pending,
-  bool review = false,
-}) {
-  final lifecycle = WidgetsBinding.instance.lifecycleState;
-  if (!context.mounted ||
-      ModalRoute.of(context)?.isCurrent == false ||
-      (lifecycle != null && lifecycle != AppLifecycleState.resumed)) {
-    return;
+/// One transient notice owned by the screen that started a task operation.
+/// Independent of ScaffoldMessenger so retries never delay success or dismiss
+/// unrelated messages (for example, an undo action).
+class TaskFeedbackPresenter {
+  OverlayEntry? _entry;
+  Timer? _timer;
+  bool _error = false;
+
+  void clear() {
+    _timer?.cancel();
+    _timer = null;
+    _entry?.remove();
+    _entry?.dispose();
+    _entry = null;
+    _error = false;
   }
-  final preferences = ref.read(feedbackPreferencesProvider).value;
-  final motion = taskMotionEnabled(context, preferences);
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.removeCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      duration: const Duration(milliseconds: 1500),
-      content: TaskCompletionNotice(
-        animate: motion,
+
+  void clearError() {
+    if (_error) clear();
+  }
+
+  bool _canShow(BuildContext context) {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return context.mounted &&
+        ModalRoute.of(context)?.isCurrent != false &&
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed);
+  }
+
+  void _show(BuildContext context, Widget content, Duration duration) {
+    clear();
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final overlay = Overlay.of(context);
+    _entry = OverlayEntry(
+      builder: (_) => Positioned(
+        top: 0,
+        left: 12,
+        right: 12,
+        child: IgnorePointer(
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.only(top: kToolbarHeight + 8),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Material(
+                    color: colors.inverseSurface,
+                    borderRadius: BorderRadius.circular(8),
+                    elevation: 4,
+                    textStyle: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onInverseSurface,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: content,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(_entry!);
+    _timer = Timer(duration, clear);
+  }
+
+  void error(BuildContext context, String message) {
+    if (!_canShow(context)) return;
+    _show(
+      context,
+      Semantics(liveRegion: true, child: Text(message)),
+      const Duration(seconds: 4),
+    );
+    _error = true;
+  }
+
+  /// Called only after a durable completion, never from a refresh or replay.
+  void complete(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool pending,
+    bool review = false,
+  }) {
+    if (!_canShow(context)) return;
+    final preferences = ref.read(feedbackPreferencesProvider).value;
+    _show(
+      context,
+      TaskCompletionNotice(
+        animate: taskMotionEnabled(context, preferences),
         message: pending
             ? '完成记录已保存本机，奖励待同步确认'
             : review
             ? '复习已完成'
             : '任务已完成',
       ),
-    ),
-    snackBarAnimationStyle: AnimationStyle(
-      duration: Duration(milliseconds: motion ? 150 : 0),
-      reverseDuration: Duration(milliseconds: motion ? 150 : 0),
-    ),
-  );
-  if (preferences.sound) {
-    try {
-      unawaited(ref.read(completionSoundProvider)().catchError((Object _) {}));
-    } catch (_) {
-      /* Feedback must never fail a completed operation. */
+      const Duration(milliseconds: 1500),
+    );
+    if (preferences.sound) {
+      try {
+        unawaited(
+          ref.read(completionSoundProvider)().catchError((Object _) {}),
+        );
+      } catch (_) {
+        /* Feedback must never fail a completed operation. */
+      }
     }
   }
 }

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:timezone/data/latest.dart' as tzdata;
+import '../../../core/time/family_time_zones.dart';
 import '../domain/task_reminder_policy.dart';
 import 'task_alarm_backend.dart';
 import 'remote_task_push.dart';
@@ -111,7 +111,7 @@ class LocalNotificationScheduler
   Future<void> _initialize() => _initialization ??=
       () async {
         if (!_supported) return;
-        measureStartupSync(StartupPhase.timezone, tzdata.initializeTimeZones);
+        measureStartupSync(StartupPhase.timezone, ensureFamilyTimeZones);
         await measureStartup(
           StartupPhase.notificationPlugin,
           () => _plugin.initialize(

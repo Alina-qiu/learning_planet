@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
+import '../../../core/time/family_time_zones.dart';
 import '../application/family_providers.dart';
 import '../application/family_time_providers.dart';
 import '../data/family_time_repository.dart';
@@ -189,7 +189,7 @@ class _TimezonePickerState extends State<_TimezonePicker> {
   @override
   void initState() {
     super.initState();
-    tzdata.initializeTimeZones();
+    ensureFamilyTimeZones();
     final rest = tz.timeZoneDatabase.locations.keys.toList()..sort();
     zones = <String>{
       if (widget.current != null) widget.current!,

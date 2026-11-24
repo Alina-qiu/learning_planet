@@ -149,6 +149,22 @@ void main() {
     },
   );
 
+  test('a denied embedded family read discards the cached list', () async {
+    await restore(expired: false);
+    final online = h.handle;
+    h.handle = (r) =>
+        r.url.path.endsWith('/families') ? MockSupabase.denied(r) : online(r);
+    await expectLater(
+      container.read(familiesProvider.future),
+      throwsA(isA<PostgrestException>().having((e) => e.code, 'code', '42501')),
+    );
+    expect(h.calls.map((r) => r.url.pathSegments.last), [
+      'accept_family_invitations',
+      'families',
+    ]);
+    expect(await store.read('parent', 'families'), isNull);
+  });
+
   for (final user in ['parent', 'different']) {
     test('a replacement session for $user rechecks the server', () async {
       await restore();

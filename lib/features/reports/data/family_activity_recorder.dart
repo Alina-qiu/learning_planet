@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../../core/offline/offline_store.dart';
+import '../../../core/time/family_time_zones.dart';
 import '../../tasks/application/task_providers.dart';
 import '../../tasks/data/offline_task_repository.dart';
 
@@ -41,7 +41,7 @@ class FamilyActivityRecorder {
     Duration Function()? elapsed,
   }) : clock = clock ?? DateTime.now,
        _elapsedOverride = elapsed {
-    tz_data.initializeTimeZones();
+    ensureFamilyTimeZones();
   }
   final OfflineStore store;
   final String? Function() owner;

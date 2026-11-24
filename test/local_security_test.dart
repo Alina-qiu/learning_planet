@@ -19,11 +19,13 @@ import 'package:learning_planet/features/auth_family/data/auth_repository.dart';
 
 class MemorySecrets implements DeviceSecrets {
   final values = <String, String>{};
+  final reads = <String>[];
   bool failWrite = false;
   bool dropWrite = false;
   bool failRead = false;
   @override
   Future<String?> read(String key) async {
+    reads.add(key);
     if (failRead) throw StateError('native private detail');
     return values[key];
   }
@@ -109,6 +111,43 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
   tearDown(() async => directory.delete(recursive: true));
+
+  test(
+    'task summary preserves the confirmed wallet and the full cache access rules',
+    () async {
+      final store = await openEncrypted(directory, secrets);
+      addTearDown(store.close);
+      const metadata = {
+        'family_id': 'family',
+        'timezone': 'Asia/Shanghai',
+        'wallet': {'coin_balance': 7, 'frozen_balance': 2, 'xp': 5},
+        'server_at': '2026-09-16T01:00:00Z',
+      };
+      final snapshot = {
+        ...metadata,
+        'tasks': List.filled(1000, {'title': marker}),
+      };
+      await store.write('owner', 'tasks:child', snapshot);
+      expect(await store.readTaskSummary('owner', 'child'), metadata);
+      expect(await store.read('owner', 'tasks:child'), snapshot);
+      expect(await store.readTaskSummary('other', 'child'), isNull);
+      expect(await store.readTaskSummary('owner', 'sibling'), isNull);
+      // A stale cache row can survive an older installation's interrupted cleanup.
+      // A family revocation still applies with no child IDs recorded.
+      await store.customStatement(
+        'INSERT INTO family_access VALUES(?,?,2,0,2,?,0)',
+        ['owner', 'family', '[]'],
+      );
+      expect(await store.readTaskSummary('owner', 'child'), isNull);
+      expect(await store.read('owner', 'tasks:child'), isNull);
+      await store.write('second-owner', 'tasks:child', snapshot);
+      await store.customStatement('INSERT INTO deleted_accounts VALUES(?,?)', [
+        'second-owner',
+        'job',
+      ]);
+      expect(await store.readTaskSummary('second-owner', 'child'), isNull);
+    },
+  );
 
   test(
     'startup recovers a hot journal even after a wrong key attempt',
@@ -496,6 +535,46 @@ void main() {
       expect(prefs.getBool('task_notifications_enabled'), isTrue);
       await pkce.removeItem(key: SecureAuthValues.pkceKey);
       expect(await pkce.getItem(key: SecureAuthValues.pkceKey), isNull);
+    },
+  );
+
+  test(
+    'SDK initialization shares a successful secure preflight, never its tokens',
+    () async {
+      final values = SecureAuthValues(
+        secrets: secrets,
+        backendUrl: 'https://project.supabase.co',
+      );
+      final session = SecureSessionStorage(values);
+      await session.persistSession('first');
+      await SecurePkceStorage(
+        values,
+      ).setItem(key: SecureAuthValues.pkceKey, value: 'verifier');
+      secrets.reads.clear();
+      await Future.wait([session.initialize(), session.initialize()]);
+      await session.initialize();
+      expect(secrets.reads, [
+        'learning_planet.auth.v1.project.${values.sessionKey}',
+        'learning_planet.auth.v1.project.${SecureAuthValues.pkceKey}',
+      ]);
+      secrets.failRead = true;
+      await expectLater(
+        session.hasAccessToken(),
+        throwsA(isA<LocalDataException>()),
+      );
+      await expectLater(
+        session.accessToken(),
+        throwsA(isA<LocalDataException>()),
+      );
+      secrets.failRead = false;
+      await session.removePersistedSession();
+      expect(await session.hasAccessToken(), isFalse);
+      // A new startup performs both migrations/checks again.
+      secrets.failRead = true;
+      await expectLater(
+        SecureSessionStorage(values).initialize(),
+        throwsA(isA<LocalDataException>()),
+      );
     },
   );
 

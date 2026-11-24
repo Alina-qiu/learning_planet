@@ -1,6 +1,17 @@
 # Android 调试构建
 
-## 2026-11-24 后台同步时保留首页任务和余额
+## 2026-11-24 任务完成提示与首页读取
+
+本次更新修复了最低时长错误提示遮住下一次成功提示的问题，并减少启动时读取登录凭据、家庭目录和任务缓存的重复工作。
+
+| 安装包 | 包名 | 用途 |
+|---|---|---|
+| [本机联调包](../build/app/outputs/flutter-apk/app-local-debug.apk) | `com.learningplanet.learning_planet.local` | 通过 ADB 端口转发连接电脑上的测试服务，可用验证码登录、建立家庭并试用。 |
+| [普通调试包](../build/app/outputs/flutter-apk/app-debug.apk) | `com.learningplanet.learning_planet` | 未配置后端时，可核对安装和配置提示页。 |
+
+安装包保存在本机工作区。每个版本的字节数、SHA-256、签名和实际运行环境列在相应交付记录中。[本轮安装包和验收](../build/acceptance-20261124-startup/DELIVERY.md) · [本机试用步骤](LOCAL_DEBUG.md)
+
+## 2026-11-24 后台同步时保留首页任务和余额（历史构建）
 
 孩子已打开首页时，后台同步开始后，已经显示的任务卡、“开始”按钮和已确认余额会保留。新快照到达后，首页显示更新的任务和余额。联调包可在本机 Android 模拟器上试用，无需云端项目。[启动服务、安装和获取验证码](LOCAL_DEBUG.md)
 

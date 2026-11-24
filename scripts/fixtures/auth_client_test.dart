@@ -248,7 +248,7 @@ void main() {
         await SupabaseFamilyRepository(second.client).loadFamilies(),
         isEmpty,
       );
-      await family(second.client);
+      final secondFamily = await family(second.client);
       expect(
         await second.client.from('children').select().eq('id', childId),
         isEmpty,
@@ -266,6 +266,21 @@ void main() {
         first.repository.currentSession!.userId,
         isNot(second.repository.currentSession!.userId),
       );
+      final owner = SupabaseFamilyRepository(first.client);
+      await owner.setParentPin(familyId: familyId, pin: '2468');
+      expect(
+        (await owner.verifyParentPin(familyId: familyId, pin: '2468')).verified,
+        isTrue,
+      );
+      await owner.inviteParent(
+        familyId: familyId,
+        email: second.client.auth.currentUser!.email!,
+      );
+      final joined = await SupabaseFamilyRepository(
+        second.client,
+      ).loadFamilies();
+      expect(joined.map((f) => f.id), [secondFamily, familyId]);
+      expect(joined.last.children.single.id, childId);
     },
   );
 

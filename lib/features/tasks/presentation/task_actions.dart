@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../auth_family/application/auth_providers.dart';
 import '../../growth/presentation/task_feedback.dart';
 import '../../wrong_questions/presentation/review_session_screen.dart';
 import '../application/task_providers.dart';
@@ -11,56 +12,113 @@ import '../domain/task.dart';
 import '../domain/task_item.dart';
 import '../domain/task_start_origin.dart';
 
+typedef _TaskScope = ({
+  TaskRepository repository,
+  String? owner,
+  String? sessionOwner,
+  String child,
+  String? family,
+});
+
 /// Keep the action on the screen so completion feedback survives a reordered row.
 mixin TaskActions<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   String get childId;
   String? get familyId;
-  bool _busy = false;
-  bool get taskActionBusy => _busy;
+  final _feedback = TaskFeedbackPresenter();
   final _celebratedTasks = <String>{};
+  _TaskScope? _scope;
+  Object? _activeAction;
+  String? _lastTask;
+  bool get taskActionBusy => _activeAction != null;
 
-  Future<void> runTaskAction(Future<void> Function() action) async {
-    if (_busy) return;
-    final child = childId;
+  _TaskScope get _currentScope {
     final repository = ref.read(taskRepositoryProvider);
+    final owner = repository is OfflineTaskRepository
+        ? repository.accountId()
+        : taskSupabaseClient(repository)?.auth.currentUser?.id;
+    return (
+      repository: repository,
+      owner: owner,
+      sessionOwner: ref.read(authAccountIdProvider),
+      child: childId,
+      family: familyId,
+    );
+  }
+
+  void watchTaskFeedbackScope() {
+    ref.watch(authAccountIdProvider);
+    ref.watch(taskRepositoryProvider);
+    final scope = _currentScope;
+    if (_scope != scope) {
+      _feedback.clear();
+      _celebratedTasks.clear();
+      _activeAction = null;
+      _lastTask = null;
+      _scope = scope;
+    }
+    if (ModalRoute.isCurrentOf(context) == false) _feedback.clear();
+  }
+
+  @override
+  void dispose() {
+    _feedback.clear();
+    super.dispose();
+  }
+
+  Future<void> runTaskAction(
+    TaskItem task,
+    Future<void> Function() action, {
+    VoidCallback? onSuccess,
+  }) async {
+    if (taskActionBusy || task.childId != childId) return;
+    final scope = _currentScope;
+    final actionId = Object();
+    final child = childId;
     bool current() =>
-        child == childId &&
-        identical(repository, ref.read(taskRepositoryProvider));
-    setState(() => _busy = true);
+        identical(_activeAction, actionId) && _currentScope == scope;
+    if (_lastTask != task.id) {
+      _feedback.clear();
+    } else {
+      _feedback.clearError();
+    }
+    _lastTask = task.id;
+    setState(() => _activeAction = actionId);
     try {
       await action();
       if (!mounted || !current()) return;
+      onSuccess?.call();
       ref.invalidate(tasksProvider(child));
       ref.invalidate(walletProvider(child));
       ref.invalidate(remindersProvider(child));
     } catch (error) {
       if (mounted && current()) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('操作失败：$error')));
+        _feedback.error(context, '操作失败：$error');
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && identical(_activeAction, actionId)) {
+        setState(() => _activeAction = null);
+      }
     }
   }
 
-  Future<void> completeTask(TaskItem task) => runTaskAction(() async {
+  Future<void> completeTask(TaskItem task) {
     final repository = ref.read(taskRepositoryProvider);
-    await repository.complete(task.id);
-    if (!mounted ||
-        childId != task.childId ||
-        !identical(repository, ref.read(taskRepositoryProvider)) ||
-        !_celebratedTasks.add(task.id)) {
-      return;
-    }
-    showTaskCompletionFeedback(
-      context,
-      ref,
-      pending: repository is OfflineTaskRepository,
+    return runTaskAction(
+      task,
+      () => repository.complete(task.id),
+      onSuccess: () {
+        if (_celebratedTasks.add(task.id)) {
+          _feedback.complete(
+            context,
+            ref,
+            pending: repository is OfflineTaskRepository,
+          );
+        }
+      },
     );
-  });
+  }
 
-  Future<void> advanceTask(TaskItem task) => runTaskAction(() async {
+  Future<void> advanceTask(TaskItem task) => runTaskAction(task, () async {
     if (task.sourceType == 'automatic_wrong_review') {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(

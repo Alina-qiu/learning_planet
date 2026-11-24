@@ -122,11 +122,20 @@ void main() {
           final value = switch (request.url.path.split('/').last) {
             'accept_family_invitations' => null,
             'families' => [
-              {'id': 'family', 'name': '家庭', 'timezone': 'Asia/Shanghai'},
-            ],
-            'children' => [
-              for (final id in ['deleted', 'revoked', 'keep'])
-                {'id': id, 'family_id': 'family', 'nickname': id, 'grade': 1},
+              {
+                'id': 'family',
+                'name': '家庭',
+                'timezone': 'Asia/Shanghai',
+                'children': [
+                  for (final id in ['deleted', 'revoked', 'keep'])
+                    {
+                      'id': id,
+                      'family_id': 'family',
+                      'nickname': id,
+                      'grade': 1,
+                    },
+                ],
+              },
             ],
             'child_deletion_tombstones' => [
               {'child_id': 'deleted'},

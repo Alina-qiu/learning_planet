@@ -31,6 +31,7 @@ class _HomeTaskListState extends ConsumerState<HomeTaskList>
 
   @override
   Widget build(BuildContext context) {
+    watchTaskFeedbackScope();
     final tasks = ref.watch(tasksProvider(childId));
     final familyToday = ref.watch(familyTodayProvider(childId));
     final origin = ref.watch(taskStartOriginProvider(familyId));

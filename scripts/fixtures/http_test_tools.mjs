@@ -73,7 +73,7 @@ export function localProcess(binary, args, {env, cwd, name}) {
     },
   };
 }
-export async function startPostgrest(database, secret) {
+export async function startPostgrest(database, secret, {maxRows} = {}) {
   const binary = process.env.POSTGREST_BIN ?? 'postgrest';
   const env = isolatedEnv(['PGRST_']);
   if (database.nativeBin) {
@@ -93,6 +93,7 @@ export async function startPostgrest(database, secret) {
     PGRST_DB_SCHEMAS: 'public', PGRST_DB_ANON_ROLE: 'anon', PGRST_DB_CONFIG: 'false',
     PGRST_JWT_SECRET: secret, PGRST_SERVER_HOST: '127.0.0.1', PGRST_SERVER_PORT: String(port),
   });
+  if (maxRows !== undefined) env.PGRST_DB_MAX_ROWS = String(maxRows);
   const service = localProcess(binary, [], {env, name: 'PostgREST'});
   try { await service.ready(`http://127.0.0.1:${port}/`); }
   catch (error) { await service.stop(); throw error; }

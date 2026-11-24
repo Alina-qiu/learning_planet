@@ -431,20 +431,49 @@ void main() {
     },
   );
   test(
+    'a family read cannot cross a session change while accepting invitations',
+    () async {
+      final entered = Completer<void>(), release = Completer<void>();
+      backend.handle = (r) async {
+        entered.complete();
+        await release.future;
+        return MockSupabase.json(r, 0);
+      };
+      final pending = SupabaseFamilyRepository(backend.client).loadFamilies();
+      await entered.future;
+      await backend.signIn(MockSupabase.secondUser);
+      final rejected = expectLater(pending, throwsStateError);
+      release.complete();
+      await rejected;
+      expect(backend.calls.map((r) => r.url.pathSegments.last), [
+        'accept_family_invitations',
+      ]);
+    },
+  );
+  test(
     'family loading groups child profiles correctly and purges all pages of deletion and revocation notices',
     () async {
       final repo = SupabaseFamilyRepository(backend.client);
       backend.handle = (r) {
         if (r.url.path.endsWith('/families')) {
           return MockSupabase.json(r, [
-            {'id': 'f1', 'name': 'One', 'timezone': 'Asia/Shanghai'},
-            {'id': 'f2', 'name': 'Two', 'timezone': 'UTC'},
-          ]);
-        }
-        if (r.url.path.endsWith('/children')) {
-          return MockSupabase.json(r, [
-            {'id': 'c2', 'family_id': 'f2', 'nickname': 'B', 'grade': 2},
-            {'id': 'c1', 'family_id': 'f1', 'nickname': 'A', 'grade': 1},
+            {
+              'id': 'f1',
+              'name': 'One',
+              'timezone': 'Asia/Shanghai',
+              'children': [
+                {'id': 'c1', 'family_id': 'f1', 'nickname': 'A', 'grade': 1},
+              ],
+            },
+            {
+              'id': 'f2',
+              'name': 'Two',
+              'timezone': 'UTC',
+              'children': [
+                {'id': 'c2', 'family_id': 'f2', 'nickname': 'B', 'grade': 2},
+              ],
+            },
+            {'id': 'empty', 'name': 'Empty', 'timezone': 'UTC', 'children': []},
           ]);
         }
         if (r.url.path.endsWith('/child_deletion_tombstones')) {
@@ -480,10 +509,15 @@ void main() {
       final families = await repo.loadFamilies();
       expect(families[0].children.single.id, 'c1');
       expect(families[1].children.single.id, 'c2');
-      expect(
-        backend.calls.first.url.path,
-        endsWith('/accept_family_invitations'),
-      );
+      expect(families[2].children, isEmpty);
+      expect(backend.calls.map((r) => r.url.path.split('/').last), [
+        'accept_family_invitations',
+        'families',
+      ]);
+      final query = backend.calls.last.url.queryParameters;
+      expect(query['select'], contains('children('));
+      expect(query['order'], 'created_at.desc.nullslast,id.desc.nullslast');
+      expect(query['children.order'], query['order']);
       expect(await repo.loadDeletedChildIds(), hasLength(502));
       await repo.setParentPin(familyId: 'f1', pin: '1234');
       await repo.inviteParent(familyId: 'f1', email: 'other@example.test');

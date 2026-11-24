@@ -1,8 +1,7 @@
-import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
+import '../../../core/time/family_time_zones.dart';
 import 'parent_notification.dart';
 
-bool _zonesInitialized = false;
 DateTime _instant(Object? value) {
   if (value is! String) throw const FormatException('提醒时间格式无效');
   final result = DateTime.tryParse(value);
@@ -41,10 +40,7 @@ class OfflineNotificationPolicy {
       throw const FormatException('安静时段无效');
     }
     settings.toConfig();
-    if (!_zonesInitialized) {
-      tzdata.initializeTimeZones();
-      _zonesInitialized = true;
-    }
+    ensureFamilyTimeZones();
     location = tz.getLocation(timezone);
   }
   final String familyId, timezone;

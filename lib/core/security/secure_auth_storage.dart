@@ -79,6 +79,7 @@ class SecureSessionStorage extends LocalStorage {
   SecureSessionStorage(this.values, {this.isCurrentSession});
   final SecureAuthValues values;
   final bool Function(String session)? isCurrentSession;
+  Future<void>? _initialization;
   int _persistenceVersion = 0;
   bool _suspended = false;
 
@@ -102,7 +103,19 @@ class SecureSessionStorage extends LocalStorage {
   }
 
   @override
-  Future<void> initialize() => values.initialize();
+  Future<void> initialize() => _initialization ??= _initialize();
+
+  Future<void> _initialize() async {
+    try {
+      // Preflight and the SDK use this same storage instance. Only migration
+      // readiness is shared; every credential read still checks secure storage.
+      await values.initialize();
+    } catch (_) {
+      _initialization = null;
+      rethrow;
+    }
+  }
+
   @override
   Future<bool> hasAccessToken() async => await accessToken() != null;
   @override

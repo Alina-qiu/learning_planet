@@ -105,7 +105,7 @@ Future<Widget> initializeApp() async {
     );
     // Preflight migration before the SDK starts session refresh or deep links.
     try {
-      await measureStartup(StartupPhase.credentials, authValues.initialize);
+      await measureStartup(StartupPhase.credentials, sessionStorage.initialize);
     } catch (_) {
       await store.close();
       rethrow;

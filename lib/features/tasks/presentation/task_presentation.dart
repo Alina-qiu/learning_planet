@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
+import '../../../core/time/family_time_zones.dart';
 import '../domain/task_item.dart';
 import '../domain/task_priority.dart';
 
@@ -41,13 +41,9 @@ class TaskHeading extends StatelessWidget {
   }
 }
 
-bool _zonesReady = false;
 String taskWindow(TaskItem task, String? zone) {
   if (zone == null || task.scheduledAt == null || task.dueAt == null) return '';
-  if (!_zonesReady) {
-    tzdata.initializeTimeZones();
-    _zonesReady = true;
-  }
+  ensureFamilyTimeZones();
   String format(DateTime date) {
     final value = tz.TZDateTime.from(date, tz.getLocation(zone));
     return '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';

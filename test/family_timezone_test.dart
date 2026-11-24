@@ -373,6 +373,7 @@ void main() {
                         'id': 'family',
                         'name': 'Home',
                         'timezone': 'Asia/Shanghai',
+                        'children': [],
                       },
                     ]
                   : [],
@@ -692,7 +693,12 @@ void main() {
             }
             return http.Response(
               jsonEncode([
-                {'id': 'family', 'name': 'Home', 'timezone': zone},
+                {
+                  'id': 'family',
+                  'name': 'Home',
+                  'timezone': zone,
+                  'children': [],
+                },
               ]),
               200,
               request: request,
@@ -721,7 +727,12 @@ void main() {
       reply.complete(
         http.Response(
           jsonEncode([
-            {'id': 'family', 'name': 'Home', 'timezone': 'Asia/Shanghai'},
+            {
+              'id': 'family',
+              'name': 'Home',
+              'timezone': 'Asia/Shanghai',
+              'children': [],
+            },
           ]),
           200,
           headers: {'content-type': 'application/json'},

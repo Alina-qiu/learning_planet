@@ -1,6 +1,6 @@
 import 'package:intl/intl.dart';
-import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
+import '../../../core/time/family_time_zones.dart';
 
 String economySourceLabel(Object? source) =>
     const {
@@ -26,15 +26,10 @@ String ledgerChangeLabel(Map<String, dynamic> row) {
       '${frozen == 0 ? '' : ' · 冻结 ${signedAmount(frozen)}'}';
 }
 
-bool _zonesReady = false;
-
 class EconomyTime {
   EconomyTime(String? zone) {
     if (zone == null) return;
-    if (!_zonesReady) {
-      tzdata.initializeTimeZones();
-      _zonesReady = true;
-    }
+    ensureFamilyTimeZones();
     try {
       _location = tz.getLocation(zone);
     } on tz.LocationNotFoundException {

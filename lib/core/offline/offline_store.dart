@@ -382,10 +382,25 @@ class OfflineStore extends GeneratedDatabase {
     ]);
   });
 
-  Future<Map<String, dynamic>?> read(String owner, String key) async {
+  Future<Map<String, dynamic>?> read(String owner, String key) =>
+      _readCache(owner, key, includeTasks: true);
+
+  /// The wallet, family time and cache checks only need snapshot metadata.
+  /// Strip the task array inside SQLite, before it crosses the isolate boundary.
+  Future<Map<String, dynamic>?> readTaskSummary(String owner, String childId) =>
+      _readCache(owner, 'tasks:$childId', includeTasks: false);
+
+  Future<Map<String, dynamic>?> _readCache(
+    String owner,
+    String key, {
+    required bool includeTasks,
+  }) async {
     if (await accountDeletionJob(owner) != null) return null;
+    final projection = includeTasks
+        ? 'payload'
+        : "json_remove(payload, '\$.tasks') AS payload";
     final row = await customSelect(
-      'SELECT payload FROM offline_cache WHERE owner=? AND cache_key=?',
+      'SELECT $projection FROM offline_cache WHERE owner=? AND cache_key=?',
       variables: [Variable(owner), Variable(key)],
     ).getSingleOrNull();
     if (row == null) return null;

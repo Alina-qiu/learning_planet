@@ -40,7 +40,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen>
   String get childId => widget.childId;
   @override
   String? get familyId => widget.familyId;
-  Future<void> _manualComplete(TaskItem task) => runTaskAction(() async {
+  Future<void> _manualComplete(TaskItem task) => runTaskAction(task, () async {
     var input = '';
     final reason = await showDialog<String>(
       context: context,
@@ -68,7 +68,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen>
     }
     await ref.read(taskRepositoryProvider).manualComplete(task.id, reason);
   });
-  Future<void> _correctTime(TaskItem task) => runTaskAction(() async {
+  Future<void> _correctTime(TaskItem task) => runTaskAction(task, () async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => TaskTimeCorrectionScreen(
@@ -88,7 +88,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen>
     }
     if (mounted) ref.invalidate(learningReportProvider);
   });
-  Future<void> _abandon(TaskItem task) => runTaskAction(() async {
+  Future<void> _abandon(TaskItem task) => runTaskAction(task, () async {
     if (!await confirmTaskAbandon(
           context,
           review: task.sourceType == 'automatic_wrong_review',
@@ -117,6 +117,7 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen>
 
   @override
   Widget build(BuildContext context) {
+    watchTaskFeedbackScope();
     ref.watch(feedbackPreferencesProvider);
     final origin = ref.watch(taskStartOriginProvider(widget.familyId));
     final authorized =

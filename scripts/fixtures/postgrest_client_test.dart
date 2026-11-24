@@ -24,8 +24,10 @@ class FaultTransport extends http.BaseClient {
   bool offline = false, loseAnswerReply = false;
   bool loseManualSaveReply = false;
   int lostReplies = 0;
+  final paths = <String>[];
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    paths.add(request.url.pathSegments.last);
     if (offline) throw http.ClientException('Injected offline transport');
     final response = await inner.send(request);
     if (loseManualSaveReply &&
@@ -131,6 +133,35 @@ void main() {
         .singleWhere((c) => c.nickname == name)
         .id;
   }
+
+  test('embedded and parent row caps preserve tied order and RLS', () async {
+    final transport = FaultTransport();
+    final active = await connect('large', transport: transport);
+    final capped = await active
+        .from('families')
+        .select('id,children(id)')
+        .order('created_at')
+        .order('id');
+    expect(capped, hasLength(1000));
+    expect(capped.first['children'], hasLength(1000));
+    transport.paths.clear();
+    final expected = ['1', for (var i = 1001; i >= 2; i--) i.toString()];
+    final listing = await SupabaseFamilyRepository(active).loadFamilies();
+    expect(listing.map((family) => family.name), expected);
+    expect(listing.first.children.map((child) => child.nickname), expected);
+    expect(listing.skip(1).every((family) => family.children.isEmpty), isTrue);
+    expect(transport.paths, [
+      'accept_family_invitations',
+      'families',
+      'children',
+      'families',
+    ]);
+    expect(await SupabaseFamilyRepository(other).loadFamilies(), isEmpty);
+    await expectLater(
+      SupabaseFamilyRepository(anon).loadFamilies(),
+      throwsA(isA<PostgrestException>()),
+    );
+  });
 
   test(
     'session PIN, anonymous and cross-family access use real HTTP roles',

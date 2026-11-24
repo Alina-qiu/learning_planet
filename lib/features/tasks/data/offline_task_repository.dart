@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:uuid/uuid.dart';
 
 import '../../../core/offline/network_failure.dart';
 import '../../../core/diagnostics/runtime_diagnostics.dart';
 import '../../../core/offline/offline_store.dart';
+import '../../../core/time/family_time_zones.dart';
 import '../domain/task.dart';
 import '../domain/task_item.dart';
 import '../domain/task_sync_state.dart';
@@ -53,7 +53,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     this.refreshFamilyAccess,
   }) : clock = clock ?? DateTime.now,
        _diagnostics = diagnostics ?? runtimeDiagnostics {
-    tz_data.initializeTimeZones();
+    ensureFamilyTimeZones();
     if (autoSync) {
       _timer = Timer.periodic(syncInterval, (_) {
         if (_foreground && _activeChild != null) _backgroundSync(_activeChild!);
@@ -284,8 +284,14 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     await _remoteDeletions.close();
   }
 
-  Future<Map<String, dynamic>> _cache(String owner, String childId) async {
-    final data = await store.read(owner, 'tasks:$childId');
+  Future<Map<String, dynamic>> _cache(
+    String owner,
+    String childId, {
+    bool includeTasks = true,
+  }) async {
+    final data = includeTasks
+        ? await store.read(owner, 'tasks:$childId')
+        : await store.readTaskSummary(owner, childId);
     _check(owner);
     if (data == null) throw StateError('此孩子尚未缓存，请先联网打开一次任务');
     return data;
@@ -313,11 +319,10 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
       throw StateError('家庭访问权限已撤销');
     }
     _activeChild = childId;
-    final cached = await store.read(owner, 'tasks:$childId');
+    final cached = await store.readTaskSummary(owner, childId);
     _check(owner);
     if (cached == null) {
       await synchronize(childId);
-      await _cache(owner, childId);
       return owner;
     }
     if (_state.revision == 0) await _publish(owner, _state.phase);
@@ -362,8 +367,8 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   Future<WalletSummary> loadWallet(String childId) async {
     final owner = await _prepare(childId);
     return _locked(() async {
-      final wallet =
-          (await _cache(owner, childId))['wallet'] as Map<String, dynamic>;
+      final snapshot = await _cache(owner, childId, includeTasks: false);
+      final wallet = snapshot['wallet'] as Map<String, dynamic>;
       return WalletSummary(
         coins: wallet['coin_balance'] as int,
         frozen: wallet['frozen_balance'] as int,
@@ -380,7 +385,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
         await store.familyAccessRevoked(owner, childId: childId)) {
       throw StateError('家庭数据已不可访问');
     }
-    final cache = await store.read(owner, 'tasks:$childId');
+    final cache = await store.readTaskSummary(owner, childId);
     _check(owner);
     if (privacy != store.privacyGeneration) throw StateError('家庭数据已变化');
     return cache?['timezone'] as String?;
@@ -389,7 +394,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   Future<DateTime> today(String childId) async {
     final owner = await _prepare(childId);
     return _locked(() async {
-      final cache = await _cache(owner, childId);
+      final cache = await _cache(owner, childId, includeTasks: false);
       final local = tz.TZDateTime.from(
         _anchoredNow(cache),
         tz.getLocation(cache['timezone'] as String),

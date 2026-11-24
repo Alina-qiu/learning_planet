@@ -507,6 +507,11 @@ Future<void> feedbackHarness(
   bool pending = false,
   bool reduceMotion = false,
 }) async {
+  final presenter = Provider.autoDispose((ref) {
+    final feedback = TaskFeedbackPresenter();
+    ref.onDispose(feedback.clear);
+    return feedback;
+  });
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -522,15 +527,13 @@ Future<void> feedbackHarness(
         ),
         home: Consumer(
           builder: (context, ref, _) {
+            final feedback = ref.watch(presenter);
             ref.watch(feedbackPreferencesProvider);
             return Scaffold(
               body: Center(
                 child: FilledButton(
-                  onPressed: () => showTaskCompletionFeedback(
-                    context,
-                    ref,
-                    pending: pending,
-                  ),
+                  onPressed: () =>
+                      feedback.complete(context, ref, pending: pending),
                   child: const Text('完成'),
                 ),
               ),

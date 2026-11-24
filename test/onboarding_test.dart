@@ -192,9 +192,13 @@ void main() {
           if (!online) throw const SocketException('offline');
           final value = switch (request.url.path.split('/').last) {
             'families' => [
-              {'id': 'family', 'name': '家庭', 'timezone': 'Asia/Shanghai'},
+              {
+                'id': 'family',
+                'name': '家庭',
+                'timezone': 'Asia/Shanghai',
+                'children': [profile.toJson()],
+              },
             ],
-            'children' => [profile.toJson()],
             'accept_family_invitations' => null,
             _ => <Object>[],
           };

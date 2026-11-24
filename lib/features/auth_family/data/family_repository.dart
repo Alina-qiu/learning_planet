@@ -82,35 +82,71 @@ class SupabaseFamilyRepository implements FamilyRepository {
 
   @override
   Future<List<Family>> loadFamilies() async {
-    await _client.rpc<void>('accept_family_invitations');
-    final familyRows = await _client
-        .from('families')
-        .select('id, name, timezone')
-        .order('created_at');
-    final childRows = await _client
-        .from('children')
-        .select(
-          'id, family_id, nickname, grade, textbook_labels, avatar_key, profile_version, guide_step, starter_task_preset, starter_rules_at, onboarding_completed_at',
-        )
-        .order('created_at');
-
-    final childrenByFamily = <String, List<ChildProfile>>{};
-    for (final row in childRows) {
-      final familyId = row['family_id'] as String;
-      childrenByFamily
-          .putIfAbsent(familyId, () => [])
-          .add(ChildProfile.fromJson(row));
+    final owner = _client.auth.currentUser?.id;
+    void checkOwner() {
+      if (_client.auth.currentUser?.id != owner) throw StateError('登录账号已变化');
     }
 
-    return [
-      for (final row in familyRows)
-        Family(
-          id: row['id'] as String,
-          name: row['name'] as String,
-          timezone: row['timezone'] as String,
-          children: childrenByFamily[row['id'] as String] ?? const [],
-        ),
-    ];
+    await _client.rpc<void>('accept_family_invitations');
+    checkOwner();
+    const pageSize = 1000;
+    const childColumns =
+        'id,created_at,family_id,nickname,grade,textbook_labels,avatar_key,'
+        'profile_version,guide_step,starter_task_preset,starter_rules_at,onboarding_completed_at';
+    // Timestamps can tie. Use the same descending pair for ordering and the
+    // cursor, so deletions before a later page do not shift its start.
+    String olderThan(Map<String, dynamic> row) =>
+        'created_at.lt.${row['created_at']},and(created_at.eq.${row['created_at']},id.lt.${row['id']})';
+
+    final families = <Family>[];
+    Map<String, dynamic>? lastFamily;
+    while (true) {
+      var query = _client
+          .from('families')
+          .select('id,created_at,name,timezone,children($childColumns)');
+      if (lastFamily != null) query = query.or(olderThan(lastFamily));
+      final rows = await query
+          .order('created_at')
+          .order('id')
+          .order('created_at', referencedTable: 'children')
+          .order('id', referencedTable: 'children')
+          .limit(pageSize)
+          .limit(pageSize, referencedTable: 'children');
+      checkOwner();
+      for (final row in rows) {
+        final id = row['id'] as String;
+        var page = (row['children'] as List).cast<Map<String, dynamic>>();
+        final children = <ChildProfile>[];
+        while (true) {
+          for (final profile in page) {
+            if (profile['family_id'] != id) throw StateError('孩子资料与家庭不一致');
+            children.add(ChildProfile.fromJson(profile));
+          }
+          // PostgREST also caps each embedded collection. Only a full child
+          // page needs a separate read, always scoped to this visible family.
+          if (page.length < pageSize) break;
+          page = await _client
+              .from('children')
+              .select(childColumns)
+              .eq('family_id', id)
+              .or(olderThan(page.last))
+              .order('created_at')
+              .order('id')
+              .limit(pageSize);
+          checkOwner();
+        }
+        families.add(
+          Family(
+            id: id,
+            name: row['name'] as String,
+            timezone: row['timezone'] as String,
+            children: children,
+          ),
+        );
+      }
+      if (rows.length < pageSize) return families;
+      lastFamily = rows.last;
+    }
   }
 
   @override

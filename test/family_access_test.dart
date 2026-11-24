@@ -144,14 +144,18 @@ void main() {
         return MockSupabase.json(request, switch (path) {
           'accept_family_invitations' => 0,
           'families' => [
-            {'id': 'family', 'name': '家', 'timezone': 'Asia/Shanghai'},
-          ],
-          'children' => [
             {
-              'id': 'child',
-              'family_id': 'family',
-              'nickname': '小星',
-              'grade': 2,
+              'id': 'family',
+              'name': '家',
+              'timezone': 'Asia/Shanghai',
+              'children': [
+                {
+                  'id': 'child',
+                  'family_id': 'family',
+                  'nickname': '小星',
+                  'grade': 2,
+                },
+              ],
             },
           ],
           'family_membership_access' => accessJson(2, owner: owner),

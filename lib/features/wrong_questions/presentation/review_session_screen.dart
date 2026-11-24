@@ -12,6 +12,7 @@ import '../data/review_repository.dart';
 import '../data/question_catalog.dart';
 import '../domain/review_rewards.dart';
 import '../domain/review_confidence.dart';
+import '../../auth_family/application/auth_providers.dart';
 import '../../growth/presentation/task_feedback.dart';
 import '../../growth/data/feedback_preferences.dart';
 
@@ -30,6 +31,10 @@ class ReviewSessionScreen extends ConsumerStatefulWidget {
 }
 
 class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
+  final _feedback = TaskFeedbackPresenter();
+  (String?, String, String)? _actionScope;
+  (String?, String, String) get _currentScope =>
+      (ref.read(authAccountIdProvider), widget.childId, widget.taskId);
   bool _busy = false;
   bool _completionShown = false;
   final _controllers = <String, TextEditingController>{};
@@ -41,15 +46,17 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
   void _showCompletion(ReviewRepository repository, {required bool pending}) {
     if (!mounted ||
         _completionShown ||
+        _actionScope != _currentScope ||
         !identical(repository, ref.read(reviewRepositoryProvider))) {
       return;
     }
     _completionShown = true;
-    showTaskCompletionFeedback(context, ref, pending: pending, review: true);
+    _feedback.complete(context, ref, pending: pending, review: true);
   }
 
   @override
   void dispose() {
+    _feedback.clear();
     for (final controller in _controllers.values) {
       controller.dispose();
     }
@@ -58,15 +65,15 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
 
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
+    _feedback.clearError();
+    _actionScope = _currentScope;
     setState(() => _busy = true);
     try {
       await action();
       if (!mounted) return;
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('复习操作失败：$error')));
+      if (mounted && _actionScope == _currentScope) {
+        _feedback.error(context, '复习操作失败：$error');
       }
     } finally {
       if (mounted) {
@@ -82,7 +89,18 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    ref.watch(authAccountIdProvider);
+    if (_actionScope != null && _actionScope != _currentScope) {
+      _feedback.clear();
+      _completionShown = false;
+      _actionScope = null;
+    }
+    if (ModalRoute.isCurrentOf(context) == false) _feedback.clear();
+    return _screen();
+  }
+
+  Widget _screen() => Scaffold(
     appBar: AppBar(
       title: const Text('自动错题与拼音复习'),
       actions: [
