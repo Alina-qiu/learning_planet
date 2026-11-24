@@ -1,12 +1,79 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import '../integration_test/cross_device_sync_test.dart'
-    show fixtureFailureMark, showFixtureTarget;
+    show fixtureFailureMark, reportAndroidProgress, showFixtureTarget;
 
 void main() {
+  final progress = Uri.http('127.0.0.1:54324', '/progress', {
+    'device': 'android',
+  });
+
+  test(
+    'a lost acknowledgement allows the next stage without resending',
+    () async {
+      final accepted = <String>[];
+      final lost = Completer<http.Response>();
+      final client = MockClient((req) async {
+        expect(req.method, 'POST');
+        expect(req.url, progress);
+        accepted.add(jsonDecode(req.body)['stage'] as String);
+        if (accepted.length == 1) return lost.future;
+        return http.Response('', 200);
+      });
+      addTearDown(client.close);
+      await reportAndroidProgress(
+        client,
+        progress,
+        'otp_verify_tapped',
+        timeout: const Duration(milliseconds: 20),
+      );
+      await reportAndroidProgress(
+        client,
+        progress,
+        'load_family_task_and_wallet',
+      );
+      lost.complete(http.Response('', 200));
+      expect(accepted, ['otp_verify_tapped', 'load_family_task_and_wallet']);
+    },
+  );
+
+  test(
+    'a dropped connection is diagnostic and protocol rejections still fail',
+    () async {
+      var attempts = 0;
+      final client = MockClient((req) async {
+        if (++attempts == 1) {
+          throw http.ClientException('private details', req.url);
+        }
+        return http.Response('', 409);
+      });
+      addTearDown(client.close);
+      await reportAndroidProgress(client, progress, 'otp_verify_tapped');
+      await expectLater(
+        reportAndroidProgress(client, progress, 'complete_task'),
+        throwsA(isA<TestFailure>()),
+      );
+      expect(attempts, 2);
+    },
+  );
+
+  test('a genuine assertion is never treated as a transport failure', () async {
+    final client = MockClient(
+      (_) async => throw TestFailure('fixture assertion'),
+    );
+    addTearDown(client.close);
+    await expectLater(
+      reportAndroidProgress(client, progress, 'fixture'),
+      throwsA(isA<TestFailure>()),
+    );
+  });
+
   testWidgets('ready action and title must coexist on the same task card', (
     tester,
   ) async {

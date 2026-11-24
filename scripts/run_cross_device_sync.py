@@ -40,7 +40,8 @@ STARTUP_MARK = (r"^(LP_STARTUP )?source=(android|dart) stage=(activity_create|ac
                 r"binding|notifications|timezone|notificationPlugin|taskAlarmClear|notificationClear|database|"
                 r"credentials|supabase|push|initialization|first_frame) elapsed_us=[0-9]{1,18} outcome=(ok|error)$")
 FAILURE_MARK = r"^AC01_UI_FAILURE kind=(assertion|state|type|framework|other) line=([1-9][0-9]{0,3}|unknown)$"
-ANDROID_LOG_FILTER = STARTUP_MARK + "|" + FAILURE_MARK
+PROGRESS_MARK = r"^AC01_PROGRESS_UNACKNOWLEDGED reason=(timeout|transport)$"
+ANDROID_LOG_FILTER = "|".join((STARTUP_MARK, FAILURE_MARK, PROGRESS_MARK))
 
 
 def require(condition, message):
@@ -83,6 +84,7 @@ def startup_summary(path):
         lines = stream.read(64 * 1024).decode("utf8", "replace").splitlines()
     marks = []
     failure = ""
+    unacknowledged = set()
     for line in lines:
         match = re.fullmatch(STARTUP_MARK, line)
         if match:
@@ -91,7 +93,10 @@ def startup_summary(path):
                 marks.append(mark)
         elif not failure and (match := re.fullmatch(FAILURE_MARK, line)):
             failure = f" failure_kind={match[1]} fixture_line={match[2]}"
-    return (",".join(marks) or "none") + failure
+        elif match := re.fullmatch(PROGRESS_MARK, line):
+            unacknowledged.add(match[1])
+    progress = " progress_unacknowledged=" + ",".join(sorted(unacknowledged)) if unacknowledged else ""
+    return (",".join(marks) or "none") + failure + progress
 
 
 def android_failure(message, adb_device):

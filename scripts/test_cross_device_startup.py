@@ -226,9 +226,12 @@ class StartupTests(unittest.TestCase):
                                "AC01_UI_FAILURE kind=private_marker line=14\n"
                                "AC01_UI_FAILURE kind=state line=14 private_marker\n"
                                "AC01_UI_FAILURE kind=state line=235\n"
-                               "AC01_UI_FAILURE kind=other line=unknown\n", encoding="utf8")
+                               "AC01_UI_FAILURE kind=other line=unknown\n"
+                               "AC01_PROGRESS_UNACKNOWLEDGED reason=transport\n"
+                               "AC01_PROGRESS_UNACKNOWLEDGED reason=timeout private_marker\n", encoding="utf8")
             self.assertEqual(runner.startup_summary(logfile),
-                             "android.activity_create=ok,dart.first_frame=ok,dart.credentials=error failure_kind=state fixture_line=235")
+                             "android.activity_create=ok,dart.first_frame=ok,dart.credentials=error failure_kind=state fixture_line=235 "
+                             "progress_unacknowledged=transport")
 
     def test_occupied_serial_or_port_stops_before_boot(self):
         for occupied in ("port", "serial"):

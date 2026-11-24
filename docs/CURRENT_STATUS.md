@@ -10,11 +10,11 @@
 
 可在本机联调的核心流程包括邮箱登录与家庭设置、离线任务和计时、金币与 XP、奖励兑换、多图错题逐张校对、自动复习、拼音练习、PDF 组卷和学习报告。服务端已接入可替换的 AI 和推送入口，真实模型与手机通知的效果仍待验证。
 
-孩子已看到的任务卡、“开始”按钮和余额会在后台同步等待网络响应时保留。此前只要同步开始，首页就会重新读取本地数据，短暂隐藏任务和余额。现在界面在任务或余额可能改变时再读取，切换账号和清除数据也会触发更新。[首页同步回归](../test/home_sync_refresh_test.dart) · [可安装的调试包](ANDROID_BUILD.md)
+孩子已看到的任务卡、“开始”按钮和余额会在后台同步等待网络响应时保留。API 29 模拟器上将成功的快照响应延迟 9.745 秒，期间三次读取都能看到两张卡片和余额。点击第一张的“开始”，本机显示“暂停”，此时服务端仍记录两项待开始。恢复传输后服务端确认操作，第二项仍待办，钱包与账本均无变化。[最终 APK 实测](../build/acceptance-20261124/android-home-slow-sync.json) · [首页同步回归](../test/home_sync_refresh_test.dart) · [安装包](ANDROID_BUILD.md)
 
 Windows 完整 Flutter 测试 859 项通过，109 个核心源文件的行覆盖率为 90.78%（6852/7548）。静态分析和 289 个 Dart 文件的格式检查均通过。断网冷启动时，如果已恢复的过期会话刷新失败，首次家庭查询可复用同一次失败结果。恢复连接或手动刷新会重新访问服务端。账号注销、权限拒绝、切换账号仍会阻止读取原家庭。[登录回归](../test/family_entry_refresh_test.dart) · [Android 调试包](ANDROID_BUILD.md)
 
-iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核时间，如果可能跨入安静时段则抑制提醒。提交 `30618f1` 的 10 项常规远程检查全部通过，包括 SDK 27.2 未签名 Debug、Release 编译和三组 iOS 模拟器运行。独立双端验收的首次运行中，iPhone 已登录并保存待办和零余额，Android 登录和三次任务快照请求成功，随后在核对任务界面时中断。在 Windows 上安装同一个由 CI 构建的 Android 测试包，任务结算为 7 金币、5 XP。[常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45347848133) · [双端首次运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45347848150/attempts/1) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
+iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核时间，如果可能跨入安静时段则抑制提醒。当前安装包的应用提交 `7f95a1b` 已通过 10 项常规远程检查，包括 iOS SDK 27.2 未签名 Debug 和 Release 编译、三组 iOS 模拟器和数据库恢复。前一提交 `30618f1` 在同一数据库上的两个原生模拟器已完成 AC-01，复用了首次运行的两份二进制产物。[当前应用 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45355661915) · [AC-01 已通过的完整运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45347848150/attempts/2) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
 
 账号注销状态检查较慢时，首页的定时轮询会等待当前检查返回。之前每 30 秒新发起的检查可能使初次结果失效，导致离线首页持续转圈。应用回到前台仍会立即核查注销状态，服务端确认已受理注销后，应用立即遮住家庭数据。[入口回归用例](../test/entry_recovery_test.dart)
 
@@ -136,7 +136,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动<3秒、列表<1.5秒、反馈<500ms | API 29 在线 Profile 构建的 5 次系统首帧中位为 1.65 秒，另 3 次首次观察到大厅、孩子和钱包同时可见为 3.63 至 5.42 秒。[在线测量](../build/acceptance-20261123/online-profile-startup.json) · [列表与反馈](APP_PERFORMANCE.md) | API 36 调试版在会话过期且服务不可达时，保留同一账号覆盖安装。旧包和新包各冷启 3 次，从发起启动到首次观察到大厅、孩子和钱包的中位数由 31.38 秒降至 20.14 秒。仍未达到 3 秒目标，目标手机也待测。[新旧包逐次测量](../build/acceptance-20261124/offline-startup-comparison.json) |
+| 冷启动<3秒、列表<1.5秒、反馈<500ms | 当前应用 `7f95a1b` 的 API 29 在线 Profile 版连续截图测量 5 次，大厅、孩子和余额同时稳定可见的观测区间中位数为 11.57–13.50 秒。另 3 次关闭截图的冷启动，系统首帧中位为 5.32 秒。截图、模拟器和调度影响读数。[在线全组测量](../build/acceptance-20261124/online-profile-home.json) · [列表与反馈](APP_PERFORMANCE.md) | 在线模拟器未达到 3 秒目标。API 36 调试版在会话过期且服务不可达时，旧版与优化版各 3 次冷启，首页观测中位数由 31.38 秒降至 20.14 秒。目标手机仍待测。[离线逐次测量](../build/acceptance-20261124/offline-startup-comparison.json) |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | API 29 模拟器恢复本机服务连接后，前台 9.34 秒发出首个快照请求。会话过期、离线重开后再次恢复连接，1.48 秒发出首个快照请求，1.56 秒开始补传操作。[同步时间及账本](../build/acceptance-20261124/android-reconnect.json) | 目标手机的无线网络切换、系统后台限制仍待验证 |
@@ -151,7 +151,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 
 | 编号 | 当前证据 | PRD 场景状态 |
 |---|---|---|
-| AC-01 Android/iOS同步且只奖励一次 | 两个独立 HTTP 会话已通过同库断线恢复和逐笔结算。Windows 上使用 CI 的同一份 Android 测试包完成任务，核实 7 金币、5 XP。[Android 原生写入](../build/review_candidate/run-45347848150-paired/windows-exact-apk-check.json) | 提交 `30618f1` 的双端首次运行已完成 iPhone 缓存和 Android 登录，Android 在完成任务前的界面检查中断。两端同轮的最新结论见[双端验收](https://github.com/Alina-qiu/learning_planet/actions/runs/45347848150)及[草稿 PR 检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks)。 |
+| AC-01 Android/iOS同步且只奖励一次 | 在同一数据库上，iPhone 缓存待办和零余额并离线重开，Android 完成同一任务。iPhone 重连后 9.895 秒发起首个新快照请求，双方最终显示 7 金币、5 XP。数据库中开始和完成各一个回执，金币与 XP 各一条账本。[双端完整运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45347848150/attempts/2) | 已在提交 `30618f1` 的两个原生模拟器通过，目标手机待验收。当前安装包来源为 `7f95a1b`。[该应用提交的双端运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45355662137) · [后续检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) |
 | AC-02 重复提交只有一条奖励 | [并发报告](../build/concurrency_integration/results.json)记录 80 条命令重放、4 次丢回执及每个孩子的账本行数 | 本机服务重放场景通过 |
 | AC-03 改时不重复生成或领奖 | API 36 模拟器产生三天连续奖励，系统日期分别拨快、拨慢 48 小时，冷启动并重新从本机服务读取，核对原任务、奖励与账本 ID | 系统改时场景在 Android 模拟器与本机服务通过 |
 | AC-04 离线打卡、上线余额一致 | API 29 实际应用在服务已记账而手机丢失回执时重发同一命令。第二次断网打卡后重开，联网自动补传，两项任务合计 50 金币、40 XP。后续同步的四条账本 ID 及金额均一致。[API 29 记录](../build/acceptance-20261124/android-reconnect.json) · [API 36 记录](../build/auto_sync_device_results/walkthrough.json) | 两个 Android 模拟器版本分别连接本机服务通过 |

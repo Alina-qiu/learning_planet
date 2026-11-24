@@ -86,6 +86,33 @@ Future<void> _sendAndroidOutcome(
   }
 }
 
+/// Progress is diagnostic. A lost acknowledgement can follow a successful
+/// server write. Explicit HTTP rejections still indicate a fixture error.
+Future<void> reportAndroidProgress(
+  http.Client client,
+  Uri endpoint,
+  String stage, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final http.Response response;
+  try {
+    response = await client
+        .post(
+          endpoint,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'stage': stage}),
+        )
+        .timeout(timeout);
+  } on TimeoutException {
+    debugPrintSynchronously('AC01_PROGRESS_UNACKNOWLEDGED reason=timeout');
+    return;
+  } on http.ClientException {
+    debugPrintSynchronously('AC01_PROGRESS_UNACKNOWLEDGED reason=transport');
+    return;
+  }
+  expect(response.statusCode, 200, reason: 'Reporting Android stage');
+}
+
 class _Control {
   _Control(this.device, this.tester);
   final String device;
@@ -97,14 +124,7 @@ class _Control {
   Future<void> stage(Map<String, dynamic> report, String name) async {
     report['stage'] = name;
     if (device != 'android') return;
-    final response = await client
-        .post(
-          uri('/progress'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'stage': name}),
-        )
-        .timeout(const Duration(seconds: 10));
-    expect(response.statusCode, 200, reason: 'Reporting Android stage');
+    await reportAndroidProgress(client, uri('/progress'), name);
   }
 
   Future<Map<String, dynamic>> wait(
