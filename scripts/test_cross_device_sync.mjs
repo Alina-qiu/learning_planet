@@ -17,7 +17,16 @@ const title = '跨设备阅读';
 const coins = 7, xp = 5;
 const phases = ['initial', 'reader-ready', 'writer-complete', 'reader-reconnect', 'reader-confirmed'];
 const androidReportPath = process.env.ANDROID_REPORT_PATH ?? 'build/integration_results/cross_device_sync_android.json';
-const androidStages = ['fixture','email_login','load_family_task_and_wallet','complete_task','confirm_task_and_wallet','confirmed'];
+const androidStages = ['fixture','email_login','login_form_visible','otp_send_tapped','otp_received',
+  'otp_form_ready','otp_verify_tapped','load_family_task_and_wallet','complete_task','confirm_task_and_wallet','confirmed'];
+const countedRoutes = new Map([['/auth/v1/otp','otp'], ['/auth/v1/verify','verify'],
+  ['/rest/v1/rpc/task_sync_snapshot','snapshot']]);
+
+export function fixtureOperation(method, target) {
+  // GoTrue's Dart client can append a query delimiter even with zero parameters.
+  // The control clock and counters follow the route; query values stay private.
+  return method === 'POST' ? countedRoutes.get(target.split('?', 1)[0]) : undefined;
+}
 
 function json(res, code, value) {
   res.writeHead(code, {'Content-Type':'application/json', 'Cache-Control':'no-store'});
@@ -42,11 +51,12 @@ export function androidEvidence({scenario, file, phase, authorize, verify, log =
   const expected = {device:'android',test:'AC-01',stage:'confirmed',task_id:scenario.task_id,
     child_id:scenario.child_id,family_id:scenario.family_id,ready_with_zero_wallet:true,
     completed:true,coins:scenario.coins,xp:scenario.xp};
-  let stage = null, saved = false, pending = Promise.resolve();
+  let stage = null, checkpoint = null, saved = false, pending = Promise.resolve();
 
   function record(next) {
     if (next === stage) return;
     stage = next;
+    if (next !== 'failed') checkpoint = next;
     log('CROSS_DEVICE_ANDROID_STAGE '+stage);
   }
 
@@ -84,6 +94,7 @@ export function androidEvidence({scenario, file, phase, authorize, verify, log =
 
   return {
     get stage() { return stage; },
+    get checkpoint() { return checkpoint; },
     get saved() { return saved; },
     async receive(path,device,req,res) {
       if (device !== 'android') { res.writeHead(403).end(); return; }
@@ -135,6 +146,7 @@ async function run(config, {database}) {
   let phase = phases[0], lastOtp = Date.now(), blocked = 0, blockedAfterWriter = 0, reconnectAt;
   let committedLedger, timer;
   const observations = [], sessions = {}, servers = [];
+  const androidHttp = {otp:0, otpOk:0, verify:0, verifyOk:0, snapshot:0, snapshotOk:0};
   const phaseTimes = {};
   const mailboxCount = {ios:2,android:3}; // First message was used for setup.
   const {promise, resolve, reject} = Promise.withResolvers();
@@ -161,6 +173,13 @@ async function run(config, {database}) {
         if (!(req.url.startsWith('/rest/v1/') || req.url.startsWith('/auth/v1/'))) {
           res.writeHead(404).end(); return;
         }
+        const operation = fixtureOperation(req.method, req.url);
+        if (device === 'android' && operation) {
+          androidHttp[operation]++;
+          res.once('finish', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) androidHttp[operation+'Ok']++;
+          });
+        }
         if (device==='ios' && ['reader-ready','writer-complete'].includes(phase)) {
           blocked++;
           if (phase==='writer-complete') blockedAfterWriter++;
@@ -170,7 +189,7 @@ async function run(config, {database}) {
         if (req.headers.apikey!==publicKey) { res.writeHead(401).end(); return; }
         req.headers.apikey = config.anon;
         if (req.headers.authorization===`Bearer ${publicKey}`) req.headers.authorization=`Bearer ${config.anon}`;
-        const snapshot = req.url==='/rest/v1/rpc/task_sync_snapshot', acceptedAt=Date.now(), atPhase=phase;
+        const snapshot = operation === 'snapshot', acceptedAt=Date.now(), atPhase=phase;
         // PostgREST validates the actual bearer. Retain only the session identifier
         // from successful snapshots to distinguish the two OTP logins.
         if (snapshot) {
@@ -187,7 +206,7 @@ async function run(config, {database}) {
             } catch (err) { fail(err); }
           });
         }
-        if (req.url==='/auth/v1/otp' && req.method==='POST') lastOtp=Date.now();
+        if (operation === 'otp') lastOtp=Date.now();
         forwardHttp(req,res,port,'');
       });
       servers.push(service);
@@ -213,7 +232,11 @@ async function run(config, {database}) {
         json(res,200,{code:item.code}); return;
       }
       if (url.pathname!=='/phase') { res.writeHead(404).end(); return; }
-      if (req.method==='GET') { json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0,androidStage:android.stage}); return; }
+      if (req.method==='GET') {
+        json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0,androidStage:android.stage,
+          androidCheckpoint:android.checkpoint,androidHttp});
+        return;
+      }
       if (req.method!=='POST') { res.writeHead(405).end(); return; }
       let body='';
       for await (const part of req) { body+=part; if (body.length>1024) throw Error('Unexpected phase body'); }

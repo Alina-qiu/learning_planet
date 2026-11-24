@@ -61,7 +61,9 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
   }
 
   @override
-  Future<List<Family>> loadFamilies() async {
+  Future<List<Family>> loadFamilies({
+    AuthRetryableFetchException? entryRefreshFailure,
+  }) async {
     final owner = accountId();
     if (owner == null) throw StateError('请先登录');
     final configurationRevision = _configurationRevision;
@@ -79,6 +81,9 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
 
     try {
       check();
+      if (entryRefreshFailure != null && currentSession?.user.id == owner) {
+        throw entryRefreshFailure;
+      }
       final loaded = await super.loadFamilies().timeout(
         const Duration(seconds: 10),
       );

@@ -5,6 +5,7 @@ import {randomUUID, createHash} from 'node:crypto';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {startTestDatabase} from './fixtures/database.mjs';
 import {freePort} from './fixtures/http_test_tools.mjs';
+import {daytimeReviewZone, generateDuringReviewChange} from './fixtures/review_generation.mjs';
 
 const output = 'build/database_upgrade', runId = randomUUID();
 await mkdir(output, {recursive: true});
@@ -13,6 +14,7 @@ const report = {runId, passed: false, status: 'running', scope: 'Populated local
 const saveReport = () => writeFile(`${output}/results.json`, JSON.stringify(report, null, 2) + '\n');
 await saveReport();
 const owner = randomUUID(), outsider = randomUUID(), session = randomUUID();
+const raceOwner = randomUUID();
 const data = {}, saved = [];
 let database, client;
 const scalar = async (sql, args = []) => Object.values((await client.query(sql, args)).rows[0])[0];
@@ -54,7 +56,7 @@ async function task(child, title) {
 }
 async function seedCore() {
   await login();
-  data.family = await scalar("select public.onboard_family('Upgrade','Asia/Shanghai','Historical child',2::smallint)");
+  data.family = await scalar("select public.onboard_family('Upgrade',$1,'Historical child',2::smallint)", [await daytimeReviewZone(scalar)]);
   data.child = await scalar('select id from public.children where family_id=$1', [data.family]);
   await scalar("select public.set_parent_pin($1,'2468')", [data.family]); await authorize();
   data.reviewChild = await scalar("select public.create_child($1,'Review child',2::smallint)", [data.family]);
@@ -119,17 +121,66 @@ async function seedOffline() {
   await capture('task_sync_leases', 'id=$1', [snapshot.lease_id]);
   assert.equal(pending.status, 'ready');
 }
+async function seedEmptyReview() {
+  await login(raceOwner);
+  const family = await scalar("select public.onboard_family('Archive overlap',$1,'Race child',2::smallint)", [await daytimeReviewZone(scalar)]);
+  const child = data.raceChild = await scalar('select id from public.children where family_id=$1', [family]);
+  await scalar("select public.set_parent_pin($1,'2468')", [family]);
+  await scalar("select public.verify_parent_pin($1,'2468')", [family]);
+  const saveQuestion = prompt => scalar('select public.save_review_question($1,$2)', [child,
+    {kind: 'question', subject: 'math', prompt, answers: ['4']}]);
+  const archived = await saveQuestion('3 + 1');
+  data.emptyReview = await generateDuringReviewChange(client, child, () =>
+    client.query('select public.archive_review_questions($1,$2,true)', [child, [archived]]));
+  assert.ok(data.emptyReview, 'Historical generator must produce the orphan on a real lock conflict');
+  assert.equal((await scalar('select public.load_review_task($1)', [data.emptyReview])).items.length, 0);
+  data.lateQuestion = await saveQuestion('2 + 2');
+  assert.equal(await scalar('select public.generate_daily_wrong_review_task($1)', [child]), data.emptyReview);
+
+  await clearIdentity();
+  // Preserve copies of the same empty shape carrying independent kinds of
+  // history. The source itself is the untouched, reproducible old generator row.
+  const protectedRows = [];
+  async function copyEmptyReview() {
+    const id = randomUUID(), daysAgo = protectedRows.push(id);
+    await client.query(`insert into public.task_instances
+      select (jsonb_populate_record(null::public.task_instances,to_jsonb(t)||jsonb_build_object(
+        'id',$2::uuid,'due_date',t.due_date-$3::int,
+        'idempotency_key','auto-review:'||t.child_id||':'||(t.due_date-$3::int)))).*
+      from public.task_instances t where t.id=$1`, [data.emptyReview, id, daysAgo]);
+    return id;
+  }
+  const started = await copyEmptyReview(), receipt = await copyEmptyReview(), ledger = await copyEmptyReview();
+  const erased = await copyEmptyReview(), audited = await copyEmptyReview(), withItem = await copyEmptyReview();
+  await client.query("update public.task_instances set status='in_progress',started_at=now() where id=$1", [started]);
+  await client.query("insert into public.task_command_receipts(user_id,command_id,task_id,request,outcome,result_version) values($1,$2,$3,'{}','applied',1)",
+    [raceOwner, randomUUID(), receipt]);
+  await client.query("insert into public.ledger_entries(child_id,asset_type,amount,source_type,source_id,idempotency_key) values($1,'coin',1,'task',$2,$3)",
+    [child, ledger, randomUUID()]);
+  await client.query("update public.task_instances set expected_minutes=2,status='skipped' where id=$1", [erased]);
+  await client.query("insert into public.audit_logs(family_id,actor_user_id,action,target_type,target_id) values($1,$2,'task.note_saved','task',$3)",
+    [family, raceOwner, audited]);
+  await client.query(`insert into public.task_review_items(task_instance_id,wrong_question_id,sequence,prompt,subject,review_kind,question_version)
+    select $1,id,1,final_text,subject,review_kind,content_version from public.wrong_questions where id=$2`, [withItem, data.lateQuestion]);
+  await capture('task_instances', 'id=any($1::uuid[])', [protectedRows]);
+  await capture('task_review_items', 'task_instance_id=$1', [withItem]);
+  await capture('task_command_receipts', 'task_id=$1', [receipt]);
+  await capture('ledger_entries', 'source_id=$1', [ledger]);
+  await capture('audit_logs', 'target_id=$1', [audited]);
+}
 const checkpoints = new Map([
   ['202609160008_task_maintenance.sql', ['008: old family, children, completed/pending tasks and ledger', seedCore]],
   ['202609160011_wrong_question_pinyin_review.sql', ['011: partially answered frozen review with private answer keys', seedReview]],
   ['202609170013_wallet_redemptions.sql', ['013: approved redemption, frozen balance and adjustment audit', seedEconomy]],
   ['202609170017_worksheet_dispatch.sql', ['017: queued v1 worksheet with frozen mixed question order', seedWorksheet]],
   ['202611040030_durable_image_uploads.sql', ['030: pre-upgrade offline lease and unsent command IDs', seedOffline]],
+  ['202611230072_cleanup_file_progress.sql', ['072: real empty daily review and protected snapshots with business history', seedEmptyReview]],
 ]);
 
 try {
   database = await startTestDatabase({port: await freePort(),
-    users: [{id: owner, email: 'upgrade@example.test'}, {id: outsider, email: 'outsider@example.test'}],
+    users: [{id: owner, email: 'upgrade@example.test'}, {id: outsider, email: 'outsider@example.test'},
+      {id: raceOwner, email: 'review-generation@example.test'}],
     onMigration: async (name, context) => {
       client = context.client;
       report.migrations.push({name, sha256: createHash('sha256').update(await readFile(`supabase/migrations/${name}`)).digest('hex')});
@@ -143,6 +194,14 @@ try {
   });
   assert.equal(report.checkpoints.length, checkpoints.size);
   report.serverVersion = database.serverVersion;
+  await check('the historical zero-item review releases the date and a later due question is selected exactly once', async () => {
+    await login(raceOwner);
+    assert.equal(await scalar('select count(*)::int from public.task_instances where id=$1', [data.emptyReview]), 0);
+    const review = await scalar('select public.generate_daily_wrong_review_task($1)', [data.raceChild]);
+    const snapshot = await scalar('select public.load_review_task($1)', [review]);
+    assert.deepEqual(snapshot.items.map(i => i.wrong_question_id), [data.lateQuestion]);
+    assert.equal(await scalar('select public.generate_daily_wrong_review_task($1)', [data.raceChild]), review);
+  });
   await check('all captured historical fields survive the complete ordered upgrade', async () => {
     await clearIdentity();
     let compared = 0;

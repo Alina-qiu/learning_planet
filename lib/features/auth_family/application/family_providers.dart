@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'
+    show Session, AuthRetryableFetchException;
 
 import '../data/family_repository.dart';
 import '../data/family_creation_repository.dart';
@@ -43,8 +45,43 @@ final familyMembersRepositoryProvider = Provider<FamilyMembersRepository?>((
 });
 
 final familiesProvider = FutureProvider<List<domain.Family>>((ref) {
-  return ref.watch(familyRepositoryProvider).loadFamilies();
+  final repository = ref.watch(familyRepositoryProvider);
+  if (repository is OfflineFamilyRepository) {
+    final entry = ref.read(familyEntryRefreshProvider);
+    final failure = entry.takeFailure(repository.currentSession);
+    return repository.loadFamilies(entryRefreshFailure: failure);
+  }
+  return repository.loadFamilies();
 });
+
+// A failed refresh is shared only by the two consecutive cold-entry checks.
+// Refreshing the family list explicitly always makes a fresh request.
+final familyEntryRefreshProvider = Provider((_) => FamilyEntryRefresh());
+
+class FamilyEntryRefresh {
+  ({Session session, AuthRetryableFetchException error})? _failure;
+  String? _waitingForConnection;
+
+  void record(Session session, AuthRetryableFetchException error) {
+    _failure = (session: session, error: error);
+  }
+
+  void clearFailure() => _failure = null;
+
+  AuthRetryableFetchException? takeFailure(Session? session) {
+    final failure = _failure;
+    clearFailure();
+    if (failure == null || !identical(session, failure.session)) return null;
+    _waitingForConnection = failure.session.user.id;
+    return failure.error;
+  }
+
+  bool needsFamilyRefresh(String owner) {
+    final refresh = _waitingForConnection == owner;
+    _waitingForConnection = null;
+    return refresh;
+  }
+}
 
 final selectedChildIdProvider = StateProvider<String?>((ref) => null);
 

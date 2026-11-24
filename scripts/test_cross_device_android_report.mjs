@@ -6,11 +6,21 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {androidEvidence, androidSessionMatches} from './test_cross_device_sync.mjs';
+import {androidEvidence, androidSessionMatches, fixtureOperation} from './test_cross_device_sync.mjs';
 import {closeServer, listen, signedJwt} from './fixtures/http_test_tools.mjs';
 
 const scenario={task_id:'task',child_id:'child',family_id:'family',coins:7,xp:5};
 const report={...scenario,device:'android',test:'AC-01',stage:'confirmed',ready_with_zero_wallet:true,completed:true};
+
+test('native auth URL queries share the same fixture cooldown and counters', () => {
+  for (const suffix of ['', '?', '?redirect_to=private_marker']) {
+    assert.equal(fixtureOperation('POST','/auth/v1/otp'+suffix),'otp');
+    assert.equal(fixtureOperation('POST','/auth/v1/verify'+suffix),'verify');
+    assert.equal(fixtureOperation('POST','/rest/v1/rpc/task_sync_snapshot'+suffix),'snapshot');
+  }
+  assert.equal(fixtureOperation('GET','/auth/v1/verify?private_marker'),undefined);
+  assert.equal(fixtureOperation('POST','/auth/v1/user?otp'),undefined);
+});
 
 async function fixture(t) {
   const dir=await mkdtemp(join(tmpdir(),'android-report-'));
@@ -79,10 +89,12 @@ test('Android progress is bounded, monotonic, and a terminal test failure cannot
   assert.equal(receiver.stage,null);
   assert.equal(await post('/progress',{stage:'unexpected',text:'no logging'}),400);
   assert.equal(await post('/progress',{stage:'unexpected'}),400);
-  for (const stage of ['fixture','email_login','fixture','email_login','confirmed','failed','failed','complete_task']) {
+  const checkpoints=['fixture','email_login','login_form_visible','otp_send_tapped','otp_received','otp_form_ready','otp_verify_tapped'];
+  for (const stage of [...checkpoints,'fixture','email_login','confirmed','failed','failed','complete_task']) {
     assert.equal(await post('/progress',{stage}),200);
   }
-  assert.deepEqual(state.logs,['fixture','email_login','failed'].map(s=>'CROSS_DEVICE_ANDROID_STAGE '+s));
+  assert.deepEqual(state.logs,[...checkpoints,'failed'].map(s=>'CROSS_DEVICE_ANDROID_STAGE '+s));
+  assert.equal(receiver.checkpoint,'otp_verify_tapped');
   assert.equal(receiver.stage,'failed');
   state.phase='writer-complete';
   assert.equal(await post('/report',report),409);

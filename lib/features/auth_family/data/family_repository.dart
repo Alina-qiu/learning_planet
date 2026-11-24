@@ -50,6 +50,8 @@ class SupabaseFamilyRepository implements FamilyRepository {
 
   final SupabaseClient _client;
 
+  Session? get currentSession => _client.auth.currentSession;
+
   @override
   Future<void> revokeParentAuthorization() =>
       _client.rpc<void>('revoke_parent_authorization');

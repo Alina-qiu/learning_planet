@@ -1,6 +1,6 @@
 # 当前需求覆盖与验收状态
 
-核对日期为 2026-11-23。本文汇总当前交付范围及验收进度，[PROGRESS.md](PROGRESS.md)保留各轮历史。
+核对日期为 2026-11-24。本文汇总当前交付范围及验收进度。[历次开发记录](PROGRESS.md)
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。华为鸿蒙 4.2 和 iPhone 的安装、真实推送、生产性能、云端部署及连续家庭使用仍待验证。
 
@@ -8,11 +8,17 @@
 
 ## 当前开发进度
 
-Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用回到前台后会补拉任务和余额，断网重开时可继续使用已恢复的本机账号。iPhone 任务和家长提醒的服务器校时现覆盖系统权限查询与主线程等待。如果收到消息时的时间范围可能跨入安静时段，应用会抑制提醒。升级前保存的校时记录需在前台重新校准。[Android 调试包](ANDROID_BUILD.md) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
+可在本机联调的核心流程包括邮箱登录与家庭设置、离线任务和计时、金币与 XP、奖励兑换、多图错题逐张校对、自动复习、拼音练习、PDF 组卷和学习报告。服务端已接入可替换的 AI 和推送入口，真实模型与手机通知的效果仍待验证。
+
+Windows 完整 Flutter 测试 855 项通过，109 个核心源文件的行覆盖率为 90.74%（6846/7545）。断网冷启动时，如果已恢复的过期会话刷新失败，首次家庭查询可复用同一次失败结果，避免再次等待。恢复连接或手动刷新会重新访问服务端。账号注销、权限拒绝、切换账号仍会阻止读取原家庭。[登录回归](../test/family_entry_refresh_test.dart) · [Android 调试包](ANDROID_BUILD.md)
+
+iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核时间，如果可能跨入安静时段则抑制提醒。上一提交 `05eaa1b` 的 10 项常规远程检查全部通过，包括 SDK 27.2 未签名编译和三组 iOS 模拟器运行。独立双端验收中，iPhone 已缓存待办和零余额，随后 Android 在登录阶段超时。Windows 的 Android API 29 已独立完成这次写入，入账 7 金币、5 XP。Android 写入后 iPhone 恢复联网并显示相同余额仍待同轮验证。[常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45079584750) · [双端运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45079584741) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
 
 账号注销状态检查较慢时，首页的定时轮询会等待当前检查返回。之前每 30 秒新发起的检查可能使初次结果失效，导致离线首页持续转圈。应用回到前台仍会立即核查注销状态，服务端确认已受理注销后，应用立即遮住家庭数据。[入口回归用例](../test/entry_recovery_test.dart)
 
 同一测试家庭在 Android API 36、API 29 分别登录。API 36 断网作答 3 题，API 29 在同步前仍显示原状态。恢复连接后，两端显示同一条已完成的复习任务；3 道题分别记为正确、错误、正确，各有 1 次作答记录，金币和 XP 分别增加 30。零题孩子没有生成任务。下表区分本机服务、模拟器与目标真机的验收范围。
+
+复习任务现在按家庭时区从 00:05 开始生成。即使孩子在 00:04:59 打开首页，也不会提前固定当天的题集。如果家长正同时归档最后一道到期题，生成器会等变更提交后再选题，避免空任务占用当天名额。迁移 073 只清理可确认由旧生成器留下、没有作答或操作记录的空任务。本机 411 项数据库检查、6 个历史节点的 16 项升级检查、9 项备份恢复均已通过。PostgREST 16.2 和 16.5 分别通过 8 项测试，各处理 99 次实际请求。[生成与并发回归](../scripts/test_review_auto_completion_cases.mjs) · [升级回归](../scripts/test_database_upgrade.mjs)
 
 注销含有大量图片的账号时，已核验的文件会随批次保存在数据库。执行超时后，新进程可缩小批次并接着处理。孩子清理和账号注销都已用真实本机对象存储验证过期租约、迟到确认和文件归属隔离。[删除联调](PRIVACY_INTEGRATION.md)
 
@@ -21,6 +27,9 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 设备校时后，重新打开应用首次联网会核对之前未收到回执的操作。同一账号刷新令牌时，客户端现在保留正在执行的账号状态和家庭概览查询。迁移 071 向新版客户端返回家长 PIN 的服务器时间，手机用包含休眠时间的单调时钟计算剩余授权，退回前台也会检查期限。
 
 应用在数据库写入期间被系统终止后，重开会由 SQLite 回滚未提交的写入，再校验加密库并恢复已提交的数据。已用保留原数据库和回滚日志的 API 36 模拟器覆盖安装验证，进入原家庭后仍有 35 金币和原账本记录。
+
+<details>
+<summary>此前版本的构建和回归记录</summary>
 
 上一版在 Windows 通过全部 842 项 Flutter 测试和静态分析，核心行覆盖率 90.62%。本机 PostgreSQL 通过 405 项检查和 14 项有数据升级检查。PostgREST 16.2 处理了 99 次实际 HTTP 请求，覆盖新版 PIN、旧客户端兼容和设备校时后重放原命令。
 
@@ -46,13 +55,15 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 
 提交`645076f`的[iOS27.2运行尝试](https://github.com/Alina-qiu/learning_planet/actions/runs/43368916879/job/131699841767)在环境准备阶段失败：预装运行时仅arm64，Apple下载服务明确返回指定通用运行时不可用；已有Rosetta探测通过。没有编译或启动该目标，也没有执行业务断言。当前OCR依赖仍不支持Apple Silicon模拟器，iOS27运行验收保留为阻塞项。常规CI继续执行三个可用目标及SDK27完整构建；保留手工运行的诊断脚本和五项选择回归，不对已确认不可用的运行时反复自动下载。详情见[兼容性记录](IOS_COMPATIBILITY.md)。
 
+</details>
+
 ## 技术栈与交付方式
 
 | 层 | 当前实现 | 边界 |
 |---|---|---|
 | 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS Debug/Release](IOS_BUILD.md)已通过CI未签名编译及资源检查，尚未签名或真机运行 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
-| 后端 | Supabase PostgreSQL/Auth/Storage，74 份业务迁移至 072 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
+| 后端 | Supabase PostgreSQL/Auth/Storage，75 份业务迁移至 073 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
@@ -114,7 +125,7 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
 | 7.1–7.3 AI契约/审核/隐私 | [AI分析](AI_ANALYSIS.md)、[相似题](SIMILAR_QUESTIONS.md)、[上传提示](WORKSHEET_ACCESSIBILITY.md) | 实际供应商配置、预算和保留策略、教材质量评测；端侧自动模糊未实现，PRD将其列为可选 |
-| 8 数据模型/状态机 | 74 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
+| 8 数据模型/状态机 | 75 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
 | 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实HMS/APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
 | 12 / 15 迭代与原型 | MVP及多项V1.1/V1.2能力已有实现；当前验收基于真实App与服务测试 | V2学习伙伴、家庭协作、成熟动画按PRD验证后决定，不用加入新模块替代当前验收 |
@@ -123,7 +134,7 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动<3秒、列表<1.5秒、反馈<500ms | API 29 模拟器用 Profile 构建经 HTTPS 和验证码登录。5 次冷启的系统首帧中位 1.65 秒，另 3 次首次采样到大厅、孩子和钱包同时可见为 3.63 至 5.42 秒。[在线测量](../build/acceptance-20261123/online-profile-startup.json) · [列表与反馈](APP_PERFORMANCE.md) | 尚未证实首页达到 3 秒目标。API 36 调试版断网且会话过期时，回到缓存首页与钱包约需 29 至 30 秒。两轮观测均有 11 次令牌刷新尝试，进入首页前未发出注销状态或家庭业务请求。[离线诊断](../build/acceptance-20261123/account-poll-apk/offline-entry-network-diagnosis.json) |
+| 冷启动<3秒、列表<1.5秒、反馈<500ms | API 29 在线 Profile 构建的 5 次系统首帧中位为 1.65 秒，另 3 次首次观察到大厅、孩子和钱包同时可见为 3.63 至 5.42 秒。[在线测量](../build/acceptance-20261123/online-profile-startup.json) · [列表与反馈](APP_PERFORMANCE.md) | API 36 调试版在会话过期且服务不可达时，保留同一账号覆盖安装。旧包和新包各冷启 3 次，从发起启动到首次观察到大厅、孩子和钱包的中位数由 31.38 秒降至 20.14 秒。仍未达到 3 秒目标，目标手机也待测。[新旧包逐次测量](../build/acceptance-20261124/offline-startup-comparison.json) |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | 实际APK前台及重开后分别14.422秒/7.087秒发起同步 | 本机回环连接断开不代表无线网络、后台或两端实机 |
@@ -138,7 +149,7 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 
 | 编号 | 当前证据 | PRD 场景状态 |
 |---|---|---|
-| AC-01 Android/iOS同步且只奖励一次 | 两个独立 HTTP 会话已通过同库断线恢复和逐笔结算；已新增 Android 与 iPhone 原生界面的同库验收入口 | 双端结论以同轮两份设备报告、服务端账本及跨端 CI 结果为准 |
+| AC-01 Android/iOS同步且只奖励一次 | 两个独立 HTTP 会话已通过同库断线恢复和逐笔结算。Android API 29 的原生写入在本机得到 7 金币和 5 XP，两个回执对应两条账本行。[本机 Android](../build/acceptance-20261123/android-native-checks.json) | iPhone 已完成首次登录和待办缓存。提交 `05eaa1b` 的远程 Android 登录超时，同一数据库下 iPhone 断线重连后的原生界面仍待验证。[双端验收](https://github.com/Alina-qiu/learning_planet/actions/runs/45079584741) |
 | AC-02 重复提交只有一条奖励 | [并发报告](../build/concurrency_integration/results.json)记录 80 条命令重放、4 次丢回执及每个孩子的账本行数 | 本机服务重放场景通过 |
 | AC-03 改时不重复生成或领奖 | API 36 模拟器产生三天连续奖励，系统日期分别拨快、拨慢 48 小时，冷启动并重新从本机服务读取，核对原任务、奖励与账本 ID | 系统改时场景在 Android 模拟器与本机服务通过 |
 | AC-04 离线打卡、上线余额一致 | [自动同步](../build/auto_sync_device_results/walkthrough.json)记录待同步操作、联网确认后 50 金币 / 40 XP 和稳定的四条账本 ID | API 36 模拟器连接本机服务的场景通过 |
@@ -169,6 +180,4 @@ Windows 完整 Flutter 测试 847 项通过，核心行覆盖率 90.69%。应用
 1. 配置iOS签名并准备专用测试设备，在已完成CI未签名编译的基础上验证安装与运行；验证收到后校验的iOS通知方案，并执行AC-01/AC-09两端场景。
 2. 用户准备开发Supabase项目后，部署迁移、Storage策略、Edge和调度，再验证外部邮箱、HMS/APNs、保留期限、备份恢复与监控；密钥通过部署环境配置，不放入客户端或聊天记录。
 3. 在华为鸿蒙4.2/iPhone上测量真实首页/列表/反馈，验证相机/OCR、离线、系统导出、后台和安全存储；替换目前仅本机或模拟器的证据。
-4. 接入实际模型后进行教材/答案/引用/费用评测，开展四周家庭试用并核对指标。没有上述证据前保持“未完成最终验收”。
-
-截至本轮，没有发现足以支持安全修改启动业务顺序的新证据，因此未为了降低模拟器测量值而调整提醒清理或凭据恢复。
+4. 接入实际模型后进行教材、答案、引用与费用评测，开展四周家庭试用并核对指标。

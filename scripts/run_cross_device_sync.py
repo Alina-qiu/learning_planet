@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
 import urllib.request
 from shutdown_ios_simulator import shutdown as shutdown_iphone
 
@@ -29,10 +28,11 @@ UI_STAGES = {*PHASES, "/scenario", "/otp", "email sign-in screen", "enabled OTP 
              "child menu", "selected child", "initial wallet", "ready task", "offline cached ready task",
              "offline cached wallet", "enabled start action", "in-progress task", "enabled completion action",
              "completed task", "confirmed wallet", "home from the offline iPhone session"}
-REPORT_STAGES = {"fixture", "email_login", "restore_offline_session", "load_family_task_and_wallet",
+LOGIN_STAGES = {"email_login", "login_form_visible", "otp_send_tapped", "otp_received", "otp_form_ready", "otp_verify_tapped"}
+REPORT_STAGES = {"fixture", *LOGIN_STAGES, "restore_offline_session", "load_family_task_and_wallet",
                  "cached_before_shutdown", "reconnect", "complete_task", "confirm_task_and_wallet", "confirmed"}
 ANDROID_DRIVER_STAGES = {"APK metadata", "installation", "activity launch"}
-ANDROID_APP_STAGES = {"fixture", "email_login", "load_family_task_and_wallet", "complete_task",
+ANDROID_APP_STAGES = {"fixture", *LOGIN_STAGES, "load_family_task_and_wallet", "complete_task",
                       "confirm_task_and_wallet", "confirmed", "failed"}
 
 
@@ -41,15 +41,55 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def control_status(device):
+def control_data(device):
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:54324/phase?device={device}", timeout=2) as response:
             data = json.load(response)
-        phase = data.get("phase")
-        stage = data.get("androidStage")
-        return phase if phase in PHASES else None, stage if stage in ANDROID_APP_STAGES else None
-    except (OSError, ValueError, AttributeError, TypeError, urllib.error.URLError):
-        return None, None
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def control_status(device):
+    data = control_data(device)
+    phase, stage = data.get("phase"), data.get("androidStage")
+    return phase if phase in PHASES else None, stage if isinstance(stage, str) and stage in ANDROID_APP_STAGES else None
+
+
+def wakefulness(output):
+    match = re.search(r"^\s*mWakefulness=(Awake|Asleep|Dreaming|Dozing)\s*$", output, re.MULTILINE)
+    return match.group(1) if match else "unknown"
+
+
+def renderer_summary(path):
+    with path.open("rb") as stream:
+        log = stream.read(512 * 1024).decode("utf8", "replace")
+    version = re.search(r"Android emulator version (\d{1,3}(?:\.\d{1,3}){1,3})\b", log)
+    gles = re.search(r"\bgles_mode_selected:(swiftshader|swangle|angle|mesa|host|guest|none)\b", log)
+    vulkan = re.search(r"\bvulkan_mode_selected:(lavapipe|swiftshader|host|none)\b", log)
+    fields = (match[1] if match else "unknown" for match in (version, gles, vulkan))
+    return "Android emulator={} GLES={} Vulkan={}".format(*fields)
+
+
+def android_failure(message, adb_device):
+    # These fixed fields suffice to distinguish a dark screen, a missing tap,
+    # an Auth error and a failed UI transition. Never include device or HTTP payloads.
+    power = "unknown"
+    try:
+        code, output = one_probe(adb_device + ["shell", "dumpsys", "power"], 4)
+        if code == 0:
+            power = wakefulness(output)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    data = control_data("android")
+    stage = data.get("androidCheckpoint")
+    stage = stage if isinstance(stage, str) and stage in ANDROID_APP_STAGES else "unknown"
+    counts = data.get("androidHttp")
+    details = []
+    for key in ("otp", "otpOk", "verify", "verifyOk", "snapshot", "snapshotOk"):
+        value = counts.get(key) if isinstance(counts, dict) else None
+        details.append(f"{key}={value if type(value) is int and 0 <= value <= 1000000 else 'unknown'}")
+    return RuntimeError(f"{message}; checkpoint={stage} power={power} HTTP {' '.join(details)}")
 
 
 def control_phase():
@@ -390,7 +430,7 @@ def run():
             # verified report marks the on-device test as successfully finished.
             deadline = time.monotonic() + 21 * 60
             last = last_app_stage = None
-            exited_at = None
+            exited_at = login_deadline = None
             final = expected == "reader-confirmed"
             with contextlib.ExitStack() as owner:
                 process = start(label, command, owner)
@@ -400,10 +440,15 @@ def run():
                     if on_device:
                         phase, app_stage = control_status("android")
                         if app_stage == "failed":
-                            raise RuntimeError(f"Android on-device assertions failed after {last_app_stage or 'launch'}")
+                            raise android_failure(f"Android on-device assertions failed after {last_app_stage or 'launch'}", adb_device)
                         if app_stage and app_stage != last_app_stage:
                             last_app_stage = app_stage
+                            # A suspended frame can prevent the guest from reaching
+                            # its two-minute UI or three-minute mailbox timeout.
+                            login_deadline = time.monotonic() + 4 * 60 if app_stage in LOGIN_STAGES else None
                             print(f"Android on-device stage {app_stage}", flush=True)
+                        if login_deadline is not None and time.monotonic() >= login_deadline:
+                            raise android_failure(f"Android login timed out after {last_app_stage}", adb_device)
                     else:
                         phase = control_phase()
                     if phase and phase != last:
@@ -430,7 +475,7 @@ def run():
                         require(time.monotonic() - exited_at < 10, f"{label} exited before {expected}")
                     time.sleep(2)
             if on_device:
-                raise RuntimeError(f"Verified Android report timed out after {last_app_stage or 'launch'}")
+                raise android_failure(f"Verified Android report timed out after {last_app_stage or 'launch'}", adb_device)
             raise RuntimeError(driver_failure(Path(tmp) / label, label, "exceeded 21 minutes", last, report))
 
         ios_command = [sys.executable, "scripts/run_ios_simulator_flow.py", "--driver", DRIVER]
@@ -466,9 +511,14 @@ def run():
             probe("Android boot completion", adb_device + ["shell", "getprop", "sys.boot_completed"],
                   total=600 if accelerated else 900, per_attempt=8,
                   accept=lambda code, out: code == 0 and out.strip() == "1", health=android_alive)
+            print(renderer_summary(Path(tmp) / "emulator"), flush=True)
             probe("Android transport", adb_device + ["get-state"], total=60,
                   accept=lambda code, out: code == 0 and out.strip() == "device", health=android_alive)
+            probe("Android stay awake", adb_device + ["shell", "svc", "power", "stayon", "true"], health=android_alive)
+            probe("Android wake screen", adb_device + ["shell", "input", "keyevent", "KEYCODE_WAKEUP"], health=android_alive)
             probe("Android keyguard", adb_device + ["shell", "wm", "dismiss-keyguard"], health=android_alive)
+            probe("Android display awake", adb_device + ["shell", "dumpsys", "power"], total=30,
+                  accept=lambda code, out: code == 0 and wakefulness(out) == "Awake", health=android_alive)
             ports = ("54324", "54326")
             for port in ports:
                 probe(f"Android reverse {port}", adb_device + ["reverse", f"tcp:{port}", f"tcp:{port}"], health=android_alive)

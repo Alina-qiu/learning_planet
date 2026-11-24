@@ -76,6 +76,7 @@ class StartupTests(unittest.TestCase):
                 self.assertTrue(state["avd"])
                 self.assertEqual(args[args.index("--serial") + 1], runner.SERIAL)
                 self.assertNotIn("--driver", args)
+                self.assertIn("screen awake", events)
                 self.assertIn("both routes",events)
                 state["phase"] = "writer-complete"
                 events.append("writer")
@@ -103,6 +104,15 @@ class StartupTests(unittest.TestCase):
                 return 0, "1"
             elif "get-state" in args:
                 return 0, "device"
+            elif args[-4:] == ["svc", "power", "stayon", "true"]:
+                events.append("stay awake")
+            elif "KEYCODE_WAKEUP" in args:
+                self.assertIn("stay awake", events)
+                events.append("wakeup requested")
+            elif "dumpsys" in args:
+                self.assertIn("wakeup requested", events)
+                events.append("screen awake")
+                return 0, "Power Manager State:\n  mWakefulness=Awake\n"
             elif "--list" in args:
                 events.append("both routes")
                 return 0, "android tcp:54324 tcp:54324\nandroid tcp:54326 tcp:54326\n"
@@ -123,6 +133,8 @@ class StartupTests(unittest.TestCase):
             queries += 1
             if queries == 1:
                 return state["phase"], "confirm_task_and_wallet"
+            if android_result == "stalled login":
+                return state["phase"], "otp_verify_tapped"
             if android_result == "failed":
                 return state["phase"], "failed"
             if android_result == "passed":
@@ -143,6 +155,7 @@ class StartupTests(unittest.TestCase):
             stack.enter_context(patch.object(runner.sys, "platform", "darwin"))
             stack.enter_context(patch.object(runner, "control_phase", side_effect=lambda:state["phase"]))
             stack.enter_context(patch.object(runner, "control_status", side_effect=android_status))
+            stack.enter_context(patch.object(runner, "control_data", return_value={}))
             stack.enter_context(patch.object(runner, "stop_group"))
             stack.enter_context(patch.object(runner, "shutdown_iphone", side_effect=shutdown))
             stack.enter_context(patch.object(runner, "ports_free", side_effect=lambda:occupied != "port"))
@@ -155,26 +168,43 @@ class StartupTests(unittest.TestCase):
             elif android_result == "failed":
                 with self.assertRaisesRegex(RuntimeError, "assertions failed after confirm_task_and_wallet"):
                     runner.run()
-            elif android_result == "missing":
+            elif android_result in ("missing", "stalled login"):
                 now = [0]
                 def advance(_):
                     now[0] += 30
                 with patch.object(runner.time, "monotonic", side_effect=lambda:now[0]), patch.object(runner.time, "sleep", side_effect=advance):
-                    with self.assertRaisesRegex(RuntimeError, "Verified Android report timed out"):
+                    reason = "Android login timed out after otp_verify_tapped" if android_result == "stalled login" else "Verified Android report timed out"
+                    with self.assertRaisesRegex(RuntimeError, reason):
                         runner.run()
+                    if android_result == "stalled login":
+                        self.assertLess(now[0], 21 * 60)
             else:
                 runner.run()
         return events
 
     def test_staged_boot_and_same_install(self):
         self.assertEqual(self.exercise_stages(), ["backend", "ADB server", "boot iPhone", "initial reader", "stop iPhone",
-                         "boot Android", "both routes", "writer", "verified Android report", "stop Android", "Android released", "boot iPhone",
+                         "boot Android", "stay awake", "wakeup requested", "screen awake", "both routes", "writer", "verified Android report", "stop Android", "Android released", "boot iPhone",
                          "restored reader", "stop iPhone"])
 
     def test_failed_or_missing_report_never_starts_the_restored_reader(self):
-        for outcome in ("failed", "missing"):
+        for outcome in ("failed", "missing", "stalled login"):
             with self.subTest(outcome=outcome):
                 self.assertNotIn("restored reader", self.exercise_stages(android_result=outcome))
+
+    def test_failure_snapshot_only_contains_allowlisted_state_and_counts(self):
+        data = {"androidCheckpoint":"otp_received", "private":"private_marker",
+                "androidHttp":{"otp":1, "otpOk":1, "verify":True, "verifyOk":-1, "snapshot":"private_marker"}}
+        with patch.object(runner, "control_data", return_value=data), \
+                patch.object(runner, "one_probe", return_value=(0, "private_marker\n  mWakefulness=Asleep\n")):
+            self.assertEqual(str(runner.android_failure("failed", ["adb"])),
+                             "failed; checkpoint=otp_received power=Asleep HTTP otp=1 otpOk=1 verify=unknown "
+                             "verifyOk=unknown snapshot=unknown snapshotOk=unknown")
+        with tempfile.TemporaryDirectory() as temp:
+            logfile = Path(temp) / "emulator"
+            logfile.write_text("Android emulator version 37.2.13.0\nprivate_marker\n"
+                               "vulkan_mode_selected:private_marker gles_mode_selected:swiftshader", encoding="utf8")
+            self.assertEqual(runner.renderer_summary(logfile), "Android emulator=37.2.13.0 GLES=swiftshader Vulkan=unknown")
 
     def test_occupied_serial_or_port_stops_before_boot(self):
         for occupied in ("port", "serial"):

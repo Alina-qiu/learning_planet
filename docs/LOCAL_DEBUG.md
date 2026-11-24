@@ -1,6 +1,6 @@
 # Android 本机联调
 
-本机后端包含截至 072 的 74 份业务迁移。练习卷到期状态使用迁移 069，错题保存重试使用 070，家长 PIN 授权时间使用 071，文件清理断点续办使用 072。启动临时服务时会加载全部迁移并创建空的测试数据库。调试包及验证范围见[构建记录](ANDROID_BUILD.md)，iPhone 提醒见[任务远程提醒](TASK_REMOTE_PUSH.md)。
+本机后端包含截至 073 的 75 份业务迁移。迁移 073 在创建当日复习任务前锁定入选题目和家长确认的答案，避免并发归档留下空任务。启动临时服务会加载全部迁移并创建空的测试数据库。[调试包与验证范围](ANDROID_BUILD.md) · [iPhone 提醒](TASK_REMOTE_PUSH.md)
 
 2026-11-06完成[实际App自动同步时限验证](AUTO_SYNC_DEVICE.md)：本机APK的前台断网恢复及离线强制结束/重开后恢复，均在30秒内自动发出同步请求，奖励和账本未重复。新增可选54322回环探针；普通联调仍将设备54321转发到电脑54321。探针、后端与模拟器已在验证结束后关闭。
 
@@ -27,7 +27,7 @@
 & scripts/local_backend.ps1
 ```
 
-终端出现 `LOCAL_BACKEND_READY http://127.0.0.1:54321` 后保持运行。在另一个终端构建：
+终端出现 `LOCAL_BACKEND_READY http://127.0.0.1:54321` 后保持运行。工作区已有当日构建的 `build/app/outputs/flutter-apk/app-local-debug.apk`，可直接安装。修改客户端代码或重新生成本机凭据后，可在另一个终端重新构建：
 
 ```powershell
 & scripts/build_local_android.ps1 -NoPub
@@ -35,11 +35,18 @@
 
 输出 `build/app/outputs/flutter-apk/app-local-debug.apk` 和对应 `.sha256`。构建脚本备份并恢复普通 `app-debug.apk`，避免公共构建目录导致两个产物混淆。工具目录可通过 `-ToolsRoot` 指定，Node可通过 `-NodeBinary` 指定。
 
-连接开启USB调试的Android测试设备，或启动模拟器，先查看设备序号，再按实际序号执行：
+没有测试手机时，可在单独的 PowerShell 窗口启动这台电脑已有的 Android 36 模拟器，等待出现系统桌面：
+
+```powershell
+$env:ANDROID_HOME = 'D:/learning-planet-tools/android-sdk'
+$env:ANDROID_AVD_HOME = 'D:/learning-planet-tools/avd'
+& D:/learning-planet-tools/android-sdk/emulator/emulator.exe -avd learning_planet_api36 -port 5580
+```
+
+保持服务和模拟器运行，在项目目录另开终端，查看设备序号并安装。使用开启 USB 调试的华为手机时，把下面的模拟器序号换成手机的序号。
 
 ```powershell
 & D:/learning-planet-tools/android-sdk/platform-tools/adb.exe devices -l
-# 以下示例针对本机专用模拟器；手机应替换设备序号。
 & D:/learning-planet-tools/android-sdk/platform-tools/adb.exe -s emulator-5580 reverse tcp:54321 tcp:54321
 & D:/learning-planet-tools/android-sdk/platform-tools/adb.exe -s emulator-5580 install -r build/app/outputs/flutter-apk/app-local-debug.apk
 ```

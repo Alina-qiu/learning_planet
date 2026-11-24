@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/offline/network_failure.dart';
 import '../../auth_family/application/auth_providers.dart';
+import '../../auth_family/application/family_providers.dart';
 import '../../auth_family/domain/parent_authorization_clock.dart';
 import '../../tasks/application/task_providers.dart';
 import '../../tasks/data/offline_task_repository.dart';
@@ -30,7 +31,29 @@ final accountDeletionStatusProvider = FutureProvider<Map<String, dynamic>?>((
   ref,
 ) {
   ref.watch(authAccountIdProvider);
-  return ref.watch(accountDeletionRepositoryProvider)?.status();
+  final repository = ref.watch(accountDeletionRepositoryProvider);
+  if (repository is! SupabaseAccountDeletionRepository) {
+    return repository?.status();
+  }
+  final entry = ref.read(familyEntryRefreshProvider);
+  final awaitingFirstFamilyRead = !ref.exists(familiesProvider);
+  var active = true;
+  ref.onDispose(() {
+    active = false;
+    entry.clearFailure();
+  });
+  return repository.status(
+    onRefreshFailure: (session, error) {
+      if (active && awaitingFirstFamilyRead && !ref.exists(familiesProvider)) {
+        entry.record(session, error);
+      }
+    },
+    onOnlineClear: (owner) {
+      if (active && entry.needsFamilyRefresh(owner)) {
+        ref.invalidate(familiesProvider);
+      }
+    },
+  );
 });
 
 class SupabaseAccountDeletionRepository implements AccountDeletionRepository {
@@ -86,8 +109,12 @@ class SupabaseAccountDeletionRepository implements AccountDeletionRepository {
   }
 
   @override
-  Future<Map<String, dynamic>?> status() async {
-    final owner = client.auth.currentUser?.id;
+  Future<Map<String, dynamic>?> status({
+    void Function(Session, AuthRetryableFetchException)? onRefreshFailure,
+    void Function(String)? onOnlineClear,
+  }) async {
+    final session = client.auth.currentSession;
+    final owner = session?.user.id;
     if (owner == null) return null;
     final local = await offline?.store.accountDeletionJob(owner);
     Map<String, dynamic>? result;
@@ -96,12 +123,22 @@ class SupabaseAccountDeletionRepository implements AccountDeletionRepository {
     } catch (error) {
       if (!isNetworkFailure(error)) rethrow;
       if (client.auth.currentUser?.id != owner) throw StateError('登录账号已变化');
+      if (local == null &&
+          error is AuthRetryableFetchException &&
+          session != null &&
+          session.isExpired &&
+          session.refreshToken != null &&
+          identical(session, client.auth.currentSession)) {
+        onRefreshFailure?.call(session, error);
+      }
       return local == null
           ? null
           : {'id': local, 'status': 'unknown', 'offline': true};
     }
     if (result != null) {
       await offline?.forgetAccount(owner, result['id'] as String);
+    } else if (local == null) {
+      onOnlineClear?.call(owner);
     }
     return result ??
         (local == null ? null : {'id': local, 'status': 'unknown'});

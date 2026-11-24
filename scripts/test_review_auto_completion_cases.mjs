@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
+import {daytimeReviewZone, generateDuringReviewChange} from './fixtures/review_generation.mjs';
 
 export async function reviewAutoCompletionCases({client,scalar,login,denied,check,otherUid}) {
   const user=randomUUID(),auth=()=>login(user,'review-auto');
   await client.query('reset role');await client.query('insert into auth.users values($1,$2)',[user,'auto-review@example.test']);
-  await auth();await scalar("select public.onboard_family('Auto review','Asia/Shanghai','Initial',1::smallint)");
+  await auth();await scalar("select public.onboard_family('Auto review',$1,'Initial',1::smallint)", [await daytimeReviewZone(scalar)]);
   const family=await scalar('select id from public.families where owner_user_id=$1',[user]);
   await scalar("select public.set_parent_pin($1,'2468')",[family]);await scalar("select public.verify_parent_pin($1,'2468')",[family]);
   const row=id=>scalar('select public.load_review_task($1)',[id]);
@@ -23,6 +24,82 @@ export async function reviewAutoCompletionCases({client,scalar,login,denied,chec
     expected_version:f.task.sync_version,predecessor_id:previous?.command_id??null,kind:'review_'+kind,occurred_at:await scalar('select clock_timestamp()::text'),...extra});
   const apply=c=>scalar('select public.apply_task_command($1)',[c]);
   let completed;
+  await check('the family 00:05 cutoff governs new daily reviews across snapshot, overview and retry', async () => {
+    // Use transaction time and a fixture-only POSIX offset to hit exact local
+    // seconds on any runner. Rollback restores the named-zone constraint.
+    await client.query('begin');
+    try {
+      await client.query('reset role');
+      await client.query('alter table public.families disable trigger validate_family_timezone_change');
+      const utcSecond = await scalar("select floor(extract(epoch from (now() at time zone 'UTC')::time))::int");
+      async function setLocalSecond(second) {
+        const offset = utcSecond - second - (utcSecond >= 43200 ? 86400 : 0);
+        const magnitude = Math.abs(offset);
+        const parts = [Math.floor(magnitude/3600), Math.floor(magnitude/60)%60, magnitude%60];
+        const zone = 'TST' + (offset >= 0 ? '+' : '-') + parts.map(n => String(n).padStart(2,'0')).join(':');
+        await client.query('reset role');
+        await client.query('update public.families set timezone=$2 where id=$1', [family, zone]);
+        assert.equal(await scalar("select floor(extract(epoch from (now() at time zone $1)::time))::int", [zone]), second);
+        await auth();
+      }
+      await setLocalSecond(299);
+      const child = await scalar("select public.create_child($1,'Cutoff',1::smallint)", [family]);
+      const question = await scalar('select public.save_review_question($1,$2)', [child,
+        {kind:'question', subject:'math', prompt:'2 + 2', answers:['4']}]);
+      await client.query('reset role');
+      await client.query("update public.wrong_questions set review_due_at=now()-interval '2 days' where id=$1", [question]);
+      await auth();
+      const generate = () => scalar('select public.generate_daily_wrong_review_task($1)', [child]);
+      assert.equal(await generate(), null);
+      assert.equal((await scalar('select public.review_overview($1)', [child])).task_id, null);
+      assert.equal((await scalar('select public.task_sync_snapshot($1)', [child])).tasks.length, 0);
+      const day = await scalar('select public.family_today($1)::text', [child]);
+      const explicitDate = 'select public.generate_daily_wrong_review_task($1,$2::date+$3::int)';
+      for (const days of [-1,1]) {
+        await client.query('savepoint check_date');
+        await denied(explicitDate, [child,day,days]);
+        await client.query('rollback to savepoint check_date');
+      }
+      await client.query('reset role');
+      await client.query("select set_config('request.jwt.claims',$1,false)", [JSON.stringify({role:'service_role'})]);
+      await client.query('set role service_role');
+      assert.equal(await scalar(explicitDate, [child,day,0]), null);
+      for (const days of [-1,1]) assert.ok(await scalar(explicitDate, [child,day,days]));
+
+      await setLocalSecond(300);
+      const generated = await scalar('select public.task_sync_snapshot($1)', [child]);
+      const tasks = generated.tasks.filter(t => t.due_date === day && t.source_type === 'automatic_wrong_review');
+      assert.equal(tasks.length, 1);
+      const id = tasks[0].id;
+      assert.deepEqual((await row(id)).items.map(i => i.wrong_question_id), [question]);
+      assert.equal((await scalar('select public.review_overview($1)', [child])).task_id, id);
+      // A timezone change may move a family with an existing snapshot back
+      // before 00:05 on the same day. Its published task remains accessible.
+      await setLocalSecond(299);
+      assert.equal(await generate(), id);
+    } finally { await client.query('rollback'); }
+  });
+  await check('concurrent bulk archive leaves no empty daily review and each child receives only its due questions', async () => {
+    const createChild = name => scalar('select public.create_child($1,$2,1::smallint)', [family, name]);
+    const saveQuestion = (child, prompt) => scalar('select public.save_review_question($1,$2)', [
+      child, {kind: 'question', subject: 'math', prompt, answers: ['4']},
+    ]);
+    const first = await createChild('Bulk archive'), sibling = await createChild('Sibling');
+    const archive = questions => client.query('select public.archive_review_questions($1,$2,true)', [first, questions]);
+    const archived = [await saveQuestion(first, '1 + 3'), await saveQuestion(first, '2 + 2')];
+    const siblingQuestion = await saveQuestion(sibling, '4 + 0');
+    const result = await generateDuringReviewChange(client, first, () => archive(archived), async () => {
+      const siblingTask = await scalar('select public.generate_daily_wrong_review_task($1)', [sibling]);
+      const frozen = await row(siblingTask);
+      assert.deepEqual(frozen.items.map(i => i.wrong_question_id), [siblingQuestion]);
+    });
+    assert.equal(result, null, 'The last eligible questions were archived during generation');
+    assert.equal(await scalar("select count(*)::int from public.task_instances where child_id=$1 and source_type='automatic_wrong_review'", [first]), 0);
+    const surviving = await saveQuestion(first, '0 + 4'), removed = await saveQuestion(first, '3 + 1');
+    const task = await generateDuringReviewChange(client, first, () => archive([removed]));
+    assert.deepEqual((await row(task)).items.map(i => i.wrong_question_id), [surviving]);
+    assert.equal(await scalar('select public.generate_daily_wrong_review_task($1)', [first]), task);
+  });
   await check('AC-11 daily snapshot finishes exactly on the last of three answers and stores each result',async()=>{
     const f=completed=await fixture(3);assert.equal(f.task.review_auto_complete,true);
     assert.equal(await scalar('select public.generate_daily_wrong_review_task($1)',[f.child]),f.task.id);

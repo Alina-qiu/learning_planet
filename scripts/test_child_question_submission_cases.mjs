@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
+import {daytimeReviewZone, generateDuringReviewChange} from './fixtures/review_generation.mjs';
 
 export async function childQuestionSubmissionCases({client,scalar,login,denied,check,otherUid}) {
   const parent=randomUUID(),input=randomUUID();
   await client.query('reset role');
   for(const id of [parent,input]) await client.query('insert into auth.users values($1,$2)',[id,`${id}@child-submission.test`]);
   const parentLogin=()=>login(parent,'submission-parent'),childLogin=()=>login(input,'submission-child');
-  await parentLogin();await scalar("select public.onboard_family('Review submissions','Asia/Shanghai','Child',1::smallint)");
+  await parentLogin();await scalar("select public.onboard_family('Review submissions',$1,'Child',1::smallint)", [await daytimeReviewZone(scalar)]);
   const family=await scalar('select id from public.families where owner_user_id=$1',[parent]);
   const child=await scalar('select id from public.children where family_id=$1',[family]);
   await scalar("select public.set_parent_pin($1,'2468')",[family]);
@@ -53,7 +54,12 @@ export async function childQuestionSubmissionCases({client,scalar,login,denied,c
     for(const role of ['anon','service_role']) {await client.query('reset role');await client.query('set role '+role);await denied('select public.child_question_submissions($1)',[child]);}await parentLogin();
   });
   await check('explicit parent confirmation creates one question with confirmed answers and preserves raw child input and OCR metrics',async()=>{
-    const key=randomUUID(),first=await scalar(approveSql,[draft.id,key,answer]);question=first.question_id;
+    const key=randomUUID();
+    let first;
+    const concurrentTask=await generateDuringReviewChange(client,child,async()=>{
+      first=await scalar(approveSql,[draft.id,key,answer]);
+    });
+    question=first.question_id;
     assert.equal(first.state,'approved');assert.ok(first.confirmed_at);assert.deepEqual(first.config.answers,[]);
     assert.deepEqual(await scalar(approveSql,[draft.id,key,answer]),first);
     await denied(approveSql,[draft.id,key,{...answer,answers:['999']}]);await denied(approveSql,[draft.id,randomUUID(),answer]);
@@ -65,6 +71,7 @@ export async function childQuestionSubmissionCases({client,scalar,login,denied,c
     const approved=await scalar('select to_jsonb(q) from public.wrong_questions q where id=$1',[question]);assert.equal(approved.final_text,answer.prompt);
     await childLogin();assert.equal((await read(draft.id)).state,'approved');assert.deepEqual((await submit(draft)).config.answers,[]);
     const task=await scalar('select public.generate_daily_wrong_review_task($1)',[child]);assert.ok(task);
+    assert.equal(task,concurrentTask);
     await client.query('reset role');assert.deepEqual(await scalar('select accepted_answers from public.task_review_answer_keys where task_id=$1 and question_id=$2',[task,question]),['4']);
     await parentLogin();
   });

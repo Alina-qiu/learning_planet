@@ -147,17 +147,25 @@ class _Control {
   }
 }
 
-Future<void> _login(WidgetTester tester, _Control control, String email) async {
+Future<void> _login(
+  WidgetTester tester,
+  _Control control,
+  String email,
+  Map<String, dynamic> report,
+) async {
   await _until(
     tester,
     'email sign-in screen',
     () => find.text('登录学习星球').evaluate().isNotEmpty,
   );
+  await control.stage(report, 'login_form_visible');
   await tester.enterText(find.byType(EditableText), email);
   final send = find.text('发送验证码');
   await tester.ensureVisible(send);
   await tester.tap(send);
+  await control.stage(report, 'otp_send_tapped');
   final otp = await control.wait('/otp');
+  await control.stage(report, 'otp_received');
   final verify = find.widgetWithText(FilledButton, '验证并登录');
   await _until(
     tester,
@@ -166,11 +174,13 @@ Future<void> _login(WidgetTester tester, _Control control, String email) async {
         verify.evaluate().isNotEmpty &&
         tester.widget<FilledButton>(verify).onPressed != null,
   );
+  await control.stage(report, 'otp_form_ready');
   final code = otp['code'] as String;
   if (!RegExp(r'^\d{8}$').hasMatch(code)) fail('Invalid fixture OTP format');
   await tester.enterText(find.byType(EditableText), code);
   await tester.ensureVisible(verify);
   await tester.tap(verify);
+  await control.stage(report, 'otp_verify_tapped');
   await _until(
     tester,
     'home after OTP verification',
@@ -308,7 +318,7 @@ void main() {
         );
       } else {
         await control.stage(report, 'email_login');
-        await _login(tester, control, scenario['email'] as String);
+        await _login(tester, control, scenario['email'] as String, report);
       }
       await control.stage(report, 'load_family_task_and_wallet');
       await _selectChild(tester, child, family);
