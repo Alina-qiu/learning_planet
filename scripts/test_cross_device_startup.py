@@ -44,6 +44,7 @@ class StartupTests(unittest.TestCase):
                 self.assertFalse(state["iphone"])
                 self.assertEqual(args[args.index("-cores") + 1], "2")
                 self.assertEqual(args[args.index("-memory") + 1], "1536")
+                self.assertEqual(args[args.index("-gpu") + 1], "software")
                 state["avd"] = True
                 events.append("boot Android")
                 return Mock(poll=lambda: None if state["avd"] else 0, wait=lambda timeout: 0)
@@ -71,12 +72,21 @@ class StartupTests(unittest.TestCase):
                     runner.SERVER_RESULT.write_text(json.dumps(proof), encoding="utf-8")
                     state["phase"] = "reader-confirmed"
                     events.append("restored reader")
+            elif "logcat" in args:
+                self.assertTrue(state["avd"])
+                self.assertIn("both routes", events)
+                self.assertEqual(args[args.index("-e") + 1], runner.STARTUP_MARK)
+                self.assertEqual(args[-3:], ["LP_STARTUP:I", "flutter:I", "*:S"])
+                self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+                events.append("capture startup marks")
+                return Mock(poll=lambda:None)
             elif "scripts/run_android_simulator_flow.py" in args:
                 self.assertFalse(state["iphone"])
                 self.assertTrue(state["avd"])
                 self.assertEqual(args[args.index("--serial") + 1], runner.SERIAL)
                 self.assertNotIn("--driver", args)
                 self.assertIn("screen awake", events)
+                self.assertIn("capture startup marks", events)
                 self.assertIn("both routes",events)
                 state["phase"] = "writer-complete"
                 events.append("writer")
@@ -184,7 +194,7 @@ class StartupTests(unittest.TestCase):
 
     def test_staged_boot_and_same_install(self):
         self.assertEqual(self.exercise_stages(), ["backend", "ADB server", "boot iPhone", "initial reader", "stop iPhone",
-                         "boot Android", "stay awake", "wakeup requested", "screen awake", "both routes", "writer", "verified Android report", "stop Android", "Android released", "boot iPhone",
+                         "boot Android", "stay awake", "wakeup requested", "screen awake", "both routes", "capture startup marks", "writer", "verified Android report", "stop Android", "Android released", "boot iPhone",
                          "restored reader", "stop iPhone"])
 
     def test_failed_or_missing_report_never_starts_the_restored_reader(self):
@@ -198,13 +208,22 @@ class StartupTests(unittest.TestCase):
         with patch.object(runner, "control_data", return_value=data), \
                 patch.object(runner, "one_probe", return_value=(0, "private_marker\n  mWakefulness=Asleep\n")):
             self.assertEqual(str(runner.android_failure("failed", ["adb"])),
-                             "failed; checkpoint=otp_received power=Asleep HTTP otp=1 otpOk=1 verify=unknown "
+                             "failed; checkpoint=otp_received adb=responded power=Asleep HTTP otp=1 otpOk=1 verify=unknown "
                              "verifyOk=unknown snapshot=unknown snapshotOk=unknown")
+        with patch.object(runner, "control_data", return_value={}), \
+                patch.object(runner, "one_probe", side_effect=subprocess.TimeoutExpired("private_marker", 15)):
+            self.assertIn("adb=timed_out power=unknown", str(runner.android_failure("failed", ["adb"])))
         with tempfile.TemporaryDirectory() as temp:
             logfile = Path(temp) / "emulator"
             logfile.write_text("Android emulator version 37.2.13.0\nprivate_marker\n"
                                "vulkan_mode_selected:private_marker gles_mode_selected:swiftshader", encoding="utf8")
             self.assertEqual(runner.renderer_summary(logfile), "Android emulator=37.2.13.0 GLES=swiftshader Vulkan=unknown")
+            logfile.write_text("source=android stage=activity_create elapsed_us=80 outcome=ok\n"
+                               "LP_STARTUP source=dart stage=first_frame elapsed_us=4 outcome=ok\n"
+                               "LP_STARTUP source=dart stage=credentials elapsed_us=7 outcome=error\n"
+                               "LP_STARTUP source=dart stage=credentials elapsed_us=7 outcome=ok private_marker\n"
+                               "source=android stage=private_marker elapsed_us=1 outcome=ok\n", encoding="utf8")
+            self.assertEqual(runner.startup_summary(logfile), "android.activity_create=ok,dart.first_frame=ok,dart.credentials=error")
 
     def test_occupied_serial_or_port_stops_before_boot(self):
         for occupied in ("port", "serial"):

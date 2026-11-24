@@ -24,7 +24,8 @@ class NativeAndroidTests(unittest.TestCase):
             android.run('emulator-5554', Path('fixture.apk'))
         self.assertEqual(len(commands), 4)
         self.assertEqual(commands[-1][3:], ['shell', 'am', 'start', '-a', 'android.intent.action.MAIN', '-c',
-                                          'android.intent.category.LAUNCHER', '-n', 'com.example.fixture/another.package.MyActivity'])
+                                          'android.intent.category.LAUNCHER', '--ez', 'enable-software-rendering', 'true',
+                                          '--ez', 'enable-impeller', 'false', '-n', 'com.example.fixture/another.package.MyActivity'])
         self.assertNotIn('forward', [arg for command in commands for arg in command])
 
     def test_timeout_stays_private(self):

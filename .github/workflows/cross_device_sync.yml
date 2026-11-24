@@ -28,6 +28,7 @@ jobs:
         run: |
           flutter build apk --debug --no-pub --target-platform android-x64 \
             --target=integration_test/cross_device_sync_test.dart \
+            --dart-define=MEASURE_STARTUP=true \
             --dart-define=LOCAL_BACKEND=true \
             --dart-define=SUPABASE_URL=http://127.0.0.1:54326 \
             --dart-define=SUPABASE_ANON_KEY=sb_publishable_cross_device_loopback_fixture

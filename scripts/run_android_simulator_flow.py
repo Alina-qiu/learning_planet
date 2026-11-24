@@ -41,8 +41,11 @@ def run(serial, apk):
         raise RuntimeError('APK installation not confirmed')
     print('Android driver stage: activity launch', flush=True)
     checked(adb + ['shell', 'am', 'force-stop', package], 20)
+    # Renderer selection belongs to this headless debug fixture's Activity.
+    # The engine requires Impeller to be disabled to select its CPU surface.
     started = checked(adb + ['shell', 'am', 'start', '-a', 'android.intent.action.MAIN', '-c',
-                             'android.intent.category.LAUNCHER', '-n', f'{package}/{activity}'], 30)
+                             'android.intent.category.LAUNCHER', '--ez', 'enable-software-rendering', 'true',
+                             '--ez', 'enable-impeller', 'false', '-n', f'{package}/{activity}'], 30)
     if 'Starting: Intent' not in started or 'Error' in started:
         raise RuntimeError('activity launch failed')
 

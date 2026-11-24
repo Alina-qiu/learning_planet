@@ -34,6 +34,11 @@ REPORT_STAGES = {"fixture", *LOGIN_STAGES, "restore_offline_session", "load_fami
 ANDROID_DRIVER_STAGES = {"APK metadata", "installation", "activity launch"}
 ANDROID_APP_STAGES = {"fixture", *LOGIN_STAGES, "load_family_task_and_wallet", "complete_task",
                       "confirm_task_and_wallet", "confirmed", "failed"}
+# Android 10 logcat and the host both use this expression. Its captures allow
+# only the startup marks emitted by MainActivity and the debug Dart entry point.
+STARTUP_MARK = (r"^(LP_STARTUP )?source=(android|dart) stage=(activity_create|activity_first_frame|plugins|channels|"
+                r"binding|notifications|timezone|notificationPlugin|taskAlarmClear|notificationClear|database|"
+                r"credentials|supabase|push|initialization|first_frame) elapsed_us=[0-9]{1,18} outcome=(ok|error)$")
 
 
 def require(condition, message):
@@ -71,16 +76,32 @@ def renderer_summary(path):
     return "Android emulator={} GLES={} Vulkan={}".format(*fields)
 
 
+def startup_summary(path):
+    with path.open("rb") as stream:
+        lines = stream.read(64 * 1024).decode("utf8", "replace").splitlines()
+    marks = []
+    for line in lines:
+        match = re.fullmatch(STARTUP_MARK, line)
+        if match:
+            mark = f"{match[2]}.{match[3]}={match[4]}"
+            if mark not in marks:
+                marks.append(mark)
+    return ",".join(marks) or "none"
+
+
 def android_failure(message, adb_device):
     # These fixed fields suffice to distinguish a dark screen, a missing tap,
     # an Auth error and a failed UI transition. Never include device or HTTP payloads.
     power = "unknown"
     try:
-        code, output = one_probe(adb_device + ["shell", "dumpsys", "power"], 4)
+        code, output = one_probe(adb_device + ["shell", "dumpsys", "power"], 15)
+        adb_status = "responded" if code == 0 else "command_failed"
         if code == 0:
             power = wakefulness(output)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
+    except subprocess.TimeoutExpired:
+        adb_status = "timed_out"
+    except OSError:
+        adb_status = "unavailable"
     data = control_data("android")
     stage = data.get("androidCheckpoint")
     stage = stage if isinstance(stage, str) and stage in ANDROID_APP_STAGES else "unknown"
@@ -89,7 +110,7 @@ def android_failure(message, adb_device):
     for key in ("otp", "otpOk", "verify", "verifyOk", "snapshot", "snapshotOk"):
         value = counts.get(key) if isinstance(counts, dict) else None
         details.append(f"{key}={value if type(value) is int and 0 <= value <= 1000000 else 'unknown'}")
-    return RuntimeError(f"{message}; checkpoint={stage} power={power} HTTP {' '.join(details)}")
+    return RuntimeError(f"{message}; checkpoint={stage} adb={adb_status} power={power} HTTP {' '.join(details)}")
 
 
 def control_phase():
@@ -344,10 +365,10 @@ def run():
     adb_device = [adb, "-s", SERIAL]
     with tempfile.TemporaryDirectory(prefix="cross-device-") as tmp, contextlib.ExitStack() as stack:
         # Only controlled stage and status messages enter the public build log.
-        def start(name, command, owner, env=None):
+        def start(name, command, owner, env=None, stderr=subprocess.STDOUT):
             stream = owner.enter_context((Path(tmp) / name).open("wb"))
             try:
-                process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
+                process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stream, stderr=stderr,
                                            start_new_session=True, env=env)
             except OSError as error:
                 raise RuntimeError(f"{name} spawn failed: errno={errno.errorcode.get(error.errno, 'UNKNOWN')}") from None
@@ -527,9 +548,17 @@ def run():
                 return code == 0 and all([f"tcp:{port}", f"tcp:{port}"] in routes for port in ports)
             probe("Android reverse verification", adb_device + ["reverse", "--list"], accept=mapped, health=android_alive)
             print("Android boot, transport and both reverse mappings confirmed; launching the writer", flush=True)
-            android = drive("Android writer", [sys.executable, "scripts/run_android_simulator_flow.py",
-                            "--serial", SERIAL, "--apk", str(APK)],
-                            "writer-complete", reports["android"], android_alive, on_device=True)
+            # Keep a filtered stream on the host before the Activity starts.
+            # Already received marks survive a later loss of the ADB transport.
+            trace = start("Android startup marks", adb_device + ["logcat", "-b", "main", "-T", "1", "-v", "raw",
+                          "-e", STARTUP_MARK, "LP_STARTUP:I", "flutter:I", "*:S"], owner, stderr=subprocess.DEVNULL)
+            try:
+                android = drive("Android writer", [sys.executable, "scripts/run_android_simulator_flow.py",
+                                "--serial", SERIAL, "--apk", str(APK)],
+                                "writer-complete", reports["android"], android_alive, on_device=True)
+            finally:
+                state = "running" if trace.poll() is None else "exited"
+                print(f"Android startup capture={state} marks={startup_summary(Path(tmp) / 'Android startup marks')}", flush=True)
             require(android.get("completed") is True and android.get("task_id") == initial.get("task_id"),
                     "Android writer report incomplete or wrong task")
             print("Android writer confirmed completion; shutting down its emulator", flush=True)
