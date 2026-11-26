@@ -6,11 +6,28 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {androidEvidence, androidSessionMatches, fixtureOperation} from './test_cross_device_sync.mjs';
+import {androidEvidence, androidSessionMatches, fixtureMailboxReply, fixtureOperation} from './test_cross_device_sync.mjs';
 import {closeServer, listen, signedJwt} from './fixtures/http_test_tools.mjs';
 
 const scenario={task_id:'task',child_id:'child',family_id:'family',coins:7,xp:5};
 const report={...scenario,device:'android',test:'AC-01',stage:'confirmed',ready_with_zero_wallet:true,completed:true};
+
+test('the fixture mailbox reports an Auth rejection without reading or exposing mail',async ()=>{
+  const neverRead = () => { throw Error('unexpected mailbox read'); };
+  for (const status of [401,403,429,503]) {
+    assert.deepEqual(await fixtureMailboxReply(status,2,neverRead),{status});
+  }
+  assert.deepEqual(await fixtureMailboxReply(200,2,async()=>{
+    throw new TypeError('private transport details',{cause:{code:'ECONNRESET'}});
+  }),{status:202,interrupted:true});
+  await assert.rejects(fixtureMailboxReply(200,2,async()=>{throw new SyntaxError('private contents');}),
+    {message:'Invalid fixture mailbox response'});
+  const mail = (status,item) => async () => new Response(JSON.stringify(item),{status});
+  assert.deepEqual(await fixtureMailboxReply(200,2,mail(403,{private:'hidden'})),{status:403});
+  assert.deepEqual(await fixtureMailboxReply(200,2,mail(404,null)),{status:202});
+  assert.deepEqual(await fixtureMailboxReply(0,2,mail(200,{count:1,code:'previous'})),{status:202});
+  assert.deepEqual(await fixtureMailboxReply(200,2,mail(200,{count:2,code:'fixture',private:'hidden'})),{status:200,code:'fixture'});
+});
 
 test('native auth URL queries share the same fixture cooldown and counters', () => {
   for (const suffix of ['', '?', '?redirect_to=private_marker']) {

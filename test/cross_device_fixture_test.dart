@@ -7,11 +7,86 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import '../integration_test/cross_device_sync_test.dart'
-    show fixtureFailureMark, reportAndroidProgress, showFixtureTarget;
+    show
+        fixtureFailureMark,
+        readFixtureOtp,
+        reportAndroidProgress,
+        showFixtureTarget;
 
 void main() {
   final progress = Uri.http('127.0.0.1:54324', '/progress', {
     'device': 'android',
+  });
+
+  test(
+    'mailbox polling retries a lost GET and a timeout without repeating any auth action',
+    () async {
+      var calls = 0;
+      final client = MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.path, '/otp');
+        expect(request.url.queryParameters.keys, ['device']);
+        switch (++calls) {
+          case 1:
+            throw http.ClientException('connection lost');
+          case 2:
+            throw TimeoutException('network read');
+          case 3:
+            return http.Response('', 202);
+          default:
+            return http.Response(jsonEncode({'code': '0' * 8}), 200);
+        }
+      });
+      addTearDown(client.close);
+      final result = await readFixtureOtp(client, 'ios', (_) async {});
+      expect(result.length, 8);
+      expect(calls, 4);
+    },
+  );
+
+  test(
+    'mailbox rejection never retries or exposes the response body',
+    () async {
+      for (final status in [401, 403, 429, 500]) {
+        var calls = 0;
+        final client = MockClient((_) async {
+          calls++;
+          return http.Response('private_marker', status);
+        });
+        addTearDown(client.close);
+        await expectLater(
+          readFixtureOtp(client, 'ios', (_) async {}),
+          throwsA(
+            isA<TestFailure>().having(
+              (e) => e.message,
+              'message',
+              'Fixture mailbox returned HTTP $status',
+            ),
+          ),
+        );
+        expect(calls, 1);
+      }
+    },
+  );
+
+  test('a stalled mailbox read obeys the total budget', () async {
+    final client = MockClient((_) => Completer<http.Response>().future);
+    addTearDown(client.close);
+    await expectLater(
+      readFixtureOtp(
+        client,
+        'ios',
+        (_) async {},
+        budget: const Duration(milliseconds: 30),
+      ),
+      throwsA(
+        isA<TestFailure>().having(
+          (e) => e.message,
+          'message',
+          'Fixture mailbox deadline reached (timeout)',
+        ),
+      ),
+    );
   });
 
   test(

@@ -28,6 +28,28 @@ export function fixtureOperation(method, target) {
   return method === 'POST' ? countedRoutes.get(target.split('?', 1)[0]) : undefined;
 }
 
+// Return only the fixture status and expected code. Never forward a provider
+// error body, an address, or an authorization header to the test report.
+export async function fixtureMailboxReply(otpStatus, expectedCount, readMail) {
+  if (otpStatus >= 400) return {status:otpStatus};
+  try {
+    const mail = await readMail();
+    if (mail.status === 404) return {status:202};
+    if (!mail.ok) return {status:mail.status};
+    const item = await mail.json();
+    if (item?.count !== expectedCount) return {status:202};
+    return {status:200, code:item.code};
+  } catch (error) {
+    // A dropped connection to the loopback mailbox is safe to poll again.
+    const transient = ['ECONNRESET','ECONNREFUSED','EHOSTUNREACH','EPIPE','ENETUNREACH','ETIMEDOUT',
+      'EAI_AGAIN','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET'];
+    if (error?.name === 'TimeoutError' || transient.includes(error?.cause?.code)) {
+      return {status:202,interrupted:true};
+    }
+    throw new Error('Invalid fixture mailbox response');
+  }
+}
+
 function json(res, code, value) {
   res.writeHead(code, {'Content-Type':'application/json', 'Cache-Control':'no-store'});
   res.end(JSON.stringify(value));
@@ -146,7 +168,9 @@ async function run(config, {database}) {
   let phase = phases[0], lastOtp = Date.now(), blocked = 0, blockedAfterWriter = 0, reconnectAt;
   let committedLedger, timer;
   const observations = [], sessions = {}, servers = [];
-  const androidHttp = {otp:0, otpOk:0, verify:0, verifyOk:0, snapshot:0, snapshotOk:0};
+  const counts = () => ({otp:0, otpOk:0, otpStatus:0, verify:0, verifyOk:0, verifyStatus:0,
+    snapshot:0, snapshotOk:0, snapshotStatus:0, mailboxReads:0, mailboxStatus:0, mailboxInterrupted:0});
+  const deviceHttp = {android:counts(), ios:counts()};
   const phaseTimes = {};
   const mailboxCount = {ios:2,android:3}; // First message was used for setup.
   const {promise, resolve, reject} = Promise.withResolvers();
@@ -174,10 +198,12 @@ async function run(config, {database}) {
           res.writeHead(404).end(); return;
         }
         const operation = fixtureOperation(req.method, req.url);
-        if (device === 'android' && operation) {
-          androidHttp[operation]++;
+        if (operation) {
+          const counters = deviceHttp[device];
+          counters[operation]++;
           res.once('finish', () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) androidHttp[operation+'Ok']++;
+            counters[operation+'Status']=res.statusCode;
+            if (res.statusCode >= 200 && res.statusCode < 300) counters[operation+'Ok']++;
           });
         }
         if (device==='ios' && ['reader-ready','writer-complete'].includes(phase)) {
@@ -225,16 +251,20 @@ async function run(config, {database}) {
         json(res,200,scenario); return;
       }
       if (req.method==='GET' && url.pathname==='/otp') {
-        const mail=await fetch(config.url+'/__test/mail?email='+encodeURIComponent(owner.email),
-          {headers:{'x-test-mailbox-key':config.mailboxKey}});
-        const item=mail.ok ? await mail.json() : null;
-        if (item?.count!==mailboxCount[device]) { json(res,202,{waiting:true}); return; }
-        json(res,200,{code:item.code}); return;
+        const counters = deviceHttp[device];
+        counters.mailboxReads++;
+        const reply = await fixtureMailboxReply(counters.otpStatus, mailboxCount[device], () =>
+          fetch(config.url+'/__test/mail?email='+encodeURIComponent(owner.email),
+            {headers:{'x-test-mailbox-key':config.mailboxKey},signal:AbortSignal.timeout(10000)}));
+        counters.mailboxStatus=reply.status;
+        if (reply.interrupted) counters.mailboxInterrupted++;
+        json(res,reply.status,reply.status===200 ? {code:reply.code} : {waiting:reply.status===202});
+        return;
       }
       if (url.pathname!=='/phase') { res.writeHead(404).end(); return; }
       if (req.method==='GET') {
         json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0,androidStage:android.stage,
-          androidCheckpoint:android.checkpoint,androidHttp});
+          androidCheckpoint:android.checkpoint,androidHttp:deviceHttp.android,iosHttp:deviceHttp.ios});
         return;
       }
       if (req.method!=='POST') { res.writeHead(405).end(); return; }

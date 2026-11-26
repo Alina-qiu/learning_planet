@@ -4,12 +4,14 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-本轮 Windows 通过 882 项 Flutter 测试，核心行覆盖率为 90.85%（6993/7697）。静态分析通过，291 个 Dart 文件通过格式检查。Android 双 Debug 和测速用 x86_64 Release 使用相同的 220 个构建输入，均通过签名检查。完整首页计时和构建模式分别记录在交付页。[Windows 结果](../build/acceptance-20261126/windows-quality.json) · [本轮交付](../build/acceptance-20261126/DELIVERY.md) · [分支最新 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+本轮 Windows 通过 885 项 Flutter 测试，核心行覆盖率为 90.85%（6993/7697）。静态分析通过，291 个 Dart 文件通过格式检查。Android 双 Debug 和测速用 x86_64 Release 使用相同的 220 个构建输入，均通过签名检查。完整首页计时和构建模式分别记录在交付页。[Windows 结果](../build/acceptance-20261126/windows-quality.json) · [本轮交付](../build/acceptance-20261126/DELIVERY.md) · [分支最新 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
 
 | 11 月 26 日调试包 | SHA-256 |
 |---|---|
 | 本机联调 | `bf68a465e96650e4bf48a52f7550f1946fe9bf5cc76c3ae271beb7cf14c815cd` |
 | 普通 | `7c7f89c0677634edf90902f152bcd93c6880ca569fedfca3ca49be79c8a73efc` |
+
+Android 10 模拟器已安装两款 Debug。普通版显示服务配置提示，联调版用邮箱验证码登录后显示孩子、今天的任务和余额。Release 也已完成一次实际中文印刷图识别，孩子校对并保存后，联网刷新仍显示“待家长确认”。[联调版首页](../build/acceptance-20261126/android-local-debug-home.json) · [中文识别与保存](../build/acceptance-20261126/android-release-ocr.json)
 
 需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，当前 SHA-256 为 `5e633b99b9bac2f29578312bbf07fcefc3051c2f712d382de8871bc2e8c09794`。2026-11-26 更新了第 9 节的冷启动首页目标。
 

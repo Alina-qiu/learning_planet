@@ -6,7 +6,7 @@
 
 截至 2026-11-26，**Android 本机联调包已可试用**。没有测试手机时，可在电脑的 Android 模拟器里登录、创建家庭、完成任务和复习错题。iOS 已通过未签名 Debug、Release 编译及 iPhone、iPad 模拟器检查。目标手机和云端服务仍待验收。
 
-Windows 已通过 882 项 Flutter 测试，110 个核心源文件行覆盖率为 90.85%。两款 Android 调试包和用于测速的 x86_64 Release 使用同一份应用源码。下载到本机后可核对以下 SHA-256。[安装与验证](docs/ANDROID_BUILD.md) · [本轮交付记录](build/acceptance-20261126/DELIVERY.md) · [当前分支 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+Windows 已通过 885 项 Flutter 测试，110 个核心源文件行覆盖率为 90.85%。两款 Android 调试包和 x86_64 Release（SHA-256 前缀 `e237998a`）使用同一份应用源码。Android 10 模拟器已完成一次图库中文识别、孩子逐字段校对、保存及服务端刷新。题目保持“待家长确认”。[安装与验证](docs/ANDROID_BUILD.md) · [本轮交付记录](build/acceptance-20261126/DELIVERY.md) · [当前分支 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
 
 | 调试包 | SHA-256 |
 |---|---|

@@ -4,25 +4,45 @@
 
 ## 2026-11-26 已登录家庭的完整首页
 
-**最终 Release 在 Android 10 模拟器上三次均达到 6 秒目标。** 三次强制停止并确认进程消失后，完整可操作首页分别在 2.334、2.409、2.111 秒时已经可见。该 APK 采用 x86_64 AOT 和本机测试签名，包含最终的家庭权限与注销回执修复。Android 和 iPhone 实机仍待测量。[本机验收索引](../build/acceptance-20261126/DELIVERY.md) · [最终包指纹](../build/acceptance-20261126/release-final-package.json)
+**中文 OCR 修复后的 Release 在 Android 10 模拟器上，一次安装后的五次常规冷启动全部在 6 秒内出现完整可操作首页，每轮重装后的三次冷启动有两次达到目标。** 两组均使用相同的 x86_64 AOT APK 和本机测试签名。Android 和 iPhone 实机仍待测量。[本机验收索引](../build/acceptance-20261126/DELIVERY.md) · [本轮 APK 指纹](../build/acceptance-20261126/release-ocrfix-package.json)
+
+### 一次安装后持续使用
+
+测试家庭已有一项已完成任务、一项待开始任务，钱包已确认 25 金币和 20 XP。连续五次均保留安装和家庭数据，强制结束进程后重新启动，核对首页上的已确认余额、当日任务和操作按钮。完整首页观测上界中位数为 **5.630 秒**，最慢为 **5.979 秒**。[服务端任务、钱包与流水](../build/acceptance-20261126/release-completed-task.json)
+
+| 常规使用 | 第 1 次 | 第 2 次 | 第 3 次 | 第 4 次 | 第 5 次 |
+|---|---:|---:|---:|---:|---:|
+| 系统首帧 | 2.229 秒 | 2.289 秒 | 2.226 秒 | 2.098 秒 | 2.153 秒 |
+| 完整首页观测上界 | [5.630 秒](../build/acceptance-20261126/release-H1.json) | [5.694 秒](../build/acceptance-20261126/release-H2.json) | [5.979 秒](../build/acceptance-20261126/release-H3.json) | [3.733 秒](../build/acceptance-20261126/release-H4.json) | [5.216 秒](../build/acceptance-20261126/release-H5.json) |
+
+### 每轮重装并在线暖机后
+
+每轮保留本机账号数据，重新安装同包并在线确认家庭快照，再强制结束进程和启动。完整可操作首页的观测上界依次为 8.022、5.595、5.903 秒。首轮在 7.491 秒时仍未显示完整首页。
 
 | 最终 Release | 系统首帧 | 同轮任务快照 HTTP 200 | 最后一张尚未完整的截图开始 | 第一张完整截图结束 |
 |---|---:|---:|---:|---:|
-| [第 1 次](../build/acceptance-20261126/release-F1.json) | 807 ms | 2,233.84 ms | 1,897.07 ms | 2,334.12 ms |
-| [第 2 次](../build/acceptance-20261126/release-F2.json) | 876 ms | 2,205.47 ms | 1,965.90 ms | 2,408.87 ms |
-| [第 3 次](../build/acceptance-20261126/release-F3.json) | 928 ms | 2,003.60 ms | 1,671.25 ms | 2,110.77 ms |
+| [第 1 次](../build/acceptance-20261126/release-G1.json) | 3,992 ms | 8,452.49 ms | 7,490.82 ms | 8,022.10 ms |
+| [第 2 次](../build/acceptance-20261126/release-G2.json) | 2,180 ms | 5,985.23 ms | 5,055.23 ms | 5,594.90 ms |
+| [第 3 次](../build/acceptance-20261126/release-G3.json) | 2,152 ms | 6,241.62 ms | 5,365.59 ms | 5,903.16 ms |
 
-同包另做了首页操作验证。点按“开始”后，界面显示“暂停”。服务端两项待开始任务中，被点按的一项进入进行中，另一项仍待开始。钱包余额与奖励流水保持原值。[首页操作回执](../build/acceptance-20261126/release-home-action.json)
+三轮首次显示的任务和余额来自该家庭启动前已在线确认的加密快照，各轮新的任务快照 HTTP 200 均出现在第一张完整截图之后。同包另做了首页操作验证，点按“开始”后界面显示“暂停”，对应任务在服务端进入进行中，另一项任务仍待开始。钱包余额与奖励流水保持原值。[本轮首页操作回执](../build/acceptance-20261126/release-home-action-after-ocr.json)
 
-在 Android 10（API 29、x86_64、SwiftShader）模拟器上，从主机发出启动命令开始计时。每个样本先用同一测试账号在线打开家庭并确认任务快照，再强制停止应用，确认进程消失。普通入口恢复凭据并检查账号、家庭和孩子的访问范围。连续两张截图同时显示大厅标题、孩子昵称、已确认余额、当日任务及其操作按钮时，取第一张匹配截图的结束时间作为上界。昵称匹配允许头像加载后发生的位置变化。应用优先展示暖机时服务端已确认、仍可访问的加密快照，并在后台同步。[Profile C 首次观测](../build/acceptance-20261126/profile-C1.json) · [Release 连续采样](../build/acceptance-20261126/release-RC1.json)
+### 完成任务的保存提示
+
+在同一安装包完成一项普通任务后，首页钱包显示 25 金币和 20 XP，服务端分别写入一条奖励流水。此次从主机发出点按命令到首次截到“完成记录已保存本机”用了 1.37 秒。ADB 点按在 0.335 秒前已返回，1.07 秒时仍未看到成功提示。这次采样超过 500 毫秒目标，尚需定位本机保存和界面显示各自占用的时间。[奖励与截图记录](../build/acceptance-20261126/release-completed-task.json)
+
+### 观测方式与构建对照
+
+在 Android 10（API 29、x86_64、SwiftShader）模拟器上，逐次确认进程消失，从主机发出启动命令开始计时。普通入口恢复凭据并检查账号、家庭和孩子的访问范围。连续两张截图同时显示大厅标题、孩子昵称、已确认余额、当日任务及其操作按钮时，取第一张匹配截图的结束时间作为上界。昵称匹配允许头像加载后发生的位置变化。首页可在当轮服务端请求完成前使用此前已经确认、仍可访问的加密快照。[常规冷启动示例](../build/acceptance-20261126/release-H1.json) · [重装后冷启动示例](../build/acceptance-20261126/release-G1.json)
 
 | 构建与环境 | 系统首帧 | 完整首页观测 |
 |---|---:|---|
 | Profile C，启动、家庭权限和任务缓存读取并行优化 | 4.895、4.120、3.944 秒 | 8.816–9.352、6.672–7.211、7.182–7.717 秒。首轮期间主机同时在编译。[第 1 次](../build/acceptance-20261126/profile-C1.json) · [第 2 次](../build/acceptance-20261126/profile-C2.json) · [第 3 次](../build/acceptance-20261126/profile-C3.json) |
 | Profile E，绑定就绪后即开始初始化，加入家庭目录收窄检查 | 6.205、10.500 秒 | 10.863–11.396、14.925–15.458 秒。两轮均与主机大型 Release 编译重叠。[第 1 次](../build/acceptance-20261126/profile-E1.json) · [第 2 次](../build/acceptance-20261126/profile-E2.json) |
 | Release C，相同 Flutter 代码、x86_64 AOT、开启 R8、本机测试签名 | 2.064、2.125 秒 | 连续采样在 4.587–5.126 秒间出现完整首页。第二次在 5.939 秒前首次截图即匹配。六秒定点采样只能给出上界。[构建指纹](../build/acceptance-20261126/release-c-package.json) · [连续采样](../build/acceptance-20261126/release-RC1.json) · [定点采样](../build/acceptance-20261126/release-RC2.json) |
+| 上一修订 Release F，修复中文 OCR 前 | 0.807、0.876、0.928 秒 | 完整首页上界为 2.334、2.409、2.111 秒。[第 1 次](../build/acceptance-20261126/release-F1.json) · [第 2 次](../build/acceptance-20261126/release-F2.json) · [第 3 次](../build/acceptance-20261126/release-F3.json) · [当时的首页操作回执](../build/acceptance-20261126/release-home-action.json) |
 
-三组对照用于定位构建模式和主机负载对结果的影响。最终三次验收使用同一 Release APK，校验的 220 个构建输入涵盖 Flutter 源码、Android 配置及依赖清单。[Flutter 文件指纹](../build/acceptance-20261126/flutter-inputs.json) · [最终构建记录](../build/acceptance-20261126/release-final-package.json)
+上述两组共八次验收使用同一修订版 APK，SHA-256 为 `e237998a4bb147a3a3565f5f2684c27904297a8290b700ad9d9604815f74c780`。已逐文件核对 220 个构建输入，包括 Flutter 源码、Android 配置及依赖清单。[本轮源码核对](../build/acceptance-20261126/package-source-match-ocrfix.json) · [本轮构建记录](../build/acceptance-20261126/release-ocrfix-package.json)
 
 ## 2026-11-24 已登录家庭的首页读取
 

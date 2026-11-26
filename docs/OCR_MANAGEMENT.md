@@ -1,6 +1,8 @@
 # OCR 与错题管理
 
-更新时间：2026-11-06。已接入本机草稿、恢复校对和上传队列；线上迁移、两类指定手机上的原生拍照与识别仍需验收。
+2026-11-26 在 Android 10 模拟器用生产入口验证了经过 R8 压缩的 Release（SHA-256 前缀 `e237998a`）。先从系统图库导入一张自制印刷图，设备识别出三行“学习星球”“语文 数学”和“12345”。孩子逐字段校对，填写参考答案后选择“保存给家长确认”。刷新提交列表后，服务端仍返回“待家长确认”，须由家长确认标准答案才可进入奖励复习。[原生识别与保存记录](../build/acceptance-20261126/android-release-ocr.json) · [提交列表](../build/acceptance-20261126/android-release-ocr-saved.png)
+
+Release 的三项 ML Kit 组件注册通过反射调用无参构造函数。构建规则保留了这三个入口。设备相机拍摄、手写或公式识别表现、iPhone 真机及托管后端仍待验证。[修复前后检查](../build/acceptance-20261126/android-release-ocr-regression.json) · [Android 构建说明](ANDROID_BUILD.md)
 
 按PRD第7.3节补充[图片隐私提示](WORKSHEET_ACCESSIBILITY.md)：拍照/选图、多图入口及上传同意旁提醒检查姓名、学校、班级和人脸。明确原图会一起保存，裁剪和增强只改变处理图；需要先遮挡后重拍或更换已处理的图片。没有新增自动模糊或改变原图保存规则。图片中断恢复及账号范围保护见[中断草稿](OCR_INTERRUPTION.md)，变更图片后的确认重置见[重新校对](OCR_SOURCE_CHANGES.md)。
 

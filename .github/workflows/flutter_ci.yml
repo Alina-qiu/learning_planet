@@ -240,6 +240,16 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
       - name: Build the production entry with Android release shrinking
         run: flutter build apk --release --target-platform android-arm64
+      - name: Verify Chinese OCR component discovery in the release APK
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          for registrar in \
+            com.google.mlkit.common.internal.CommonComponentRegistrar \
+            com.google.mlkit.vision.common.internal.VisionCommonRegistrar \
+            com.google.mlkit.vision.text.internal.TextRegistrar; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" dex code --class "$registrar" "$apk" > "$RUNNER_TEMP/registrar.smali"
+            grep -Fx '.method public constructor <init>()V' "$RUNNER_TEMP/registrar.smali"
+          done
 
   ios-simulator:
     name: ios-simulator (${{ matrix.ios }}, ${{ matrix.family }})

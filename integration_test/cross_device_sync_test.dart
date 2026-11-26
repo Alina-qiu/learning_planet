@@ -113,6 +113,61 @@ Future<void> reportAndroidProgress(
   expect(response.statusCode, 200, reason: 'Reporting Android stage');
 }
 
+/// Poll only the fixture mailbox. A dropped read must not send another email
+/// or verify a code. Keep transport recovery inside the original deadline.
+Future<String> readFixtureOtp(
+  http.Client client,
+  String device,
+  Future<void> Function(Duration) pump, {
+  Duration budget = const Duration(minutes: 3),
+}) async {
+  final watch = Stopwatch()..start();
+  final endpoint = _controlUri(device, '/otp');
+  var last = 'pending';
+  while (watch.elapsed < budget) {
+    final remaining = budget - watch.elapsed;
+    if (remaining <= Duration.zero) break;
+    const perRead = Duration(seconds: 10);
+    http.Response? reply;
+    try {
+      reply = await client
+          .get(endpoint)
+          .timeout(remaining < perRead ? remaining : perRead);
+    } on TimeoutException {
+      last = 'timeout';
+    } on http.ClientException {
+      last = 'transport';
+    } on SocketException {
+      last = 'transport';
+    }
+    if (reply != null) {
+      if (reply.statusCode == 200) {
+        Object? data;
+        try {
+          data = jsonDecode(utf8.decode(reply.bodyBytes));
+        } on FormatException {
+          fail('Invalid fixture mailbox response');
+        }
+        if (data is Map && data['code'] is String) {
+          final code = data['code'] as String;
+          if (RegExp(r'^\d{8}$').hasMatch(code)) return code;
+        }
+        fail('Invalid fixture mailbox response');
+      }
+      if (reply.statusCode != 202) {
+        fail('Fixture mailbox returned HTTP ${reply.statusCode}');
+      }
+      last = 'pending';
+    }
+    final delay = budget - watch.elapsed;
+    if (delay <= Duration.zero) break;
+    await pump(
+      delay < const Duration(seconds: 1) ? delay : const Duration(seconds: 1),
+    );
+  }
+  fail('Fixture mailbox deadline reached ($last)');
+}
+
 class _Control {
   _Control(this.device, this.tester);
   final String device;
@@ -185,7 +240,11 @@ Future<void> _login(
   await tester.ensureVisible(send);
   await tester.tap(send);
   await control.stage(report, 'otp_send_tapped');
-  final otp = await control.wait('/otp');
+  final code = await readFixtureOtp(
+    control.client,
+    control.device,
+    tester.pump,
+  );
   await control.stage(report, 'otp_received');
   final verify = find.widgetWithText(FilledButton, '验证并登录');
   await _until(
@@ -196,8 +255,6 @@ Future<void> _login(
         tester.widget<FilledButton>(verify).onPressed != null,
   );
   await control.stage(report, 'otp_form_ready');
-  final code = otp['code'] as String;
-  if (!RegExp(r'^\d{8}$').hasMatch(code)) fail('Invalid fixture OTP format');
   await tester.enterText(find.byType(EditableText), code);
   await tester.ensureVisible(verify);
   await tester.tap(verify);

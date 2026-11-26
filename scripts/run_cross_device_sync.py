@@ -336,6 +336,20 @@ def driver_failure(path, name, status, phase, report=None):
                  if data.get(key) is True]
         if facts:
             message += ", confirmed " + ", ".join(facts)
+    if name in ("initial iPhone reader", "restored iPhone reader"):
+        data = control_data("ios").get("iosHttp")
+        fields = []
+        for key in ("otp", "otpStatus", "verify", "verifyStatus", "snapshot", "snapshotStatus", "mailboxReads", "mailboxStatus", "mailboxInterrupted"):
+            value = data.get(key) if isinstance(data, dict) else None
+            valid = type(value) is int and (value == 0 or 100 <= value <= 599
+                    if key.endswith("Status") else 0 <= value <= 1000000)
+            fields.append(f"{key}={value if valid else 'unknown'}")
+        message += "; iOS HTTP " + " ".join(fields)
+        # A simulator log can contain email addresses, codes or tokens. Only
+        # carry the fixture's fixed failure category or numeric status forward.
+        match = re.search(r"Fixture mailbox (deadline reached \((?:pending|timeout|transport)\)|returned HTTP [1-5]\d\d)(?![\\w])", log)
+        if match:
+            message += "; mailbox " + match[1]
     stages = [s for s in re.findall(r"^Android driver stage: ([A-Za-z ]+)\r?$", log, re.MULTILINE)
               if s in ANDROID_DRIVER_STAGES]
     if stages:

@@ -9,11 +9,11 @@ Android 支持孩子的本地定时任务提醒和家长的应用内收件箱、
 | [本机联调包](../build/app/outputs/flutter-apk/app-local-debug.apk)，通过 ADB 连接电脑上的服务，可登录和建立家庭 | `com.learningplanet.learning_planet.local` | 215499695 | `bf68a465e96650e4bf48a52f7550f1946fe9bf5cc76c3ae271beb7cf14c815cd` |
 | [普通调试包](../build/app/outputs/flutter-apk/app-debug.apk)，可查看未配置后端提示 | `com.learningplanet.learning_planet` | 215499563 | `7c7f89c0677634edf90902f152bcd93c6880ca569fedfca3ca49be79c8a73efc` |
 
-安装包保存在本机工作区。每个版本的字节数、SHA-256、签名和实际运行环境列在相应交付记录中。[本轮安装包和验收](../build/acceptance-20261126/DELIVERY.md) · [本机试用步骤](LOCAL_DEBUG.md)
+安装包保存在本机工作区。Release 压缩配置修复前后各重建了两款 Debug，分别逐字节核对，同名 APK 完全一致。签名与运行环境列在交付记录中。[本轮安装包和验收](../build/acceptance-20261126/DELIVERY.md) · [本机试用步骤](LOCAL_DEBUG.md)
 
-同一源码通过 Windows 882 项 Flutter 测试，110 个核心文件行覆盖率为 6993/7697（90.85%）。x86_64 Release AOT 包为 60618679 字节，SHA-256 为 `bd519fb89df3b53d2736f3cea51bbf1861808e7a97fbf64d0f9df69679ab7fa3`。优化后的 DEX 保留中文识别器和 Flutter 插件，包内包含 9 项汉字模型、字表及中拉混排识别资源。[Windows 测试](../build/acceptance-20261126/windows-quality.json) · [Release 构建](../build/acceptance-20261126/release-final-package.json) · [中文识别包核对](../build/acceptance-20261126/release-final-ocr-package.json)
+Windows 通过 885 项 Flutter 测试，110 个核心文件行覆盖率为 6993/7697（90.85%）。x86_64 Release AOT 包为 60618679 字节，SHA-256 为 `e237998a4bb147a3a3565f5f2684c27904297a8290b700ad9d9604815f74c780`。两份 Debug 与该 Release 的 220 个构建输入已逐文件核对。普通版已安装并显示配置提示，本机联调版通过真实邮箱验证码登录后显示孩子、任务和余额。[Windows 测试](../build/acceptance-20261126/windows-quality.json) · [Release 构建](../build/acceptance-20261126/release-ocrfix-package.json) · [同源核对](../build/acceptance-20261126/package-source-match-ocrfix.json) · [普通版验证](../build/acceptance-20261126/android-debug-unconfigured.json) · [联调版验证](../build/acceptance-20261126/android-local-debug-home.json)
 
-在 Debug 与 Release 之间切换时，使用 `flutter build apk --release` 让 Flutter 按发布模式重新生成原生插件注册表，剔除开发依赖 `integration_test`。应用打包中文 OCR 模型。R8 保留对中文识别的常规检查，只为插件可选的日文、韩文和天城文选项配置了六条精确规则。当前 Release 使用本机调试证书，仅供本机性能测量。[R8 配置](../android/app/proguard-rules.pro) · [Android 构建配置](../android/app/build.gradle.kts)
+在 Debug 与 Release 之间切换时，使用 `flutter build apk --release` 让 Flutter 按发布模式重新生成原生插件注册表。R8 保留 ML Kit 在应用启动时反射调用的三个注册器构造函数，并仅对未配置的日文、韩文和天城文选项放行六条警告。Android 10 模拟器上，最终 Release 从系统图库识别出“学习星球”“语文 数学”和“12345”。孩子按原图校对并填写参考答案后保存，刷新服务端列表仍显示“待家长确认”。该 Release 使用本机测试签名。[R8 配置](../android/app/proguard-rules.pro) · [包内模型](../build/acceptance-20261126/release-ocrfix-ocr-package.json) · [识别、校对和保存](../build/acceptance-20261126/android-release-ocr.json)
 
 ## 2026-11-24 任务完成提示与首页读取
 

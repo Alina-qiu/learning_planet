@@ -202,6 +202,19 @@ class StartupTests(unittest.TestCase):
             with self.subTest(outcome=outcome):
                 self.assertNotIn("restored reader", self.exercise_stages(android_result=outcome))
 
+    def test_ios_failure_reports_only_bounded_counts_status_and_mailbox_category(self):
+        data = {"iosHttp":{"otp":1,"otpStatus":429,"verify":False,"snapshotStatus":"secret",
+                           "mailboxReads":3,"mailboxStatus":429,"address":"private_marker"}}
+        with tempfile.TemporaryDirectory() as folder, patch.object(runner, "control_data", return_value=data):
+            log = Path(folder)/"driver.log"
+            log.write_text("Private contents: private_marker Fixture mailbox returned HTTP 429",encoding="utf8")
+            reason=runner.driver_failure(log,"initial iPhone reader","exited","initial")
+            self.assertIn("otp=1 otpStatus=429 verify=unknown",reason)
+            self.assertIn("snapshotStatus=unknown mailboxReads=3 mailboxStatus=429",reason)
+            self.assertIn("mailbox returned HTTP 429",reason)
+            self.assertNotIn("private_marker",reason)
+            self.assertNotIn("secret",reason)
+
     def test_failure_snapshot_only_contains_allowlisted_state_and_counts(self):
         data = {"androidCheckpoint":"otp_received", "private":"private_marker",
                 "androidHttp":{"otp":1, "otpOk":1, "verify":True, "verifyOk":-1, "snapshot":"private_marker"}}
