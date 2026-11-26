@@ -214,7 +214,9 @@ class _ChildExportScreenState extends ConsumerState<ChildExportScreen> {
       body: !parent
           ? const Center(child: Text('家长授权已到期，请返回首页验证 PIN'))
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(
+                16,
+              ).add(MediaQuery.paddingOf(context).copyWith(top: 0)),
               children: [
                 Text(
                   widget.nickname,

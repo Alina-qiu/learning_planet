@@ -22,6 +22,7 @@ abstract interface class QuestionImageService {
   Future<Uint8List?> pick(bool camera);
   Future<List<Uint8List>> pickMany();
   Future<List<Uint8List>> recover();
+  Future<void> discardUnclaimedSelection();
   Future<Uint8List> process(
     Uint8List original,
     int turns,
@@ -198,6 +199,14 @@ class DeviceQuestionImageService implements QuestionImageService {
     return _readSelection(
       response.files ?? [if (response.file != null) response.file!],
     );
+  }
+
+  @override
+  Future<void> discardUnclaimedSelection() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // Consume only the native receipt. Never open another scope's files.
+      await _picker.retrieveLostData();
+    }
   }
 
   @override

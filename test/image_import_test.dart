@@ -78,6 +78,31 @@ class ExpiringImportStore extends OfflineStore {
   }
 }
 
+class LostSelectionImages extends BatchImages {
+  List<Uint8List> lost = [];
+  int recoveries = 0, discards = 0;
+  final nativeOpened = Completer<void>();
+  @override
+  Future<List<Uint8List>> pickMany() {
+    if (!nativeOpened.isCompleted) nativeOpened.complete();
+    return super.pickMany();
+  }
+
+  @override
+  Future<List<Uint8List>> recover() async {
+    recoveries++;
+    final images = lost;
+    lost = [];
+    return images;
+  }
+
+  @override
+  Future<void> discardUnclaimedSelection() async {
+    discards++;
+    lost = [];
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   group('native image selection adapter', () {
@@ -195,6 +220,176 @@ void main() {
     tearDown(() async {
       await repo.dispose();
       await store.close();
+    });
+
+    group('Android interrupted native picker', () {
+      late LostSelectionImages images;
+      setUp(() {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        images = LostSelectionImages();
+      });
+      tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      Future<void> pending() async {
+        await store.openImagePicker(
+          'parent',
+          'family',
+          'a',
+          'original-request',
+          childInput: false,
+          recover: false,
+          discardUnclaimed: images.discardUnclaimedSelection,
+        );
+        images.lost = [
+          fixture(),
+          Uint8List.fromList([...fixture(), 31]),
+        ];
+      }
+
+      Future<List<String>> select(
+        String child, {
+        bool recover = true,
+        bool asChild = false,
+        String group = 'family',
+        Future<bool> Function()? replace,
+      }) => repo.importPickerImages(
+        child,
+        group,
+        images,
+        childInput: asChild,
+        recover: recover,
+        checkPage: () {},
+        confirmReplace: replace ?? () async => false,
+      );
+
+      test(
+        'reopened file binds both originals to their initiating account, family, child and input mode',
+        () async {
+          final directory = await Directory.systemTemp.createTemp(
+            'planet-picker-scope-',
+          );
+          final file = File('${directory.path}/offline.sqlite');
+          try {
+            await repo.dispose();
+            await store.close();
+            store = OfflineStore(NativeDatabase(file));
+            connect();
+            await pending();
+            final selected = [...images.lost];
+            await repo.dispose();
+            await store.close();
+            store = OfflineStore(NativeDatabase(file));
+            connect();
+            await expectLater(select('b'), throwsStateError);
+            await expectLater(select('a', asChild: true), throwsStateError);
+            family = 'another-family';
+            await expectLater(
+              select('a', group: 'another-family'),
+              throwsStateError,
+            );
+            owner = 'another-account';
+            await expectLater(
+              select('b', asChild: true, group: 'another-family'),
+              throwsStateError,
+            );
+            expect(images.recoveries, 0);
+            expect(await store.imageDrafts(owner!), isEmpty);
+            owner = 'parent';
+            family = 'family';
+            final ids = await select('a');
+            expect(ids.toSet(), hasLength(2));
+            for (var i = 0; i < ids.length; i++) {
+              final row = (await repo.draft(ids[i], 'family'));
+              expect(row['child_id'], 'a');
+              expect(row['original'], selected[i]);
+              expect(row['metadata']['import_index'], i + 1);
+              expect(row['metadata']['consent'], false);
+            }
+            await expectLater(select('a'), throwsStateError);
+            expect(images.recoveries, 1);
+            expect(await store.imageDrafts('parent'), hasLength(2));
+          } finally {
+            await repo.dispose();
+            await store.close();
+            store = OfflineStore(NativeDatabase.memory());
+            connect();
+            await directory.delete(recursive: true);
+          }
+        },
+      );
+
+      test(
+        'legacy results cannot be recovered and are discarded before a fresh selection',
+        () async {
+          images.lost = [fixture(), fixture()];
+          await expectLater(select('b', asChild: true), throwsStateError);
+          expect(images.recoveries, 0);
+          expect(images.lost, hasLength(2));
+          images.files = [fixture()];
+          expect(
+            await select('b', asChild: true, recover: false),
+            hasLength(1),
+          );
+          expect(images.discards, 1);
+          expect(images.lost, isEmpty);
+        },
+      );
+
+      test(
+        'explicit replacement drains the previous receipt and protects the new request against stale completion',
+        () async {
+          await pending();
+          owner = 'other';
+          family = null;
+          expect(await select('b', asChild: true, recover: false), isEmpty);
+          expect(images.lost, hasLength(2));
+          expect(images.discards, 1);
+          images.pending = Completer<List<Uint8List>>();
+          final newSelection = repo.importPickerImages(
+            'b',
+            'family',
+            images,
+            childInput: true,
+            recover: false,
+            confirmReplace: () async => true,
+            checkPage: () {},
+          );
+          await images.nativeOpened.future;
+          expect(images.lost, isEmpty);
+          owner = 'parent';
+          family = 'family';
+          await expectLater(select('a'), throwsStateError);
+          await store.finishImagePicker('parent', 'original-request');
+          expect(await store.read('other', 'native-image-picker'), isNotNull);
+          owner = 'other';
+          family = null;
+          images.pending!.complete([fixture()]);
+          expect(await newSelection, hasLength(1));
+          expect(await store.imageDrafts('parent'), isEmpty);
+          expect(await store.imageDrafts('other', childId: 'b'), hasLength(1));
+        },
+      );
+
+      test(
+        'deletion releases the old scope without requiring the removed account',
+        () async {
+          await pending();
+          await store.removeAccountData('parent', 'job');
+          owner = 'other';
+          family = null;
+          images.files = [fixture()];
+          final ids = await select(
+            'b',
+            asChild: true,
+            recover: false,
+            replace: () async =>
+                throw StateError('deleted scope cannot be required'),
+          );
+          expect(ids, hasLength(1));
+          expect(images.lost, isEmpty);
+          expect(images.recoveries, 0);
+        },
+      );
     });
 
     test(
@@ -411,6 +606,58 @@ void main() {
     );
 
     testWidgets(
+      'draft list recovery leaves the sibling receipt untouched and replacement requires a separate decision',
+      (tester) async {
+        await tester.runAsync(() async {
+          final images = LostSelectionImages();
+          await store.openImagePicker(
+            'parent',
+            'family',
+            'sibling',
+            'sibling-request',
+            childInput: false,
+            recover: false,
+            discardUnclaimed: () async {},
+          );
+          images.lost = [fixture(), fixture()];
+          await mount(tester, images);
+          Future<void> requestReplacement() async {
+            await tester.tap(find.text('多图导入（每次最多10张）'));
+            final dialog = find.text('放弃本机上次未恢复的选图？');
+            // The draft screen displays an indeterminate progress bar while the
+            // native operation is waiting for this modal to resolve.
+            for (var i = 0; i < 50 && dialog.evaluate().isEmpty; i++) {
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+              await tester.pump(const Duration(milliseconds: 20));
+            }
+            await tester.pump(const Duration(milliseconds: 250));
+            expect(dialog, findsOneWidget);
+          }
+
+          await tester.tap(find.text('恢复中断的图片选择（Android）'));
+          await tester.pumpAndSettle();
+          expect(images.recoveries, 0);
+          expect(await store.imageDrafts('parent', childId: 'child'), isEmpty);
+          await requestReplacement();
+          await tester.tap(find.text('保留上次选择'));
+          await tester.pumpAndSettle();
+          expect(images.lost, hasLength(2));
+          expect(images.discards, 0);
+          await requestReplacement();
+          await tester.tap(find.text('放弃并重新选图'));
+          await tester.pumpAndSettle();
+          expect(images.recoveries, 0);
+          expect(images.discards, 1);
+          expect(
+            await store.imageDrafts('parent', childId: 'child'),
+            hasLength(2),
+          );
+          await tester.pumpWidget(const SizedBox());
+        });
+      },
+    );
+
+    testWidgets(
       'a delayed native selection is rejected after the page loses parent authorization',
       (tester) async {
         await tester.runAsync(() async {
@@ -508,6 +755,15 @@ void main() {
           addTearDown(tester.view.resetPhysicalSize);
           addTearDown(tester.view.resetDevicePixelRatio);
           addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          await store.openImagePicker(
+            'parent',
+            'family',
+            'child',
+            'interrupted',
+            childInput: false,
+            recover: false,
+            discardUnclaimed: () async {},
+          );
           await mount(tester, BatchImages());
           final recover = find.text('恢复中断的图片选择（Android）');
           await tester.scrollUntilVisible(recover, 200);

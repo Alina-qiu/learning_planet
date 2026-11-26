@@ -393,7 +393,8 @@ class OfflineStore extends GeneratedDatabase {
       null;
 
   String? _cacheChild(String key, Map<String, dynamic> data) {
-    if (key.startsWith('creation:') ||
+    if (key == 'native-image-picker' ||
+        key.startsWith('creation:') ||
         key.startsWith('ai-request:') ||
         key.startsWith('economy-command:') ||
         key.startsWith('economy-view:') ||

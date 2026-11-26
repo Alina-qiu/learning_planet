@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/offline/network_failure.dart';
@@ -11,6 +13,8 @@ import 'question_media_repository.dart';
 
 /// Images and approved upload payloads survive restarts; PINs never enter SQLite.
 class OfflineQuestionMediaRepository implements QuestionMediaRepository {
+  // The native picker is shared even when an account switch replaces this repository.
+  static bool _pickerBusy = false;
   OfflineQuestionMediaRepository({
     required this.store,
     required this.live,
@@ -106,6 +110,120 @@ class OfflineQuestionMediaRepository implements QuestionMediaRepository {
     return row;
   }
 
+  Future<T> _withPicker<T>(
+    String child,
+    String family,
+    QuestionImageService service, {
+    required bool childInput,
+    required bool recover,
+    required T cancelled,
+    required Future<bool> Function() confirmReplace,
+    required void Function() checkPage,
+    required Future<T> Function(String? requestId) action,
+  }) async {
+    final owner = _owner(), generation = store.privacyGeneration;
+    void guard() {
+      _check(owner, family, childInput: childInput, privacy: generation);
+      checkPage();
+    }
+
+    guard();
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return action(null);
+    }
+    if (_pickerBusy) throw StateError('已有图片选择正在处理，请稍后再试');
+    _pickerBusy = true;
+    String? token;
+    var release = !recover;
+    Future<String> open([String? replace]) => store.openImagePicker(
+      owner,
+      family,
+      child,
+      const Uuid().v4(),
+      childInput: childInput,
+      recover: recover,
+      replaceRequest: replace,
+      discardUnclaimed: () async {
+        guard();
+        await service.discardUnclaimedSelection();
+        guard();
+      },
+    );
+    try {
+      try {
+        token = await open();
+      } on PendingImageSelection catch (pending) {
+        if (!await confirmReplace()) return cancelled;
+        guard();
+        token = await open(pending.requestId);
+      }
+      guard();
+      final result = await action(token);
+      release = true;
+      guard();
+      return result;
+    } finally {
+      try {
+        if (release && token != null) {
+          await store.finishImagePicker(owner, token);
+        }
+      } finally {
+        _pickerBusy = false;
+      }
+    }
+  }
+
+  Future<Uint8List?> pickImage(
+    String child,
+    String family,
+    QuestionImageService service, {
+    required bool childInput,
+    required bool camera,
+    required Future<bool> Function() confirmReplace,
+    required void Function() checkPage,
+  }) => _withPicker(
+    child,
+    family,
+    service,
+    childInput: childInput,
+    recover: false,
+    cancelled: null,
+    confirmReplace: confirmReplace,
+    checkPage: checkPage,
+    action: (_) => service.pick(camera),
+  );
+
+  Future<List<String>> importPickerImages(
+    String child,
+    String family,
+    QuestionImageService service, {
+    required bool childInput,
+    required bool recover,
+    required void Function() checkPage,
+    required Future<bool> Function() confirmReplace,
+  }) => _withPicker(
+    child,
+    family,
+    service,
+    childInput: childInput,
+    recover: recover,
+    cancelled: const <String>[],
+    confirmReplace: confirmReplace,
+    checkPage: checkPage,
+    action: (token) => importImages(
+      child,
+      family,
+      () async {
+        checkPage();
+        final images = await (recover ? service.recover() : service.pickMany());
+        checkPage();
+        return images;
+      },
+      childInput: childInput,
+      pickerRequest: token,
+    ),
+  );
+
   /// Capture scope before opening the native picker. A delayed selection must
   /// not be imported into a different login or after privacy cleanup.
   Future<List<String>> importImages(
@@ -113,6 +231,7 @@ class OfflineQuestionMediaRepository implements QuestionMediaRepository {
     String family,
     Future<List<Uint8List>> Function() select, {
     bool childInput = false,
+    String? pickerRequest,
   }) async {
     final owner = _owner(), generation = store.privacyGeneration;
     void guard() {
@@ -161,6 +280,9 @@ class OfflineQuestionMediaRepository implements QuestionMediaRepository {
           // Also checked inside the transaction so an expired PIN, deleted child
           // or quota failure cannot leave a silently imported partial batch.
           guard();
+        }
+        if (pickerRequest != null) {
+          await store.finishImagePicker(owner, pickerRequest);
         }
       }),
     );

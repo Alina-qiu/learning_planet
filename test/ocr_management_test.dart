@@ -18,6 +18,8 @@ Uint8List fixture() =>
     Uint8List.fromList(image.encodeJpg(image.Image(width: 60, height: 40)));
 
 class FakeImages implements QuestionImageService {
+  @override
+  Future<void> discardUnclaimedSelection() async {}
   int picks = 0, recognitions = 0;
   bool fail = false;
   bool recoverImage = false;
@@ -344,7 +346,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
-  testWidgets('recovering another image resets enhancement and consent', (
+  testWidgets('selecting another image resets enhancement and consent', (
     tester,
   ) async {
     final images = FakeImages()..recoverImage = true;
@@ -360,11 +362,11 @@ void main() {
     await tester.tap(find.text(consent));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('恢复中断的图片选择（Android）'),
+      find.text('相册'),
       -200,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('恢复中断的图片选择（Android）'));
+    await tester.tap(find.text('相册'));
     await tester.pumpAndSettle();
     await see(tester, enhancement);
     expect(

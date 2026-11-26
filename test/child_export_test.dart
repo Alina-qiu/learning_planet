@@ -409,6 +409,23 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('save ZIP remains reachable above the system navigation bar', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 365);
+    tester.view.padding = const FakeViewPadding(bottom: 60);
+    addTearDown(tester.view.reset);
+    await mount(tester, FakeExport(), FakeExportOutput());
+    await tester.drag(find.byType(ListView), const Offset(0, -720));
+    await tester.pumpAndSettle();
+    final button = find.byWidgetPredicate((widget) => widget is FilledButton);
+    expect(tester.getRect(button).bottom, lessThanOrEqualTo(305));
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(find.text('确认导出'), findsOneWidget);
+  });
+
   testWidgets('child mode never requests export data', (tester) async {
     final repository = FakeExport();
     await mount(tester, repository, FakeExportOutput(), parent: false);

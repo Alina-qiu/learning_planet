@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../ai/data/ai_repository.dart';
 import '../../ai/presentation/ai_settings_screen.dart';
+import '../../auth_family/application/auth_providers.dart';
 import '../../auth_family/application/family_providers.dart';
 import '../data/ai_weekly_report_repository.dart';
 import '../domain/learning_report.dart';
@@ -15,7 +17,7 @@ const weeklyEvidenceLabels = {
   'coins': '金币产消',
 };
 
-class AiWeeklyReportScreen extends ConsumerStatefulWidget {
+class AiWeeklyReportScreen extends StatelessWidget {
   const AiWeeklyReportScreen({
     required this.familyId,
     required this.childId,
@@ -24,19 +26,44 @@ class AiWeeklyReportScreen extends ConsumerStatefulWidget {
   });
   final String familyId, childId, endDate;
   @override
-  ConsumerState<AiWeeklyReportScreen> createState() =>
-      _AiWeeklyReportScreenState();
+  Widget build(BuildContext context) => _WeeklyReport(
+    key: ValueKey((familyId, childId, endDate)),
+    familyId: familyId,
+    childId: childId,
+    endDate: endDate,
+  );
 }
 
-class _AiWeeklyReportScreenState extends ConsumerState<AiWeeklyReportScreen> {
+class _WeeklyReport extends ConsumerStatefulWidget {
+  const _WeeklyReport({
+    required this.familyId,
+    required this.childId,
+    required this.endDate,
+    super.key,
+  });
+  final String familyId, childId, endDate;
+  @override
+  ConsumerState<_WeeklyReport> createState() => _WeeklyReportState();
+}
+
+class _WeeklyReportState extends ConsumerState<_WeeklyReport> {
   Map<String, dynamic>? _settings, _source, _draft, _receipt;
   final Set<String> _feedback = {};
   bool _busy = false, _consent = false;
+  bool _closed = false;
+  late final String? _owner;
+  late final int _revision;
+  ValueNotifier<Map?>? _openEvidence;
   String? _error;
   AiRepository get _ai => ref.read(aiRepositoryProvider);
   AiWeeklyReportRepository get _reports =>
       ref.read(aiWeeklyReportRepositoryProvider);
-  bool get _allowed => ref.read(activeParentFamilyProvider) == widget.familyId;
+  bool get _allowed =>
+      mounted &&
+      !_closed &&
+      ref.read(activeParentFamilyProvider) == widget.familyId &&
+      ref.read(authAccountIdProvider) == _owner &&
+      ref.read(parentAuthorizationRevisionProvider) == _revision;
   bool get _same =>
       _draft == null ||
       ((_draft!['input'] as Map)['kind'] == 'weekly_report' &&
@@ -54,8 +81,51 @@ class _AiWeeklyReportScreenState extends ConsumerState<AiWeeklyReportScreen> {
   @override
   void initState() {
     super.initState();
+    _owner = ref.read(authAccountIdProvider);
+    _revision = ref.read(parentAuthorizationRevisionProvider);
     Future.microtask(_load);
   }
+
+  @override
+  void dispose() {
+    if (_openEvidence != null) {
+      // The detail route can outlive its report when the selected child changes.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openEvidence?.value = null;
+      });
+    }
+    super.dispose();
+  }
+
+  void _closeAccess() {
+    if (!mounted || _closed) return;
+    setState(() {
+      _closed = true;
+      _settings = _source = _draft = _receipt = null;
+      _consent = false;
+      _feedback.clear();
+      _error = null;
+    });
+    _openEvidence?.value = null;
+  }
+
+  bool _denied(Object error) =>
+      error is PostgrestException &&
+          const {
+            '42501',
+            '401',
+            '403',
+            'PGRST301',
+            'PGRST303',
+          }.contains(error.code) ||
+      error is AuthSessionMissingException ||
+      error is AuthException &&
+          const {'401', '403'}.contains(error.statusCode) ||
+      error is FunctionException &&
+          (error.status == 401 ||
+              error.status == 403 &&
+                  error.details is Map &&
+                  error.details['error'] == 'AI_ACCESS_DENIED');
 
   Future<void> _run(Future<void> Function() action) async {
     if (_busy || !_allowed) return;
@@ -65,8 +135,10 @@ class _AiWeeklyReportScreenState extends ConsumerState<AiWeeklyReportScreen> {
     });
     try {
       await action();
-    } catch (_) {
-      if (mounted && _allowed) {
+    } catch (error) {
+      if (_allowed && _denied(error)) {
+        _closeAccess();
+      } else if (mounted && _allowed) {
         setState(
           () => _error = '未能确认结果。请先核对原请求；若数据已变化，可结束本次请求后重新查看统计。不会自动重新付费生成。',
         );
@@ -81,27 +153,52 @@ class _AiWeeklyReportScreenState extends ConsumerState<AiWeeklyReportScreen> {
 
   Future<void> _load() => _run(() async {
     final source = await _reports.context(widget.childId, widget.endDate);
-    if (source['family_id'] != widget.familyId) throw StateError('报告家庭不匹配');
-    if (!mounted || !_allowed) return;
+    if (!_allowed) return;
+    if (source['family_id'] != widget.familyId) {
+      _closeAccess();
+      return;
+    }
     final settings = await _ai.context(widget.childId);
+    if (!_allowed) return;
     var draft = await _ai.pending(widget.childId);
+    if (!_allowed) return;
     if (draft != null && draft['generation'] != settings['generation']) {
+      setState(() {
+        _draft = _receipt = _source = null;
+        _feedback.clear();
+      });
       await _ai.dismiss(widget.childId, draft['request_id'] as String);
       draft = null;
     }
     if (!mounted || !_allowed) return;
     setState(() {
       _settings = settings;
+      if (draft == null || _draft?['request_id'] != draft['request_id']) {
+        _receipt = null;
+        _feedback.clear();
+      }
       _draft = draft;
-      _receipt = null;
       _consent = false;
       _source = source;
     });
     if (draft != null && _same) await _inspect();
   });
   Future<void> _inspect() async {
-    final receipt = await _ai.resolve(widget.childId, _request, 'inspect');
-    if (mounted && _allowed) setState(() => _receipt = receipt);
+    if (!_allowed) return;
+    final Map<String, dynamic> receipt;
+    try {
+      receipt = await _ai.resolve(widget.childId, _request, 'inspect');
+    } catch (error) {
+      if (!_allowed) return;
+      if (!_denied(error)) rethrow;
+      _closeAccess();
+      return;
+    }
+    if (!_allowed) return;
+    setState(() => _receipt = receipt);
+    _openEvidence?.value = _ready
+        ? (_result!['evidence'] as Map)['snapshot'] as Map
+        : null;
   }
 
   Future<void> _generate() => _run(() async {
@@ -167,19 +264,26 @@ class _AiWeeklyReportScreenState extends ConsumerState<AiWeeklyReportScreen> {
   Future<void> _viewEvidence(List ids) => _run(() async {
     await _inspect();
     if (!mounted || !_allowed || !_ready) return;
-    final snapshot = Map<String, dynamic>.from(
+    final evidence = ValueNotifier<Map?>(
       (_result!['evidence'] as Map)['snapshot'] as Map,
     );
-    await Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => _EvidenceScreen(
-          familyId: widget.familyId,
-          snapshot: snapshot,
-          ids: ids.cast<String>(),
+    _openEvidence = evidence;
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => _EvidenceScreen(
+            evidence: evidence,
+            ids: ids.cast<String>(),
+            allowed: () => _allowed,
+            refresh: _inspect,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _openEvidence = null;
+      evidence.dispose();
+    }
   });
   Future<void> _sendFeedback(String key) => _run(() async {
     await _inspect();
@@ -218,7 +322,14 @@ class _AiWeeklyReportScreenState extends ConsumerState<AiWeeklyReportScreen> {
   );
   @override
   Widget build(BuildContext context) {
-    final allowed = ref.watch(activeParentFamilyProvider) == widget.familyId;
+    ref.listen(activeParentFamilyProvider, (_, family) {
+      if (family != widget.familyId) _closeAccess();
+    });
+    ref.listen(authAccountIdProvider, (_, owner) {
+      if (owner != _owner) _closeAccess();
+    });
+    ref.listen(parentAuthorizationRevisionProvider, (_, _) => _closeAccess());
+    final allowed = _allowed;
     final output = _ready ? _result!['structured_output'] as Map : null;
     return Scaffold(
       appBar: AppBar(title: const Text('AI 学习周报')),
@@ -344,24 +455,82 @@ class _AiWeeklyReportScreenState extends ConsumerState<AiWeeklyReportScreen> {
   }
 }
 
-class _EvidenceScreen extends ConsumerWidget {
+class _EvidenceScreen extends StatefulWidget {
   const _EvidenceScreen({
-    required this.familyId,
-    required this.snapshot,
+    required this.evidence,
     required this.ids,
+    required this.allowed,
+    required this.refresh,
   });
-  final String familyId;
-  final Map snapshot;
+  final ValueNotifier<Map?> evidence;
   final List<String> ids;
+  final bool Function() allowed;
+  final Future<void> Function() refresh;
   @override
-  Widget build(BuildContext context, WidgetRef ref) => Scaffold(
-    appBar: AppBar(title: const Text('这条结论的数据依据')),
-    body: ref.watch(activeParentFamilyProvider) != familyId
-        ? const Center(child: Text('家长授权已到期，请返回后重新验证'))
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: _EvidenceBody(snapshot: snapshot, ids: ids),
-          ),
+  State<_EvidenceScreen> createState() => _EvidenceScreenState();
+}
+
+class _EvidenceScreenState extends State<_EvidenceScreen>
+    with WidgetsBindingObserver {
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    if (_checking || !widget.allowed() || widget.evidence.value == null) return;
+    setState(() => _checking = true);
+    try {
+      await widget.refresh();
+    } catch (_) {
+      if (mounted && widget.allowed()) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('未能核对这份依据，请稍后重试。')));
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<Map?>(
+    valueListenable: widget.evidence,
+    builder: (context, snapshot, _) => Scaffold(
+      appBar: AppBar(
+        title: const Text('这条结论的数据依据'),
+        actions: [
+          if (snapshot != null && widget.allowed())
+            IconButton(
+              tooltip: '核对依据',
+              onPressed: _checking ? null : _refresh,
+              icon: const Icon(Icons.refresh),
+            ),
+        ],
+      ),
+      body: !widget.allowed()
+          ? const Center(child: Text('家长授权已到期，请返回后重新验证'))
+          : snapshot == null
+          ? const Center(child: Text('这份周报的依据已失效，请返回周报。'))
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: _EvidenceBody(snapshot: snapshot, ids: widget.ids),
+            ),
+    ),
   );
 }
 

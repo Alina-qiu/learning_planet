@@ -11,6 +11,7 @@ import 'package:learning_planet/app/theme.dart';
 import 'package:learning_planet/core/offline/offline_store.dart';
 import 'package:learning_planet/features/ai/data/ai_repository.dart';
 import 'package:learning_planet/features/ai/presentation/ai_analysis_screen.dart';
+import 'package:learning_planet/features/auth_family/application/auth_providers.dart';
 import 'package:learning_planet/features/auth_family/application/family_providers.dart';
 import 'package:learning_planet/features/reports/data/ai_weekly_report_repository.dart';
 import 'package:learning_planet/features/reports/data/report_repository.dart';
@@ -71,12 +72,18 @@ Map<String, dynamic> weeklyResult({List<String> flags = const []}) => {
 };
 
 class WeeklyAi extends FakeAi {
+  Object? inspectionError;
+  Completer<void>? inspectionHold;
   @override
   Future<Map<String, dynamic>> resolve(
     String childId,
     String id,
     String operation,
   ) async {
+    if (operation == 'inspect') {
+      await inspectionHold?.future;
+      if (inspectionError != null) throw inspectionError!;
+    }
     try {
       final receipt = await super.resolve(childId, id, operation);
       return {
@@ -111,6 +118,7 @@ class WeeklyReports implements AiWeeklyReportRepository {
 }
 
 final weeklyAuthorization = StateProvider<String?>((ref) => 'family');
+final weeklyAccount = StateProvider<String?>((ref) => 'parent');
 const weeklyScreen = AiWeeklyReportScreen(
   familyId: 'family',
   childId: 'child',
@@ -130,6 +138,7 @@ void main() {
           aiRepositoryProvider.overrideWithValue(ai),
           aiWeeklyReportRepositoryProvider.overrideWithValue(reports),
           reportRepositoryProvider.overrideWithValue(FakeReports()),
+          authAccountIdProvider.overrideWith((ref) => ref.watch(weeklyAccount)),
           activeParentFamilyProvider.overrideWith(
             (ref) => ref.watch(weeklyAuthorization),
           ),
@@ -270,6 +279,123 @@ void main() {
         find.byKey(const ValueKey('feedback:recommendation')),
         findsNothing,
       );
+    },
+  );
+  testWidgets(
+    'an interrupted inspection preserves the report for retry, while server denial clears the original request and all facts',
+    (tester) async {
+      final ai = WeeklyAi();
+      await ready(ai);
+      await mount(tester, ai, WeeklyReports());
+      ai.inspectionError = TimeoutException('inspect');
+      await tap(tester, '核对原请求');
+      await reveal(tester, find.text('和孩子一起安排一小段复习。'));
+      ai.inspectionError = null;
+      await tap(tester, '核对原请求');
+      await reveal(tester, find.text('和孩子一起安排一小段复习。'));
+      ai.inspectionError = const PostgrestException(
+        code: '42501',
+        message: 'Parent authorization required or expired',
+      );
+      await tap(tester, '核对原请求');
+      expect(find.text('家长授权已到期，请返回首页重新验证 PIN'), findsOneWidget);
+      expect(find.text('和孩子一起安排一小段复习。'), findsNothing);
+      expect(find.text('查看本次发送的汇总数据'), findsNothing);
+      expect(find.text('核对原请求'), findsNothing);
+      expect(ai.submits, 0);
+    },
+  );
+  testWidgets(
+    'open evidence survives transient network errors and closes with the report on a rejected session',
+    (tester) async {
+      final ai = WeeklyAi();
+      await ready(ai);
+      await mount(tester, ai, WeeklyReports());
+      final evidence = find.byKey(const ValueKey('evidence:recommendation'));
+      await reveal(tester, evidence);
+      await tester.tap(evidence);
+      await tester.pumpAndSettle();
+      ai.inspectionError = TimeoutException('inspect');
+      await tester.tap(find.byTooltip('核对依据'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('到期未掌握题 1 道'), findsOneWidget);
+      ai.inspectionError = const PostgrestException(
+        code: 'PGRST301',
+        message: 'JWT expired',
+      );
+      await tester.tap(find.byTooltip('核对依据'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('到期未掌握题 1 道'), findsNothing);
+      expect(find.text('家长授权已到期，请返回后重新验证'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('家长授权已到期，请返回首页重新验证 PIN'), findsOneWidget);
+      expect(ai.submits, 0);
+    },
+  );
+  for (final scope in ['PIN', 'account']) {
+    testWidgets(
+      'a late inspection cannot restore a previous $scope scope after re-entry',
+      (tester) async {
+        final ai = WeeklyAi();
+        await ready(ai);
+        final container = await mount(tester, ai, WeeklyReports());
+        final button = find.text('核对原请求');
+        await reveal(tester, button);
+        ai.inspectionHold = Completer<void>();
+        await tester.tap(button);
+        await tester.pump();
+        if (scope == 'PIN') {
+          container.read(weeklyAuthorization.notifier).state = null;
+          await tester.pump();
+          container.read(weeklyAuthorization.notifier).state = 'family';
+        } else {
+          container.read(weeklyAccount.notifier).state = 'other-parent';
+          await tester.pump();
+          container.read(weeklyAccount.notifier).state = 'parent';
+        }
+        ai.inspectionHold!.complete();
+        await tester.pumpAndSettle();
+        expect(find.text('家长授权已到期，请返回首页重新验证 PIN'), findsOneWidget);
+        expect(find.text('查看本次发送的汇总数据'), findsNothing);
+        expect(ai.submits, 0);
+      },
+    );
+  }
+  testWidgets(
+    'changing the selected child closes the previous child’s open evidence',
+    (tester) async {
+      final child = ValueNotifier('child');
+      addTearDown(child.dispose);
+      final ai = WeeklyAi();
+      await ready(ai);
+      await mount(
+        tester,
+        ai,
+        WeeklyReports(),
+        home: ValueListenableBuilder<String>(
+          valueListenable: child,
+          builder: (_, id, _) => AiWeeklyReportScreen(
+            familyId: 'family',
+            childId: id,
+            endDate: '2026-03-08',
+          ),
+        ),
+      );
+      final button = find.byKey(const ValueKey('evidence:recommendation'));
+      await reveal(tester, button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('到期未掌握题 1 道'), findsOneWidget);
+      ai.draft = null;
+      child.value = 'second-child';
+      await tester.pumpAndSettle();
+      expect(find.textContaining('到期未掌握题 1 道'), findsNothing);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('查看本次发送的汇总数据'), findsOneWidget);
+      expect(find.text('和孩子一起安排一小段复习。'), findsNothing);
+      expect(ai.submits, 0);
     },
   );
   testWidgets(

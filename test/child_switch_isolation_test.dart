@@ -99,7 +99,66 @@ class _Questions extends FakeReviewRepository {
   }
 }
 
+class _DelayedExit extends FakeFamilyRepository {
+  final revoke = Completer<void>();
+
+  @override
+  Future<void> revokeParentAuthorization() => revoke.future;
+}
+
 void main() {
+  testWidgets(
+    'opening the notebook while a child switch is pending cannot leave the previous notebook on top',
+    (tester) async {
+      tester.view.physicalSize = const Size(480, 1140);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final family = _DelayedExit()
+        ..families.add(
+          const Family(
+            id: 'family',
+            name: '同一家庭',
+            timezone: 'Asia/Shanghai',
+            children: _children,
+          ),
+        );
+      final responses = _Responses();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authRepositoryProvider.overrideWithValue(
+              FakeAuthRepository(const AuthSession(userId: 'parent')),
+            ),
+            familyRepositoryProvider.overrideWithValue(family),
+            taskRepositoryProvider.overrideWithValue(_Tasks(responses)),
+            reviewRepositoryProvider.overrideWithValue(_Questions(responses)),
+          ],
+          child: const MaterialApp(home: AuthGate()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final notebook = find.text('错题本与拼音复习');
+      final oldNotebookPosition = tester.getCenter(notebook);
+      await tester.tap(find.byTooltip('切换孩子'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('月月'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('正在切换孩子…'), findsOneWidget);
+      await tester.tapAt(oldNotebookPosition);
+      await tester.pump();
+      family.revoke.completeError(StateError('offline'));
+      await tester.pumpAndSettle();
+      expect(find.text('错题 a'), findsNothing);
+      expect(find.text('月月'), findsOneWidget);
+      expect(find.textContaining('已退出家长模式'), findsNothing);
+      await tester.tap(notebook);
+      await tester.pumpAndSettle();
+      expect(find.text('错题 b'), findsOneWidget);
+      expect(find.text('错题 a'), findsNothing);
+    },
+  );
   testWidgets(
     'switching the selected child isolates tasks, wallet and notebook even when the previous child replies late',
     (tester) async {

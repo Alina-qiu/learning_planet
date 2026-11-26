@@ -1,8 +1,12 @@
 # Android 调试构建
 
-## 2026-11-27 每日复习刷新版
+## 2026-11-27 双孩子共用设备
 
-本机联调包 `app-local-debug.apk` 通过 ADB 转发连接电脑上的临时服务，可以用邮箱验证码登录家庭。普通调试包 `app-debug.apk` 启动后显示未配置服务的提示。两个包分别安装，有独立的应用 ID 和本机数据。当前产物的字节数、SHA-256 及所在目录由本机交付文档统一记录。[本轮安装包和校验](../build/review-refresh-20261126/DELIVERY.md) · [启动服务和安装](LOCAL_DEBUG.md)
+本机联调版用于登录并体验完整流程，普通版用于检查服务配置。两份 APK 的摘要、模拟器上两个孩子的离线打卡结果及已登录家庭冷启动时间，见[本机交付记录](../build/child-isolation-20261127/DELIVERY.md)。[安装与启动本机服务](LOCAL_DEBUG.md)
+
+## 每日复习刷新版（历史记录）
+
+本机联调包 `app-local-debug.apk` 通过 ADB 转发连接电脑上的临时服务，可以用邮箱验证码登录家庭。普通调试包 `app-debug.apk` 启动后显示未配置服务的提示。两个包分别安装，有独立的应用 ID 和本机数据。该版产物的字节数、SHA-256 及所在目录由当轮交付文档记录。[本轮安装包和校验](../build/review-refresh-20261126/DELIVERY.md) · [启动服务和安装](LOCAL_DEBUG.md)
 
 当日自动复习在首次开始前刷新到期题、题面、标准答案和预计奖励，开始后固定本次题单。孩子离线开始后，如服务端题目版本已变化，应用保留原作答供核对，孩子可采用更新后的题目重新开始。Windows 通过 902 项 Flutter 测试，110 个核心文件的行覆盖率为 约 90.9%。数据库通过 419 项全库与 20 项历史升级检查。[复习规则](REVIEW_AUTO_COMPLETION.md) · [本机与接口结果](../build/review-refresh-20261126/local-quality.json) · [数据库结果](../build/review-refresh-20261126/review-refresh-database.json)
 

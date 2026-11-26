@@ -2,7 +2,72 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'offline_store.dart';
 
+class PendingImageSelection implements Exception {
+  const PendingImageSelection(this.requestId);
+  final String requestId;
+}
+
 extension OfflineMediaStore on OfflineStore {
+  static const _pickerKey = 'native-image-picker';
+
+  /// Android has one lost-result slot for the entire installation. Only the
+  /// scope that opened the picker may consume it, even after a process restart.
+  Future<String> openImagePicker(
+    String owner,
+    String family,
+    String child,
+    String requestId, {
+    required bool childInput,
+    required bool recover,
+    String? replaceRequest,
+    required Future<void> Function() discardUnclaimed,
+  }) => transaction(() async {
+    final pending = await customSelect(
+      'SELECT owner FROM offline_cache WHERE cache_key=? LIMIT 1',
+      variables: [Variable(_pickerKey)],
+    ).getSingleOrNull();
+    if (pending != null) {
+      final previousOwner = pending.read<String>('owner');
+      final previous = await read(previousOwner, _pickerKey);
+      if (previous != null) {
+        if (recover &&
+            previousOwner == owner &&
+            previous['family_id'] == family &&
+            previous['child_id'] == child &&
+            previous['child_input'] == childInput) {
+          return previous['request_id'] as String;
+        }
+        if (recover) throw StateError('请在上次选图的账号、孩子和录入模式中恢复图片');
+        if (replaceRequest == null) {
+          throw PendingImageSelection(previous['request_id'] as String);
+        }
+        if (replaceRequest != previous['request_id']) {
+          throw StateError('本机选图状态已变化，请重新选择');
+        }
+      }
+      // The old scope is no longer accessible, or replacement was confirmed.
+      await remove(previousOwner, _pickerKey);
+    }
+    if (recover) throw StateError('没有属于当前账号、孩子和录入模式的图片选择，请重新选图');
+    // The new scope is not committed until the old native receipt is drained.
+    await write(owner, _pickerKey, {
+      'family_id': family,
+      'child_id': child,
+      'child_input': childInput,
+      'request_id': requestId,
+    });
+    await discardUnclaimed();
+    return requestId;
+  });
+
+  Future<void> finishImagePicker(
+    String owner,
+    String requestId,
+  ) => customStatement(
+    "DELETE FROM offline_cache WHERE owner=? AND cache_key=? AND json_extract(payload,'\$.request_id')=?",
+    [owner, _pickerKey, requestId],
+  );
+
   static const _directoryVisible = """NOT EXISTS (SELECT 1 FROM offline_cache h
     WHERE h.owner=d.owner AND h.cache_key IN
       ('directory-hidden:child:' || d.child_id, 'directory-hidden:family:' || d.family_id))""";

@@ -264,6 +264,15 @@ void main() {
         await (phase == 'picker' ? images.pickStarted : images.processStarted)
             .future
             .timeout(const Duration(seconds: 5));
+        if (phase == 'picker') {
+          final receipt = await store.read(
+            'original-owner',
+            'native-image-picker',
+          );
+          expect(receipt?['child_id'], 'child');
+          expect(receipt?['child_input'], false);
+          expect(receipt?['request_id'], isNotEmpty);
+        }
         owner = 'different-owner';
         // The new account is a parent in the same family; PIN alone is not an identity boundary.
         if (phase == 'picker') {

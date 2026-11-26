@@ -8,6 +8,7 @@ import '../data/question_media_repository.dart';
 import '../data/offline_question_media_repository.dart';
 import 'review_question_editor.dart';
 import 'image_drafts_screen.dart';
+import 'replace_image_selection_dialog.dart';
 
 class QuestionOcrScreen extends ConsumerStatefulWidget {
   const QuestionOcrScreen({
@@ -197,7 +198,22 @@ class _QuestionOcrScreenState extends ConsumerState<QuestionOcrScreen> {
   }
 
   Future<void> _pick(bool camera) => _run(() async {
-    final bytes = await ref.read(questionImageServiceProvider).pick(camera);
+    final service = ref.read(questionImageServiceProvider);
+    final repository = ref.read(questionMediaRepositoryProvider);
+    final bytes = repository is OfflineQuestionMediaRepository
+        ? await repository.pickImage(
+            widget.childId,
+            widget.familyId,
+            service,
+            childInput: widget.childInput,
+            camera: camera,
+            checkPage: () {
+              if (!mounted) throw StateError('已离开图片录入页');
+              _checkParent();
+            },
+            confirmReplace: () => confirmReplaceImageSelection(context),
+          )
+        : await service.pick(camera);
     if (bytes == null || !mounted) return;
     _checkParent();
     setState(() {
@@ -221,26 +237,7 @@ class _QuestionOcrScreenState extends ConsumerState<QuestionOcrScreen> {
       await _importSelection(repository, recover: true);
       return;
     }
-    final files = await ref.read(questionImageServiceProvider).recover();
-    if (files.isEmpty) throw StateError('没有可恢复的图片选择');
-    if (files.length != 1) throw StateError('多张图片需使用本机草稿导入，请启用本机存储');
-    final bytes = files.single;
-    if (!mounted) return;
-    _checkParent();
-    setState(() {
-      _original = bytes;
-      _processed = null;
-      _result = null;
-      _config = null;
-      _editorDraft = null;
-      _importInfo = {};
-      _consent = false;
-      _enhance = false;
-      _draftId = const Uuid().v4();
-      _turns = 0;
-      _horizontal = _vertical = const RangeValues(0, 1);
-    });
-    await _process();
+    throw StateError('需要本机草稿记录才能确认中断选择的归属，请重新选图');
   });
 
   Future<void> _importSelection(
@@ -252,14 +249,15 @@ class _QuestionOcrScreenState extends ConsumerState<QuestionOcrScreen> {
     if (!mounted) return;
     _checkParent();
     final service = ref.read(questionImageServiceProvider);
-    final ids = await repository.importImages(
+    final ids = await repository.importPickerImages(
       widget.childId,
       widget.familyId,
-      () async {
-        final images = await (recover ? service.recover() : service.pickMany());
+      service,
+      recover: recover,
+      confirmReplace: () => confirmReplaceImageSelection(context),
+      checkPage: () {
         if (!mounted) throw StateError('已离开图片导入页面，本次未导入');
         _checkParent();
-        return images;
       },
       childInput: widget.childInput,
     );

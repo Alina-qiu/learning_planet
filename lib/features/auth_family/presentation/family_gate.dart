@@ -16,15 +16,22 @@ import '../../tasks/presentation/task_management_screen.dart';
 import '../../tasks/presentation/reminder_coordinator.dart';
 import '../../tasks/data/notification_scheduler.dart';
 
-class FamilyGate extends ConsumerWidget {
+class FamilyGate extends ConsumerStatefulWidget {
   const FamilyGate({super.key});
 
-  Future<bool> _clearNotifications(BuildContext context, WidgetRef ref) async {
+  @override
+  ConsumerState<FamilyGate> createState() => _FamilyGateState();
+}
+
+class _FamilyGateState extends ConsumerState<FamilyGate> {
+  bool _switchingChild = false;
+
+  Future<bool> _clearNotifications() async {
     try {
       await ref.read(notificationSchedulerProvider).setScope(null);
-      return context.mounted;
+      return mounted;
     } catch (_) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('清除旧提醒失败，请重试。')));
@@ -33,7 +40,8 @@ class FamilyGate extends ConsumerWidget {
     }
   }
 
-  Future<bool> _exitParentMode(BuildContext context, WidgetRef ref) async {
+  Future<bool> _exitParentMode() async {
+    final wasInParentMode = ref.read(parentModeProvider);
     clearLocalParentAuthorization(ref);
     final revision = ref.read(parentAuthorizationRevisionProvider);
     final repository = ref.read(familyRepositoryProvider);
@@ -42,18 +50,40 @@ class FamilyGate extends ConsumerWidget {
         const Duration(seconds: 3),
       );
     } catch (_) {
-      if (context.mounted) {
+      if (mounted && wasInParentMode) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('本机已退出家长模式。再次进入时请联网验证 PIN。')),
         );
       }
     }
-    return context.mounted &&
-        ref.read(parentAuthorizationRevisionProvider) == revision;
+    return mounted && ref.read(parentAuthorizationRevisionProvider) == revision;
+  }
+
+  Future<void> _selectChild(String id) async {
+    if (_switchingChild) return;
+    setState(() => _switchingChild = true);
+    try {
+      if (!await _exitParentMode() || !mounted) return;
+      final revision = ref.read(parentAuthorizationRevisionProvider);
+      if (!await _clearNotifications() ||
+          !mounted ||
+          ref.read(parentAuthorizationRevisionProvider) != revision) {
+        return;
+      }
+      final families = ref.read(familiesProvider).valueOrNull;
+      if (families != null &&
+          families.any(
+            (family) => family.children.any((child) => child.id == id),
+          )) {
+        ref.read(selectedChildIdProvider.notifier).state = id;
+      }
+    } finally {
+      if (mounted) setState(() => _switchingChild = false);
+    }
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     ref.listen(familiesProvider, (_, next) {
       if (next.isLoading) return;
       final families = next.asData?.value;
@@ -193,6 +223,16 @@ class FamilyGate extends ConsumerWidget {
                 ref.invalidate(familiesProvider);
               }
             });
+            if (_switchingChild) {
+              return Scaffold(
+                body: Center(
+                  child: Semantics(
+                    liveRegion: true,
+                    child: const Text('正在切换孩子…'),
+                  ),
+                ),
+              );
+            }
             return ReminderCoordinator(
               childId: child.id,
               familyId: child.familyId,
@@ -201,12 +241,7 @@ class FamilyGate extends ConsumerWidget {
                 childNickname: child.nickname,
                 children: children,
                 selectedChildId: child.id,
-                onChildSelected: (id) async {
-                  if (!await _exitParentMode(context, ref)) return;
-                  if (!context.mounted) return;
-                  if (!await _clearNotifications(context, ref)) return;
-                  ref.read(selectedChildIdProvider.notifier).state = id;
-                },
+                onChildSelected: _selectChild,
                 onGettingStarted: () => Navigator.of(context).push<void>(
                   MaterialPageRoute(
                     builder: (_) => GettingStartedScreen(
@@ -247,7 +282,7 @@ class FamilyGate extends ConsumerWidget {
                 isParentMode: isParentMode,
                 onParentMode: () {
                   if (isParentMode) {
-                    _exitParentMode(context, ref);
+                    _exitParentMode();
                   } else {
                     enterParentMode(context, ref, child.familyId);
                   }

@@ -5,6 +5,7 @@ import '../../auth_family/presentation/parent_mode_prompt.dart';
 import '../data/question_media_repository.dart';
 import '../data/offline_question_media_repository.dart';
 import 'question_ocr_screen.dart';
+import 'replace_image_selection_dialog.dart';
 
 class ImageDraftsScreen extends ConsumerStatefulWidget {
   const ImageDraftsScreen({
@@ -25,17 +26,18 @@ class _ImageDraftsScreenState extends ConsumerState<ImageDraftsScreen> {
   }) => _run(() async {
     final service = ref.read(questionImageServiceProvider);
     final childInput = ref.read(activeParentFamilyProvider) != widget.familyId;
-    final ids = await repo.importImages(
+    final ids = await repo.importPickerImages(
       widget.childId,
       widget.familyId,
-      () async {
-        final images = await (recover ? service.recover() : service.pickMany());
+      service,
+      recover: recover,
+      confirmReplace: () => confirmReplaceImageSelection(context),
+      checkPage: () {
         if (!mounted) throw StateError('已离开图片导入页面，本次未导入');
         if (!childInput &&
             ref.read(activeParentFamilyProvider) != widget.familyId) {
           throw StateError('家长授权已到期，本次未导入');
         }
-        return images;
       },
       childInput: childInput,
     );

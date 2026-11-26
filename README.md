@@ -8,11 +8,11 @@
 
 也可以在浏览器直接打开[离线 HTML 原型](docs/demo/index.html)，体验孩子做任务、复习错题、申请兑换和家长履约。演示 PIN 为 `2468`。它使用固定的示例学习日，数据保存在本机浏览器。需要转发单个文件时，运行 `node scripts/package_demo.mjs`，生成的文件为 `build/demo/learning-planet.html`。
 
-本机试用请选择 `app-local-debug.apk`，通过 ADB 转发连接电脑的临时服务。普通版 `app-debug.apk` 用于查看服务配置提示。两个包的路径、字节数和 SHA-256 统一记录在本机交付文档中。[本轮安装包和校验](build/review-refresh-20261126/DELIVERY.md) · [启动服务与安装](docs/LOCAL_DEBUG.md)
+本机试用请选择 `app-local-debug.apk`，通过 ADB 转发连接电脑的临时服务。普通版 `app-debug.apk` 用于查看服务配置提示。两个包的路径、字节数和 SHA-256 统一记录在本机交付文档中。[本轮安装包和校验](docs/ANDROID_BUILD.md) · [启动服务与安装](docs/LOCAL_DEBUG.md)
 
 孩子或家长打开今日复习时，应用会刷新到期题目。孩子首次开始后，题目、顺序和标准答案随本次复习固定。离线开始时如果题目已更新，应用保留原作答供核对，孩子可采用新题单重新作答。孩子自行录入的错题需由家长确认标准答案后才会进入奖励复习。[复习规则与验收](docs/REVIEW_AUTO_COMPLETION.md)
 
-Android 安装包对应的 Flutter 版本已通过 902 项测试，110 个核心源文件的行覆盖率为 90.90%。PostgREST 16.2 和 16.5 各通过 12 项接口测试，覆盖离线答题冲突和奖励核账。本轮服务端通过 419 项数据库检查、9 个历史节点的 22 项升级检查和 9 项备份恢复检查。新版拼音练习卷已在本机实际生成并下载。[Windows 与接口结果](build/review-refresh-20261126/local-quality.json) · [拼音组卷与版本升级](docs/PDF_INTEGRATION.md) · [当前分支 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+本机双孩子场景已核对断网打卡、离线重开和重新联网后的奖励归属。应用回归及两款安装包的结果随版本记录。PostgREST 16.2 和 16.5 各通过 12 项接口测试，覆盖离线答题冲突和奖励核账。本轮服务端通过 419 项数据库检查、9 个历史节点的 22 项升级检查和 9 项备份恢复检查。新版拼音练习卷已在本机实际生成并下载。[双孩子验收](docs/CURRENT_STATUS.md#双孩子共用设备) · [拼音组卷与版本升级](docs/PDF_INTEGRATION.md) · [当前分支 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
 
 - [当前需求覆盖与逐项验收](docs/CURRENT_STATUS.md)：ACC、TSK、ERR、AC-01至AC-11、非功能要求及剩余依赖。
 - 常规 CI 覆盖 Flutter、Android 构建、iOS 未签名构建与模拟器、数据库升级和备份恢复。同一家庭的 Android 与 iPhone 同步另设独立验收。[当前分支检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) · [历史测试记录](docs/TESTING.md)
