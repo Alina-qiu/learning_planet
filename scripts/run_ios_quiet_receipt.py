@@ -51,6 +51,27 @@ def verify(ready, sent, callbacks, complete):
         raise ValueError("Persisted receipt and Notification Center evidence disagree")
 
 
+def wait_for_ready(process, device, bundle, started, timeout=1200):
+    deadline = time.monotonic() + timeout
+    command = ["xcrun", "simctl", "get_app_container", device, bundle, "data"]
+    while (remaining := deadline - time.monotonic()) > 0:
+        status = process.poll()
+        if status is not None:
+            raise RuntimeError(f"XCTest exited with {status} before native settings/clock/plan; see xctest.log")
+        # The container may be absent, or CoreSimulator busy, while Xcode installs the test host.
+        try:
+            found = subprocess.run(command, capture_output=True, text=True, timeout=min(10, remaining))
+        except subprocess.TimeoutExpired:
+            found = None
+        if found is not None and found.returncode == 0 and found.stdout.strip():
+            directory = Path(found.stdout.strip()) / "Documents" / "ac09-receipt"
+            path = directory / "ready.json"
+            if path.is_file() and path.stat().st_mtime >= started and path.stat().st_size:
+                return directory, json.loads(path.read_text(encoding="utf8"))
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+    raise TimeoutError("Timed out waiting for native settings/clock/plan; see xctest.log")
+
+
 def run(device, report):
     device = checked_id(device)
     if not Path("ios/Runner.xcworkspace").is_dir():
@@ -91,22 +112,8 @@ def run(device, report):
                     raise RuntimeError("XCTest ended before " + description + ", see xctest.log")
                 time.sleep(.4)
             raise TimeoutError("Timed out waiting for " + description)
-        def container():
-            found = subprocess.run(simulator + ["get_app_container", device, bundle, "data"],
-                                   capture_output=True, text=True, timeout=10)
-            if found.returncode == 0:
-                return Path(found.stdout.strip()) / "Documents" / "ac09-receipt"
-            return None
-        def ready_probe():
-            directory = container()
-            if directory is None:
-                return None
-            path = directory / "ready.json"
-            if path.is_file() and path.stat().st_mtime >= started and path.stat().st_size:
-                return directory, json.loads(path.read_text(encoding="utf8"))
-            return None
         try:
-            directory, ready = await_result(ready_probe, 1200, "native settings/clock/plan")
+            directory, ready = wait_for_ready(proc, device, bundle, started)
             write("ready", ready)
             zero = time.monotonic()
             def event(name):

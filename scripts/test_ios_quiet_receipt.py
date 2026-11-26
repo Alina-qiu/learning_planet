@@ -1,8 +1,13 @@
 import copy
+import json
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from run_ios_quiet_receipt import payload, verify
+from run_ios_quiet_receipt import payload, verify, wait_for_ready
 
 
 class QuietReceiptEvidenceTests(unittest.TestCase):
@@ -68,6 +73,46 @@ class QuietReceiptEvidenceTests(unittest.TestCase):
         self.complete["delivered"] = []
         with self.assertRaises(ValueError):
             self.validate()
+
+
+class QuietReceiptReadinessTests(unittest.TestCase):
+    def test_busy_then_uninstalled_then_ready(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root) / 'Documents' / 'ac09-receipt'
+            directory.mkdir(parents=True)
+            (directory / 'ready.json').write_text(json.dumps({'run': 'fixture'}), encoding='utf8')
+            responses = [subprocess.TimeoutExpired('simctl', 10),
+                         subprocess.CompletedProcess([], 2, stdout=''),
+                         subprocess.CompletedProcess([], 0, stdout=root + '\n')]
+            with patch('run_ios_quiet_receipt.subprocess.run', side_effect=responses) as query, \
+                    patch('run_ios_quiet_receipt.time.sleep'):
+                self.assertEqual(wait_for_ready(Mock(poll=lambda: None), 'sim', 'app', 0),
+                                 (directory, {'run': 'fixture'}))
+                self.assertEqual(query.call_count, 3)
+
+    def test_repeated_timeouts_share_one_deadline(self):
+        clock = [0]
+        def busy(*args, timeout, **kwargs):
+            clock[0] += timeout
+            raise subprocess.TimeoutExpired('simctl', timeout)
+        def sleep(seconds):
+            clock[0] += seconds
+        with patch('run_ios_quiet_receipt.subprocess.run', side_effect=busy) as query, \
+                patch('run_ios_quiet_receipt.time.monotonic', side_effect=lambda: clock[0]), \
+                patch('run_ios_quiet_receipt.time.sleep', side_effect=sleep):
+            with self.assertRaisesRegex(TimeoutError, 'native settings/clock/plan'):
+                wait_for_ready(Mock(poll=lambda: None), 'sim', 'app', 0, timeout=15)
+            self.assertEqual([c.kwargs['timeout'] for c in query.call_args_list], [10, 3])
+            self.assertEqual(clock[0], 15)
+
+    def test_xctest_exit_during_busy_probe_surfaces_its_status(self):
+        process = Mock()
+        process.poll.side_effect = [None, 65]
+        with patch('run_ios_quiet_receipt.subprocess.run', side_effect=subprocess.TimeoutExpired('simctl', 10)) as query, \
+                patch('run_ios_quiet_receipt.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'XCTest exited with 65'):
+                wait_for_ready(process, 'sim', 'app', 0)
+            query.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
-"""Run a native integration fixture using Apple's retained unified logs.
+"""Run a native integration fixture on a prepared Apple simulator.
 
-The simulator and prebuilt integration app must already exist. Read retained
-system logs for the PID returned by launch, including an early VM announcement.
-This changes test transport only, not the app, renderer or test assertions.
+Follow live unified logs and query retained entries from the last five minutes.
+Connect the Flutter driver to the VM announcement from the newly launched PID.
 """
 import argparse
 import os
@@ -35,28 +34,67 @@ def launch_pid(output, bundle):
 
 def wait_for_service(device, pid, report, timeout=120):
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        # Flutter emits the announcement via os_log on iOS; --console-pty does
-        # not capture it. Query persisted entries instead of subscribing late.
-        path = report / "vm-service.log"
-        with path.open("wb") as log:
-            try:
-                subprocess.run(
-                    ["xcrun", "simctl", "spawn", device, "log", "show", "--last", "5m",
-                     "--style", "compact", "--predicate",
-                     'process == "Runner" AND eventMessage CONTAINS "The Dart VM service is listening on"'],
-                    stdout=log, stderr=subprocess.STDOUT,
-                    timeout=min(30, max(0.1, deadline - time.monotonic())), check=True,
-                )
-            except subprocess.TimeoutExpired:
-                # simctl/log can outlive its output. Keep already-written lines
-                # and allow another lookup within the original total deadline.
-                log.write(b"\nLog lookup timed out; retaining partial output\n")
-        url = vm_service_url(path.read_text(encoding="utf-8", errors="replace"), pid)
-        if url:
-            return url
-        time.sleep(2)
-    raise TimeoutError("Dart VM service was not announced within 120 seconds")
+    # Flutter sends this announcement through os_log. Follow new entries and
+    # also query the preceding five minutes in case it was emitted at launch.
+    prefix = ["xcrun", "simctl", "spawn", device, "log"]
+    flags = ["--style", "compact", "--predicate",
+             'process == "Runner" AND eventMessage CONTAINS "The Dart VM service is listening on"']
+    processes = {}
+    last_lookup = float("-inf")
+
+    def stop(process):
+        if process.poll() is not None:
+            return True
+        process.kill()
+        try:
+            process.wait(timeout=min(1, max(0, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            # Keep ownership of a slow-to-exit probe. Never wait past discovery's budget.
+            return False
+        return True
+
+    url = None
+    with tempfile.TemporaryDirectory() as directory:
+        paths = {name:Path(directory) / name for name in ("stream", "show")}
+        try:
+            while True:
+                for path in paths.values():
+                    if path.exists():
+                        with path.open("rb") as log:
+                            log.seek(max(0, path.stat().st_size - 65536))
+                            url = vm_service_url(log.read().decode("utf-8", "replace"), pid)
+                        if url:
+                            return url
+                now = time.monotonic()
+                if now >= deadline:
+                    raise TimeoutError(f"Dart VM service was not announced within {timeout} seconds")
+                for name, path in paths.items():
+                    process = processes.get(name)
+                    if name == "stream" and process is not None:
+                        continue
+                    if process is not None and process.poll() is None:
+                        if now - last_lookup < 30:
+                            continue
+                        if not stop(process):
+                            continue
+                    if name == "show" and now - last_lookup < 2:
+                        continue
+                    args = [name, "--last", "5m"] if name == "show" else [name]
+                    # Each producer appends. A late writer after simctl exits
+                    # must not lose its bytes to truncation on the next probe.
+                    with path.open("ab") as log:
+                        processes[name] = subprocess.Popen(prefix + args + flags, stdout=log,
+                                                           stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                    if name == "show":
+                        last_lookup = now
+                time.sleep(min(0.5, max(0, deadline - time.monotonic())))
+        finally:
+            pending = sum(1 for process in processes.values() if not stop(process))
+            status = "ready" if url else "unavailable"
+            counts = {name:path.stat().st_size if path.exists() else 0 for name,path in paths.items()}
+            (report / "vm-service.log").write_text(
+                f"Runner PID {pid}: VM discovery {status}; stream bytes={counts['stream']}, "
+                f"retained bytes={counts['show']}, pending cleanup={pending}\n", encoding="utf-8")
 
 
 DEFAULT_DRIVER = "test_driver/task_flow_driver.dart"
