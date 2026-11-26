@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {randomUUID, createHash} from 'node:crypto';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {startTestDatabase} from './fixtures/database.mjs';
+import {RENDERER_VERSION} from '../supabase/functions/_shared/worksheet_pdf.mjs';
 import {freePort} from './fixtures/http_test_tools.mjs';
 import {daytimeReviewZone, generateDuringReviewChange} from './fixtures/review_generation.mjs';
 
@@ -208,6 +209,34 @@ async function seedPendingReviewStart() {
     [data.pendingReviewChild,{...prompt,prompt:'2 + 3',answers:['5']},data.editedQuestion]);
   assert.equal((await scalar('select public.load_review_task($1)',[task.id])).items[0].prompt,'2 + 2');
 }
+async function seedV2Worksheets() {
+  await login(raceOwner);
+  const family = await scalar('select family_id from public.children where id=$1', [data.pendingReviewChild]);
+  await scalar("select public.verify_parent_pin($1,'2468')", [family]);
+  data.v2Worksheets = {};
+  for (const status of ['queued', 'running', 'ready']) {
+    const id = randomUUID();
+    await scalar('select public.request_worksheet($1,$2,$3,$4)', [data.pendingReviewChild, [data.editedQuestion],
+      {title: 'V2 ' + status}, id]);
+    if (status !== 'queued') {
+      const claim = await scalar('select public.claim_worksheet($1)', [id]);
+      if (status === 'ready') {
+        await clearIdentity();
+        await client.query("insert into storage.objects(bucket_id,name) values('worksheets',$1)", [claim.pdf_path]);
+        await scalar("select set_config('request.jwt.claims',$1,false)", [JSON.stringify({role: 'service_role'})]);
+        await client.query('set role service_role');
+        await scalar('select public.finish_worksheet($1,$2,$3)', [id, claim.lease_token,
+          {pages: 1, byte_size: 6000000, sha256: 'b'.repeat(64), renderer_version: 'a4-v2'}]);
+        await login(raceOwner);
+      }
+    }
+    const row = await scalar('select to_jsonb(j) from public.worksheet_jobs j where id=$1', [id]);
+    assert.equal(row.renderer_version, 'a4-v2');
+    assert.equal(row.status, status);
+    data.v2Worksheets[status] = row;
+  }
+}
+
 const checkpoints = new Map([
   ['202609160008_task_maintenance.sql', ['008: old family, children, completed/pending tasks and ledger', seedCore]],
   ['202609160011_wrong_question_pinyin_review.sql', ['011: partially answered frozen review with private answer keys', seedReview]],
@@ -217,6 +246,7 @@ const checkpoints = new Map([
   ['202611230072_cleanup_file_progress.sql', ['072: real empty daily review and protected snapshots with business history', seedEmptyReview]],
   ['202611240073_review_candidate_lock.sql', ['073: active parent devices and a leased delivery on a retired transport', seedLegacyPushDevice]],
   ['202611260074_parent_push_transports.sql', ['074: published unstarted review, pre-upgrade offline start and later key edit', seedPendingReviewStart]],
+  ['202611270075_refresh_unstarted_review.sql', ['075: queued worksheet, live v2 lease and published v2 PDF', seedV2Worksheets]],
 ]);
 
 try {
@@ -343,8 +373,27 @@ try {
     assert.deepEqual(claim.snapshot.config, before.config);
     assert.deepEqual(claim.snapshot.items.map(row => row.accepted_answers), [['chóng qìng'], ['4']]);
     const after = await scalar('select to_jsonb(j) from public.worksheet_jobs j where id=$1', [data.worksheet]);
-    assert.equal(after.renderer_version, 'a4-v2'); assert.equal(after.pdf_path, before.pdf_path);
+    assert.equal(after.renderer_version, RENDERER_VERSION); assert.equal(after.pdf_path, before.pdf_path);
     assert.equal(after.expires_at, before.expires_at);
+  });
+  await check('v2 published PDF and live lease keep their version; an unclaimed worksheet takes the current renderer', async () => {
+    await login(raceOwner);
+    const family = await scalar('select family_id from public.children where id=$1', [data.pendingReviewChild]);
+    await scalar("select public.verify_parent_pin($1,'2468')", [family]);
+    for (const prior of Object.values(data.v2Worksheets)) {
+      const result = await scalar('select public.claim_worksheet($1)', [prior.id]);
+      const current = await scalar('select to_jsonb(j) from public.worksheet_jobs j where id=$1', [prior.id]);
+      if (prior.status === 'queued') {
+        assert.equal(result.status, 'claimed');
+        assert.equal(current.renderer_version, RENDERER_VERSION);
+        assert.equal(current.pdf_path, prior.pdf_path);
+        assert.deepEqual(current.question_ids, prior.question_ids);
+      } else {
+        assert.equal(result.status, prior.status);
+        assert.deepEqual(current, prior);
+      }
+    }
+    await authorize();
   });
   await check('original adjustment actor/time/reason are readable through the new PIN-protected API', async () => {
     const id = await scalar("select id from public.ledger_entries where source_id=$1 and asset_type='coin'", [data.adjustment]);

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f7ff">
+  <meta name="color-scheme" content="light">
+  <title>学习星球 · 冒险大厅</title>
+  <link rel="stylesheet" href="demo.css">
+  <script defer src="model.js"></script>
+  <script defer src="child.js"></script>
+  <script defer src="parent.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳到当前页面</a>
+  <header class="app-header">
+    <div class="header-inner">
+      <a class="brand" href="#home" data-view="home" aria-label="学习星球，回到冒险大厅">
+        <span class="brand-mark" aria-hidden="true"></span><span>学习星球</span>
+      </a>
+      <span class="demo-label">离线体验版</span>
+      <a class="parent-entry" data-view="parent" href="#parent">家长模式</a>
+    </div>
+  </header>
+  <div class="shell">
+    <nav class="tabs" aria-label="孩子端导航"></nav>
+    <main id="main" tabindex="-1">
+      <div class="page-title"><h1></h1></div>
+      <div id="content"></div>
+      <p class="local-note">演示家庭的数据保存在当前浏览器，请使用示例内容。</p>
+    </main>
+  </div>
+  <div id="feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript><p>请在浏览器中启用 JavaScript，以体验任务、复习与奖励流程。</p></noscript>
+</body>
+</html>

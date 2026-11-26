@@ -25,7 +25,7 @@ await withAuthBackend(async (config, {database, secret, storage}) => {
     answers: ['20'], explanation: '12 + 8 = 20，用加法求总数。', ocr_confirmed: true};
   const mathId = await question(math);
   const word = (prompt, reading, context) => ({kind:'pinyin',subject:'chinese',prompt,context,answers:[reading],pronunciation_confirmed:true});
-  const green = await question(word('绿叶', 'lǜ yè', '树上长出了绿叶。'));
+  const green = await question(word('绿水', 'lǜ4 shuǐ3', '远处有青山绿水。'));
   const bank = await question(word('银行', 'yín háng', '我去银行存钱。'));
   const mixedId = randomUUID(), retryId = randomUUID();
   const mixedConfig = {title:'错题与拼音练习',include_answers:true,include_explanations:true,pinyin_mode:'word_to_pinyin'};
@@ -123,12 +123,12 @@ await withAuthBackend(async (config, {database, secret, storage}) => {
       const content=expected.trace.map(line=>line.text).join('\n');
       if(id===mixedId) {
         assert.ok(content.includes(math.prompt.slice(0,10)));assert.ok(!content.includes('修改后的题干'));
-        assert.ok(content.includes('20'));assert.ok(content.includes('lǜ yè') && content.includes('yín háng'));
+        assert.ok(content.includes('20'));assert.ok(content.includes('答案：lǜ shuǐ') && content.includes('yín háng'));
         assert.deepEqual(snapshot.items.map(item=>item.question_id),[green,mathId,bank]);
         assert.ok(pdf.getPages()[0].getWidth()<pdf.getPages()[0].getHeight());
       } else {
-        assert.ok(content.includes('lǜ yè') && content.includes('yín háng'));
-        assert.ok(!content.includes('银行') && !content.includes('绿叶') && !content.includes('答案：'));
+        assert.ok(content.includes('看拼音写词语：lǜ shuǐ') && content.includes('yín háng'));
+        assert.ok(!content.includes('银行') && !content.includes('绿水') && !content.includes('答案：'));
         assert.ok(pdf.getPages()[0].getWidth()>pdf.getPages()[0].getHeight());
       }
       results.push({filename,pages:job.pages,bytes:Number(job.byte_size),sha256:job.sha256,renderer:job.renderer_version});

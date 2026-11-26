@@ -34,14 +34,14 @@ export async function worksheetVersionCases({client,scalar,login,denied,check,ot
   await check('new worksheet version matches the actual renderer and completion still rejects mismatched results',async()=>{
     const id=await create();assert.equal((await row(id)).renderer_version,RENDERER_VERSION);
     const lease=await claim(id);await object(lease.pdf_path);await trusted();
-    await denied('select public.finish_worksheet($1,$2,$3)',[id,lease.lease_token,result('a4-v1')]);
+    await denied('select public.finish_worksheet($1,$2,$3)',[id,lease.lease_token,result('a4-v2')]);
     await finish(id,lease.lease_token,RENDERER_VERSION);
     await auth();assert.equal((await row(id)).status,'ready');
   });
   for(const state of ['queued','failed']) {
     await check(`legacy ${state} worksheet upgrades only when claimed and preserves its frozen snapshot`,async()=>{
       const id=await create();
-      await admin("update public.worksheet_jobs set renderer_version='a4-v1',status=$2,error_code='PDF_GENERATION_FAILED' where id=$1",[id,state]);
+      await admin("update public.worksheet_jobs set renderer_version='a4-v2',status=$2,error_code='PDF_GENERATION_FAILED' where id=$1",[id,state]);
       const before=await row(id), lease=await claim(id), after=await row(id);
       assert.equal(lease.status,'claimed');assert.equal(after.renderer_version,RENDERER_VERSION);
       assert.equal(after.attempts,before.attempts+1);assert.equal(after.error_code,null);
@@ -53,24 +53,24 @@ export async function worksheetVersionCases({client,scalar,login,denied,check,ot
   }
   await check('active legacy lease can finish with its original renderer and ready PDFs remain unchanged',async()=>{
     const id=await create(), lease=await claim(id);
-    await admin("update public.worksheet_jobs set renderer_version='a4-v1' where id=$1",[id]);
+    await admin("update public.worksheet_jobs set renderer_version='a4-v2' where id=$1",[id]);
     const running=await row(id);assert.equal((await claim(id)).status,'running');
     assert.deepEqual(await row(id),running);
-    await object(lease.pdf_path);await trusted();await finish(id,lease.lease_token,'a4-v1');await auth();
+    await object(lease.pdf_path);await trusted();await finish(id,lease.lease_token,'a4-v2');await auth();
     const ready=await row(id);assert.equal((await claim(id)).status,'ready');assert.deepEqual(await row(id),ready);
-    assert.equal(ready.renderer_version,'a4-v1');assert.equal(ready.attempts,1);
+    assert.equal(ready.renderer_version,'a4-v2');assert.equal(ready.attempts,1);
   });
   await check('expired legacy lease upgrades on reclaim and rejects the previous worker token',async()=>{
     const id=await create(), old=await claim(id);
-    await admin("update public.worksheet_jobs set renderer_version='a4-v1',lease_until=now()-interval '1 second' where id=$1",[id]);
+    await admin("update public.worksheet_jobs set renderer_version='a4-v2',lease_until=now()-interval '1 second' where id=$1",[id]);
     const fresh=await claim(id);assert.notEqual(fresh.lease_token,old.lease_token);
     assert.equal((await row(id)).renderer_version,RENDERER_VERSION);
     await object(fresh.pdf_path);await trusted();
-    await denied('select public.finish_worksheet($1,$2,$3)',[id,old.lease_token,result('a4-v1')]);
+    await denied('select public.finish_worksheet($1,$2,$3)',[id,old.lease_token,result('a4-v2')]);
     await finish(id,fresh.lease_token,RENDERER_VERSION);await auth();assert.equal((await row(id)).attempts,2);
   });
   await check('unauthorized claims cannot upgrade legacy jobs while trusted dispatch can',async()=>{
-    const id=await create();await admin("update public.worksheet_jobs set renderer_version='a4-v1' where id=$1",[id]);
+    const id=await create();await admin("update public.worksheet_jobs set renderer_version='a4-v2' where id=$1",[id]);
     const before=await row(id);await login(otherUid);await denied('select public.claim_worksheet($1)',[id]);
     await auth();await scalar('select public.revoke_parent_authorization($1)',[family]);
     await denied('select public.claim_worksheet($1)',[id]);await scalar("select public.verify_parent_pin($1,'2468')",[family]);
@@ -80,7 +80,7 @@ export async function worksheetVersionCases({client,scalar,login,denied,check,ot
   });
   await check('expired worksheets remain unavailable without changing version or retention',async()=>{
     const id=await create();
-    await admin("update public.worksheet_jobs set renderer_version='a4-v1',expires_at=now()-interval '1 second' where id=$1",[id]);
+    await admin("update public.worksheet_jobs set renderer_version='a4-v2',expires_at=now()-interval '1 second' where id=$1",[id]);
     const before=await row(id);await denied('select public.claim_worksheet($1)',[id]);assert.deepEqual(await row(id),before);
   });
 }

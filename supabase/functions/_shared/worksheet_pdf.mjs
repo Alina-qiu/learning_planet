@@ -1,7 +1,7 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
-export const RENDERER_VERSION = 'a4-v2';
+export const RENDERER_VERSION = 'a4-v3';
 const MM = 72 / 25.4;
 const A4 = [210 * MM, 297 * MM];
 const ink = rgb(0.12, 0.15, 0.19), muted = rgb(0.45, 0.48, 0.51), rule = rgb(0.7, 0.72, 0.74);
@@ -38,16 +38,20 @@ export function pinyinDirection(item, index, config, seed) {
 
 export function printablePinyin(value) {
   return String(value).normalize('NFC').toLowerCase().replace(/u:/g,'ü').replace(/v/g,'ü')
+    .replace(/['’·-]/g,' ')
     .replace(/([0-5])/g,'$1 ').trim().split(/\s+/).map(token => {
       const tone = /[0-5]$/.test(token) ? Number(token.at(-1)) : null;
       if (tone === null) return token;
-      const syllable = token.slice(0,-1);
+      // The answer key accepts a tone mark followed by its matching number.
+      // Strip only tone marks before placing the numeric tone; keep ü intact.
+      const syllable = token.slice(0,-1).normalize('NFD')
+        .replace(/[\u0300\u0301\u0304\u030c]/g,'').normalize('NFC');
       if (tone === 0 || tone === 5) return syllable;
       let position = syllable.indexOf('a');
       if (position < 0) position = syllable.indexOf('e');
       if (position < 0 && syllable.includes('ou')) position = syllable.indexOf('o');
       if (position < 0) for (let i=0;i<syllable.length;i++) if ('aeiouü'.includes(syllable[i])) position=i;
-      if (position < 0) return syllable;
+      if (position < 0) return token;
       const accents = { a:'āáǎà', e:'ēéěè', i:'īíǐì', o:'ōóǒò', u:'ūúǔù', ü:'ǖǘǚǜ' };
       return syllable.slice(0,position)+accents[syllable[position]][tone-1]+syllable.slice(position+1);
     }).join(' ');

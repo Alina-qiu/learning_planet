@@ -4,9 +4,11 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-本轮 Windows 通过 902 项 Flutter 测试，核心行覆盖率为 约 90.9%。静态分析通过，292 个 Dart 文件通过格式检查。PostgREST 16.2、16.5 分别通过 12 项实际接口测试，各处理 177 次请求，覆盖直接从错题本开始恢复的任务、两端改题、离线答题冲突和奖励核账。[本机检查](../build/review-refresh-20261126/local-quality.json) · [分支最新 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+Android 安装包对应提交 `8f39cdc`。该版本通过 902 项 Flutter 测试，核心行覆盖率为 90.90%。PostgREST 16.2、16.5 各通过 12 项接口测试。远程 11 项常规作业及 3 项 Android 与 iPhone 同步作业全部通过，iPhone 模拟器恢复联网后 8.217 秒读到另一端完成的任务。[本机检查](../build/review-refresh-20261126/local-quality.json) · [该版常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45858279249) · [该版双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45858279347) · [分支最新检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
 
 两份调试包的用途和本机运行步骤见[Android 构建记录](ANDROID_BUILD.md)。本次复习变更的接口、数据库、应用和安装包证据集中在[本机验收记录](../build/review-refresh-20261126/DELIVERY.md)。
+
+最新服务端使用 `a4-v3` 生成拼音练习卷。本机 419 项数据库检查、9 个历史节点的 22 项升级检查和 9 项备份恢复检查通过。孩子与家长的六个主要页面也可用独立的 HTML 原型离线体验。[拼音组卷验证](PDF_INTEGRATION.md) · [浏览器原型](demo/index.html)
 
 基线提交 `e178b18` 在 Android 10 模拟器上完成了邮箱验证码登录和一次实际中文印刷图识别，孩子校对并保存后，联网刷新仍显示“待家长确认”。[基线联调版首页](../build/acceptance-20261126/android-local-debug-home.json) · [中文识别与保存](../build/acceptance-20261126/android-release-ocr.json)
 
@@ -133,7 +135,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | 5.1 首次使用 | [孩子档案与引导](CHILD_PROFILE_ONBOARDING.md)、[创建恢复](FAMILY_CREATION_RELIABILITY.md)、[本机首用流程](LOCAL_DEBUG.md) | 新家庭真实首用、外部邮件与孩子独立操作 |
 | 6.3 长期计划 | [奖励编辑](PLAN_REWARD_EDITOR.md)、[离线计划](OFFLINE_SCHEDULES.md)，请假不计分母、最高终奖档位 | 真实计划周期、云端调度和两端操作 |
 | 6.4 经济与账本 | [库存](REWARD_INVENTORY.md)、[兑换恢复](ECONOMY_COMMANDS.md)、[审计明细](WALLET_ADJUSTMENT_DETAILS.md)、[真实并发报告](../build/concurrency_integration/results.json) | 真实家庭长期账本核对与经济平衡 |
-| 6.6 拼音练习 | [词库](PINYIN_WORD_BANK.md)、`test/pinyin_import_test.dart`、`scripts/test_pinyin_worksheet.mjs` | 真实教材、多音字语境、两端打印；人工确认不能省略 |
+| 6.6 拼音练习 | 词条由家长确认。使用新版渲染器时，`lǜ4 shuǐ3` 在题页与答案页均印为 `lǜ shuǐ`，本机已通过真实组卷、下载与逐页核对。[词库](PINYIN_WORD_BANK.md) · [组卷验收](PDF_INTEGRATION.md) | 真实教材、多音字语境、Android 与 iPhone 系统打印仍待验收。 |
 | 6.7 PDF生命周期 | [PDF集成](PDF_INTEGRATION.md)、[永久清理](PERMANENT_CLEANUP.md)、[本机文件恢复](BACKUP_RESTORE.md) | 真实30天保留期限、托管存储/调度与目标环境备份恢复 |
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
@@ -141,13 +143,13 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | 8 数据模型/状态机 | 76 份[迁移](../supabase/migrations)、[411 项全库检查](../build/acceptance-20261126/database-checks.log)、[18 项有数据升级检查](../build/acceptance-20261126/database-upgrade.json)、[本机 Auth/Storage 恢复](BACKUP_RESTORE.md) | 云端迁移、真实 Auth/Storage 版本升级、目标环境备份恢复及回滚 |
 | 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
-| 12 / 15 迭代与原型 | MVP及多项V1.1/V1.2能力已有实现；当前验收基于真实App与服务测试 | V2学习伙伴、家庭协作、成熟动画按PRD验证后决定，不用加入新模块替代当前验收 |
+| 12 / 15 迭代与原型 | [离线 HTML 原型](demo/index.html)覆盖冒险大厅、今日复习、错题宝库、任务中心、奖励商店和家长控制台。支持用示例家庭完成第 15.1 节的五项操作，运行 `node scripts/package_demo.mjs` 可生成单文件版本。 | 孩子与家长的实际可用性观察、四周家庭试用仍待开展。V2 功能按验证结果决定。 |
 
 ## 第9节非功能要求
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | 提交 `e178b18` 的 Android 10 Release 常规冷启动 5/5 达标，最慢 5.98 秒。每次重装并暖机后再测，2/3 达标，最慢 8.02 秒。六项任务均可确认在 500 毫秒内出现可见反馈，其中四项可确认保存提示也已出现。[首页测量](APP_PERFORMANCE.md) · [任务录屏复核](../build/acceptance-20261126/feedback-repeats/RESULTS.md) | 两次保存提示的取样区间跨过 500 毫秒。真机性能和重装后的稳定性仍待验证。 |
+| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | 提交 `8f39cdc` 的 Android 10 Release 常规冷启动 3/3 达标，孩子、余额与可点击的任务最迟在 4.074、3.775、3.567 秒出现。三次点击完成后，按钮均在 217 毫秒内禁用，其中两次可确认在 500 毫秒内显示保存提示。[本轮启动与反馈](../build/review-refresh-20261126/RESULTS-8f39cdc.md) · [此前测试条件](APP_PERFORMANCE.md) | 一次保存提示的取样区间为 313–515 毫秒。较早版本每轮重装后的三次启动中有一次超出 6 秒。真机性能和重装后的稳定性仍待验证。 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | API 29 模拟器恢复本机服务连接后，前台 9.34 秒发出首个快照请求。会话过期、离线重开后再次恢复连接，1.48 秒发出首个快照请求，1.56 秒开始补传操作。[同步时间及账本](../build/acceptance-20261124/android-reconnect.json) | 目标手机的无线网络切换、系统后台限制仍待验证 |

@@ -8,6 +8,8 @@ import { snapshot } from './fixtures/worksheet_snapshot.mjs';
 const font = await readFile('supabase/functions/worksheet-render/fonts/NotoSansSC-Regular.ttf');
 assert.equal(printablePinyin('yin2hang2'),'yín háng');
 assert.equal(printablePinyin('nv3 liu2 shui3 lü4 ye4'),'nǚ liú shuǐ lǜ yè');
+assert.equal(printablePinyin("hǎo3-shuǐ3'lü3·zi0"),'hǎo shuǐ lǚ zi');
+assert.equal(printablePinyin('ng2 ng4'),'ng2 ng4', 'retain numeric tone when there is no vowel to mark');
 assert.equal(createHash('sha256').update(font).digest('hex'), 'b6a3861ad594afe88f30c0eff922728198d51ac59323c922a29afc4322a7bead');
 const first = await renderWorksheet(snapshot, font), second = await renderWorksheet(snapshot, font);
 assert.deepEqual(first.bytes, second.bytes, 'identical immutable snapshot must produce identical bytes');

@@ -1,5 +1,15 @@
 # 本地真实 PDF 生成与清理验证
 
+## 2026-11-27 拼音题页与答案页
+
+家长录入带声调及相同调号的拼音时，此前的练习卷可能给同一音节的两个元音各标一次声调。现在录入 `hǎo3` 会印成 `hǎo`，录入 `lǜ4 shuǐ3` 会印成 `lǜ shuǐ`。看拼音写词语的题页和给词语写拼音的参考答案共用这条规则。[拼音回归](../scripts/test_pinyin_worksheet.mjs)
+
+本机从家长会话保存“绿水”并发起组卷，通过 Deno 和私有 Storage 生成文件，再由 Flutter 下载。两份 PDF 共三页，已逐页检查拼音和田字格。题页遮住语境中的汉字答案。下载文件与 Node 对相同题目快照生成的文件逐字节一致。3 项客户端检查和 4 组服务流程通过，包含上传失败重试、成功回执丢失和过期文件清理。[联调回归](../scripts/test_worksheet_integration.mjs) · [本机样张与摘要](../build/demo-20261127/worksheet/local-service-pdf-validation.json)
+
+部署组卷服务时需要配套使用迁移 076 和 `a4-v3` 渲染器。新任务和重新领取的任务使用新版。已生成的 PDF 保留原文件，有效的旧租约可按其原版本完成。[迁移 076](../supabase/migrations/202611270076_worksheet_pinyin_tones.sql)
+
+## 2026-11-05 本机联调记录
+
 2026-11-05：实际 Flutter Repository 的3项检查和4组服务流程通过。GoTrue、PostgREST、原Deno入口、Storage与MinIO共同运行，执行13次Auth、88次业务、20次Storage请求，接收2封本机合成邮件。日志为 `tmp/worksheet-integration-latest.log`。本结果覆盖本机服务，不代表云端或真机验收完成。
 
 ## 修复的组卷失败

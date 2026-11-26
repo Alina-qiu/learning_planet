@@ -88,7 +88,7 @@ try {
     assert.equal((await api(`/storage/v1/object/worksheets/${pdf.path}`, service,
       {method: 'POST', type: 'application/pdf', body: Buffer.from(rendered.bytes)})).status, 200);
     await rpc('finish_worksheet', service, {target_worksheet_id: worksheetId, token: claim.lease_token,
-      result: {pages: pdf.pages, byte_size: rendered.bytes.length, sha256: pdf.sha256, renderer_version: 'a4-v2'}});
+      result: {pages: pdf.pages, byte_size: rendered.bytes.length, sha256: pdf.sha256, renderer_version: rendered.renderer_version}});
     assert.equal(hash((await signedBytes(config, owner.token, 'worksheets', pdf.path)).bytes), pdf.sha256);
     passed('real OTP users, two isolated families, completed/pending tasks, ledger receipt, four private images and a rendered PDF seeded');
     await quiesce();
