@@ -47,6 +47,7 @@ import { ocrFieldCases } from './test_ocr_field_cases.mjs';
 import { questionCatalogCases } from './test_question_catalog_cases.mjs';
 import { reviewMilestoneCases } from './test_review_milestone_cases.mjs';
 import { reviewAutoCompletionCases } from './test_review_auto_completion_cases.mjs';
+import { reviewRefreshCases } from './test_review_refresh_cases.mjs';
 import { reviewConfidenceCases } from './test_review_confidence_cases.mjs';
 import { familyTimezoneCases } from './test_family_timezone_cases.mjs';
 import { worksheetVersionCases } from './test_worksheet_version_cases.mjs';
@@ -1223,6 +1224,7 @@ try {
   await questionCatalogCases({client,scalar,login,denied,check,otherUid});
   await reviewMilestoneCases({client,scalar,login,denied,check,otherUid});
   await reviewAutoCompletionCases({client,scalar,login,denied,check,otherUid});
+  await reviewRefreshCases({client,scalar,login,denied,check,otherUid});
   await reviewConfidenceCases({client,scalar,login,denied,check,otherUid});
   await familyTimezoneCases({client,scalar,login,denied,check,otherUid});
   await worksheetVersionCases({client,scalar,login,denied,check,otherUid});

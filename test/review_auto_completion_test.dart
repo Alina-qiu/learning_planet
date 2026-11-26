@@ -120,6 +120,7 @@ class OnlineAutoReview extends MilestoneReview {
     String value,
     String command, {
     ReviewConfidence? confidence,
+    int? questionVersion,
   }) async {
     check();
     submitted = value;

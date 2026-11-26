@@ -14,6 +14,7 @@ import 'package:learning_planet/features/tasks/data/offline_task_repository.dart
 import 'package:learning_planet/features/tasks/data/task_repository.dart';
 import 'package:learning_planet/features/tasks/data/task_sync_remote.dart';
 import 'package:learning_planet/features/tasks/domain/task.dart';
+import 'package:learning_planet/features/tasks/domain/task_start_origin.dart';
 import 'package:learning_planet/features/wrong_questions/data/review_repository.dart';
 import 'package:learning_planet/features/wrong_questions/domain/review_confidence.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -302,6 +303,73 @@ void main() {
   );
 
   test(
+    'another session can change the daily preview up to first start',
+    () async {
+      final id = await child('双端复习清单');
+      final editor = SupabaseReviewRepository(parent);
+      final reader = SupabaseReviewRepository(peer);
+      final tasks = SupabaseTaskRepository(peer);
+      Future<void> save(String prompt, String answer, {String? question}) =>
+          editor.save(id, {
+            'kind': 'question',
+            'subject': 'math',
+            'prompt': prompt,
+            'answers': [answer],
+          }, questionId: question);
+      List<Map<String, dynamic>> items(Map<String, dynamic> snapshot) =>
+          (snapshot['items'] as List).cast<Map<String, dynamic>>();
+
+      await save('1 + 1', '2');
+      final taskId = (await tasks.loadTasks(id)).single.id;
+      final original = items(await reader.task(taskId)).single;
+      await editor.archive(original['wrong_question_id'] as String, true);
+      final withdrawn = await reader.task(taskId);
+      expect(withdrawn['task']['review_waiting_for_due'], isTrue);
+      expect(items(withdrawn), isEmpty);
+      expect(await tasks.loadTasks(id), isEmpty);
+      await save('2 + 2', '4');
+      expect((await tasks.loadTasks(id)).single.id, taskId);
+      final amended = items(await reader.task(taskId));
+      expect(amended.map((q) => q['prompt']), ['2 + 2']);
+
+      // No preview request between this edit and starting on the other device.
+      await save('3 + 3', '6');
+      await startReviewWithOrigin(reader, taskId, TaskStartOrigin.childMode);
+      final started = await reader.task(taskId);
+      expect(started['task']['status'], 'in_progress');
+      final frozen = items(started);
+      expect(
+        frozen.map((q) => q['prompt']),
+        unorderedEquals(['2 + 2', '3 + 3']),
+      );
+
+      final editedId = amended.single['wrong_question_id'] as String;
+      await save('4 + 4', '8', question: editedId);
+      await save('5 + 5', '10');
+      expect((await tasks.loadTasks(id)).single.id, taskId);
+      expect(items(await reader.task(taskId)), frozen);
+      final graded = await reader.answer(taskId, editedId, '4', uuid.v4());
+      expect(
+        items(
+          graded,
+        ).singleWhere((q) => q['wrong_question_id'] == editedId)['result'],
+        isTrue,
+      );
+      final remaining = frozen.singleWhere(
+        (q) => q['wrong_question_id'] != editedId,
+      );
+      final done = await reader.answer(
+        taskId,
+        remaining['wrong_question_id'] as String,
+        '6',
+        uuid.v4(),
+      );
+      expect(done['task']['status'], 'completed');
+      expect(items(done).every((q) => q['result'] == true), isTrue);
+    },
+  );
+
+  test(
     'four/five-argument review overloads preserve confidence and automatically settle final answer',
     () async {
       final id = await child('复习 HTTP');
@@ -360,6 +428,99 @@ void main() {
         (await reviews.questions(id)).map((q) => q['last_answer_confidence']),
         unorderedEquals([1, 2, null]),
       );
+    },
+  );
+
+  test(
+    'an offline answer stays with the original question until the child adopts the revised preview',
+    () async {
+      final id = await child('离线题单变更');
+      final editor = SupabaseReviewRepository(parent);
+      final transport = FaultTransport();
+      final client = await connect('peer', transport: transport);
+      final owner = client.auth.currentUser!.id;
+      final store = OfflineStore(NativeDatabase.memory());
+      final tasks = OfflineTaskRepository(
+        store: store,
+        remote: SupabaseTaskSyncRemote(client),
+        live: SupabaseTaskRepository(client),
+        accountId: () => client.auth.currentUser?.id,
+        autoSync: false,
+      )..setForeground(false);
+      final reviews = CachedReviewRepository(
+        SupabaseReviewRepository(client),
+        store,
+        tasks.accountId,
+        tasks: tasks,
+      );
+      Future<void> setQuestion(
+        String prompt,
+        String answer, {
+        String? questionId,
+      }) => editor.save(id, {
+        'kind': 'question',
+        'subject': 'math',
+        'prompt': prompt,
+        'answers': [answer],
+      }, questionId: questionId);
+      Map<String, dynamic> onlyItem(Map<String, dynamic> snapshot) =>
+          (snapshot['items'] as List).cast<Map<String, dynamic>>().single;
+
+      try {
+        await setQuestion('6 + 6', '12');
+        final taskId = (await tasks.loadTasks(id)).single.id;
+        final original = onlyItem(await reviews.task(taskId));
+        final question = original['wrong_question_id'] as String;
+        transport.offline = true;
+        await startReviewWithOrigin(reviews, taskId, TaskStartOrigin.childMode);
+        final saved = await reviews.answer(taskId, question, '12', uuid.v4());
+        expect(saved['local_completion'], isTrue);
+
+        // The same question ID now has a different prompt and answer key.
+        await setQuestion('7 + 7', '14', questionId: question);
+        transport.offline = false;
+        await tasks.synchronize(id);
+        final conflict = await reviews.task(taskId);
+        expect(conflict['sync_conflict'], isTrue);
+        expect(onlyItem(conflict)['prompt'], '6 + 6');
+        expect(onlyItem(conflict)['conflict_answer'], '12');
+        final server = await editor.task(taskId);
+        expect(server['task']['status'], 'ready');
+        expect(onlyItem(server)['prompt'], '7 + 7');
+        expect(onlyItem(server)['result'], isNull);
+        final remoteTasks = SupabaseTaskRepository(parent);
+        expect((await remoteTasks.loadWallet(id)).coins, 0);
+
+        await tasks.acceptServer(id, taskId);
+        final adopted = await reviews.task(taskId);
+        expect(onlyItem(adopted)['prompt'], '7 + 7');
+        expect(onlyItem(adopted)['conflict_answer'], isNull);
+        expect(await store.commands(owner), isEmpty);
+        await startReviewWithOrigin(reviews, taskId, TaskStartOrigin.childMode);
+        await reviews.answer(taskId, question, '14', uuid.v4());
+        await tasks.synchronize(id);
+        await tasks.synchronize(id);
+        final done = await editor.task(taskId);
+        expect(done['task']['status'], 'completed');
+        expect(onlyItem(done)['result'], isTrue);
+        final wallet = await remoteTasks.loadWallet(id);
+        expect((wallet.coins, wallet.xp), (15, 15));
+        final ledger = await parent
+            .from('ledger_entries')
+            .select('asset_type,amount')
+            .eq('source_id', taskId);
+        expect(
+          ledger,
+          unorderedEquals([
+            {'asset_type': 'coin', 'amount': 15},
+            {'asset_type': 'xp', 'amount': 15},
+          ]),
+        );
+      } finally {
+        await tasks.dispose();
+        await store.close();
+        transport.close();
+      }
     },
   );
 

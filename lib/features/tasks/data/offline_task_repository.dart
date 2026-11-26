@@ -177,6 +177,22 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     bool dataChanged = true,
   }) async {
     final rows = await store.commands(owner);
+    _publishRows(
+      owner,
+      rows,
+      phase,
+      message: message,
+      dataChanged: dataChanged,
+    );
+  }
+
+  void _publishRows(
+    String owner,
+    List<Map<String, dynamic>> rows,
+    TaskSyncPhase phase, {
+    String? message,
+    bool dataChanged = true,
+  }) {
     _check(owner);
     final conflicts = [
       for (final row in rows)
@@ -463,7 +479,8 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
       final command = row['command'] as Map<String, dynamic>;
       if (row['state'] == 'conflict' && command['kind'] == 'review_answer') {
         for (final item in items) {
-          if (item['wrong_question_id'] == command['question_id']) {
+          if (item['wrong_question_id'] == command['question_id'] &&
+              item['question_version'] == command['question_version']) {
             item['conflict_answer'] = command['answer'];
             item['conflict_answer_confidence'] = command['answer_confidence'];
           }
@@ -473,6 +490,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
       if (command['kind'] == 'review_answer') {
         for (final item in items) {
           if (item['wrong_question_id'] == command['question_id'] &&
+              item['question_version'] == command['question_version'] &&
               item['result'] == null) {
             item['pending_answer'] = command['answer'];
             item['pending_answer_confidence'] = command['answer_confidence'];
@@ -498,6 +516,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     String taskId,
     String operation, {
     String? questionId,
+    int? questionVersion,
     String? answer,
     String? commandId,
     TaskStartOrigin? startOrigin,
@@ -506,6 +525,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     taskId,
     'review_$operation',
     questionId: questionId,
+    questionVersion: questionVersion,
     answer: answer,
     commandId: commandId,
     startOrigin: startOrigin,
@@ -516,6 +536,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     String taskId,
     String kind, {
     String? questionId,
+    int? questionVersion,
     String? answer,
     String? commandId,
     TaskStartOrigin? startOrigin,
@@ -529,163 +550,179 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     }
     final owner = _account();
     final generation = store.reviewGeneration(owner);
-    final review = kind.startsWith('review_')
-        ? await store.read(owner, 'review-task:$taskId')
-        : null;
-    if (kind.startsWith('review_') && review == null) {
-      throw StateError('请先联网加载复习题目');
-    }
-    final operation = kind.replaceFirst('review_', '');
-    final childId = review == null
-        ? _activeChild
-        : (review['task'] as Map)['child_id'] as String;
-    if (childId == null) throw StateError('请先打开任务列表');
-    _activeChild = childId;
-    final cache = await _cache(owner, childId);
-    final rows = await store.commands(owner, childId: childId);
-    if (rows.any(
-      (row) => row['task_id'] == taskId && row['state'] == 'conflict',
-    )) {
-      throw StateError('此任务存在同步冲突，请先采用服务端状态');
-    }
-    final all = await store.commands(owner);
-    if (all.length >= 500) throw StateError('待同步操作已达上限，请先联网同步');
-    final source = (cache['tasks'] as List)
-        .cast<Map<String, dynamic>>()
-        .where((row) => row['id'] == taskId)
-        .firstOrNull;
-    if (source == null) throw StateError('任务不在当前孩子的缓存中');
-    var task = TaskItem.fromJson(
-      review == null ? source : review['task'] as Map<String, dynamic>,
-    );
-    if (review != null && task.sourceType != 'automatic_wrong_review') {
-      throw StateError('不是复习任务');
-    }
-    if (task.sourceType == 'automatic_wrong_review' &&
-        review == null &&
-        kind != 'abandon') {
-      throw StateError('复习任务需要完成题目作答，不支持普通离线打卡');
-    }
-    final chain = rows
-        .where((row) => row['task_id'] == taskId && row['state'] == 'pending')
-        .toList();
-    for (final row in chain) {
-      task = _project(task, row['command'] as Map<String, dynamic>);
-    }
-    if (operation == 'complete' && task.status == TaskStatus.completed) return;
-    if (kind == 'abandon' && task.status == TaskStatus.abandoned) return;
-    if (operation == 'answer' && task.status == TaskStatus.completed) {
-      // The final local answer and its automatic completion commit together.
-      // Retrying that answer must not append another completion.
-      final saved = chain.where((row) {
-        final command = row['command'] as Map;
-        return command['kind'] == 'review_answer' &&
-            command['question_id'] == questionId &&
-            command['answer'] == answer &&
-            (confidence == null ||
-                command['answer_confidence'] == confidence.wire);
-      });
-      if (saved.isNotEmpty) return;
-    }
-    final allowed = switch (operation) {
-      'start' =>
-        task.status == TaskStatus.ready || task.status == TaskStatus.scheduled,
-      'pause' => task.status == TaskStatus.inProgress,
-      'answer' => task.status == TaskStatus.inProgress,
-      'resume' => task.status == TaskStatus.paused,
-      'abandon' => !task.isTerminal,
-      'complete' =>
-        task.status == TaskStatus.inProgress ||
-            task.status == TaskStatus.paused,
-      _ => false,
-    };
-    if (!allowed) throw StateError('任务当前状态不允许此操作');
-    Map<String, dynamic>? reviewItem;
-    var automaticComplete = false;
-    if (review != null) {
-      final items = (review['items'] as List).cast<Map<String, dynamic>>();
-      final pendingAnswers = {
-        for (final row in chain)
-          if ((row['command'] as Map)['kind'] == 'review_answer')
-            (row['command'] as Map)['question_id']: row['command'] as Map,
-      };
-      if (operation == 'answer') {
-        reviewItem = items
-            .where((item) => item['wrong_question_id'] == questionId)
-            .firstOrNull;
-        if (reviewItem == null ||
-            answer == null ||
-            answer.trim().isEmpty ||
-            answer.length > 500) {
-          throw StateError('请填写有效答案（最多500字）');
-        }
-        if (reviewItem['result'] != null) throw StateError('此题已由服务端判定');
-        if (pendingAnswers.containsKey(questionId)) {
-          final pending = pendingAnswers[questionId]!;
-          if (pending['answer'] == answer &&
+    final privacy = store.privacyGeneration;
+    final appended = await store.transaction(() async {
+      final review = kind.startsWith('review_')
+          ? await store.read(owner, 'review-task:$taskId')
+          : null;
+      if (kind.startsWith('review_') && review == null) {
+        throw StateError('请先联网加载复习题目');
+      }
+      final operation = kind.replaceFirst('review_', '');
+      final childId = review == null
+          ? _activeChild
+          : (review['task'] as Map)['child_id'] as String;
+      if (childId == null) throw StateError('请先打开任务列表');
+      _activeChild = childId;
+      final cache = await _cache(owner, childId);
+      // One ordered account snapshot supplies the child chain, the global limit
+      // and, once committed, the pending/conflict summary for all children.
+      final all = await store.commands(owner);
+      final rows = all.where((row) => row['child_id'] == childId);
+      if (rows.any(
+        (row) => row['task_id'] == taskId && row['state'] == 'conflict',
+      )) {
+        throw StateError('此任务存在同步冲突，请先采用服务端状态');
+      }
+      if (all.length >= 500) throw StateError('待同步操作已达上限，请先联网同步');
+      final source = (cache['tasks'] as List)
+          .cast<Map<String, dynamic>>()
+          .where((row) => row['id'] == taskId)
+          .firstOrNull;
+      if (source == null) throw StateError('任务不在当前孩子的缓存中');
+      var task = TaskItem.fromJson(
+        review == null ? source : review['task'] as Map<String, dynamic>,
+      );
+      if (review != null && task.sourceType != 'automatic_wrong_review') {
+        throw StateError('不是复习任务');
+      }
+      if (task.sourceType == 'automatic_wrong_review' &&
+          review == null &&
+          kind != 'abandon') {
+        throw StateError('复习任务需要完成题目作答，不支持普通离线打卡');
+      }
+      final chain = rows
+          .where((row) => row['task_id'] == taskId && row['state'] == 'pending')
+          .toList();
+      for (final row in chain) {
+        task = _project(task, row['command'] as Map<String, dynamic>);
+      }
+      if (operation == 'complete' && task.status == TaskStatus.completed) {
+        return null;
+      }
+      if (kind == 'abandon' && task.status == TaskStatus.abandoned) return null;
+      if (operation == 'answer' && task.status == TaskStatus.completed) {
+        // The final local answer and its automatic completion commit together.
+        // Retrying that answer must not append another completion.
+        final saved = chain.where((row) {
+          final command = row['command'] as Map;
+          return command['kind'] == 'review_answer' &&
+              command['question_id'] == questionId &&
+              command['answer'] == answer &&
               (confidence == null ||
-                  pending['answer_confidence'] == confidence.wire)) {
-            return;
-          }
-          throw StateError('此题已保存本机，待服务端确认');
+                  command['answer_confidence'] == confidence.wire);
+        });
+        if (saved.isNotEmpty) return null;
+      }
+      final allowed = switch (operation) {
+        'start' =>
+          task.status == TaskStatus.ready ||
+              task.status == TaskStatus.scheduled,
+        'pause' => task.status == TaskStatus.inProgress,
+        'answer' => task.status == TaskStatus.inProgress,
+        'resume' => task.status == TaskStatus.paused,
+        'abandon' => !task.isTerminal,
+        'complete' =>
+          task.status == TaskStatus.inProgress ||
+              task.status == TaskStatus.paused,
+        _ => false,
+      };
+      if (!allowed) throw StateError('任务当前状态不允许此操作');
+      Map<String, dynamic>? reviewItem;
+      var automaticComplete = false;
+      if (review != null) {
+        final items = (review['items'] as List).cast<Map<String, dynamic>>();
+        if (operation == 'start' &&
+            (items.isEmpty ||
+                (review['task'] as Map)['review_waiting_for_due'] == true)) {
+          throw StateError('今天暂时没有到期的复习题');
         }
-        automaticComplete =
-            (review['task'] as Map)['review_auto_complete'] == true &&
-            items.every(
-              (item) =>
-                  item['result'] != null ||
-                  item['wrong_question_id'] == questionId ||
-                  pendingAnswers.containsKey(item['wrong_question_id']),
-            );
-      }
-      if (operation == 'complete' &&
-          (items.isEmpty ||
-              items.any(
+        final pendingAnswers = {
+          for (final row in chain)
+            if ((row['command'] as Map)['kind'] == 'review_answer')
+              (row['command'] as Map)['question_id']: row['command'] as Map,
+        };
+        if (operation == 'answer') {
+          reviewItem = items
+              .where((item) => item['wrong_question_id'] == questionId)
+              .firstOrNull;
+          if (reviewItem == null ||
+              answer == null ||
+              answer.trim().isEmpty ||
+              answer.length > 500) {
+            throw StateError('请填写有效答案（最多500字）');
+          }
+          if (reviewItem['result'] != null) throw StateError('此题已由服务端判定');
+          if (questionVersion != null &&
+              reviewItem['question_version'] != questionVersion) {
+            throw StateError('题目已更新，请查看新题后作答');
+          }
+          if (pendingAnswers.containsKey(questionId)) {
+            final pending = pendingAnswers[questionId]!;
+            if (pending['answer'] == answer &&
+                (confidence == null ||
+                    pending['answer_confidence'] == confidence.wire)) {
+              return null;
+            }
+            throw StateError('此题已保存本机，待服务端确认');
+          }
+          automaticComplete =
+              (review['task'] as Map)['review_auto_complete'] == true &&
+              items.every(
                 (item) =>
-                    item['result'] == null &&
-                    !pendingAnswers.containsKey(item['wrong_question_id']),
-              ))) {
-        throw StateError('请先提交全部题目的答案');
+                    item['result'] != null ||
+                    item['wrong_question_id'] == questionId ||
+                    pendingAnswers.containsKey(item['wrong_question_id']),
+              );
+        }
+        if (operation == 'complete' &&
+            (items.isEmpty ||
+                items.any(
+                  (item) =>
+                      item['result'] == null &&
+                      !pendingAnswers.containsKey(item['wrong_question_id']),
+                ))) {
+          throw StateError('请先提交全部题目的答案');
+        }
       }
-    }
-    final at = _anchoredNow(cache);
-    if (at.isAfter(DateTime.parse(cache['lease_expires_at'] as String))) {
-      throw StateError('离线缓存授权已超过七天，请联网刷新');
-    }
-    if ((task.activeStartedAt != null && at.isBefore(task.activeStartedAt!)) ||
-        (chain.isNotEmpty &&
-            at.isBefore(
-              DateTime.parse(
-                (chain.last['command'] as Map)['occurred_at'] as String,
-              ),
-            ))) {
-      throw StateError('设备时间发生变化，请联网校准');
-    }
-    if ((operation == 'complete' || automaticComplete) &&
-        task.elapsedSeconds(at) < task.minimumSeconds) {
-      throw StateError('尚未达到最低有效时长');
-    }
-    if (all.length + (automaticComplete ? 2 : 1) > 500) {
-      throw StateError('待同步操作已达上限，请先联网同步');
-    }
-    final command = <String, dynamic>{
-      'command_id': commandId ?? const Uuid().v4(),
-      'task_id': task.id,
-      'kind': kind,
-      'lease_id': cache['lease_id'],
-      'expected_version': task.serverVersion,
-      'predecessor_id': chain.isEmpty ? null : chain.last['command_id'],
-      'occurred_at': at.toUtc().toIso8601String(),
-      if (startOrigin != null) 'start_origin': startOrigin.wire,
-      if (reviewItem != null) ...{
-        'question_id': questionId,
-        'question_version': reviewItem['question_version'],
-        'answer': answer,
-        if (confidence != null) 'answer_confidence': confidence.wire,
-      },
-    };
-    _check(owner);
-    await store.transaction(() async {
+      final at = _anchoredNow(cache);
+      if (at.isAfter(DateTime.parse(cache['lease_expires_at'] as String))) {
+        throw StateError('离线缓存授权已超过七天，请联网刷新');
+      }
+      if ((task.activeStartedAt != null &&
+              at.isBefore(task.activeStartedAt!)) ||
+          (chain.isNotEmpty &&
+              at.isBefore(
+                DateTime.parse(
+                  (chain.last['command'] as Map)['occurred_at'] as String,
+                ),
+              ))) {
+        throw StateError('设备时间发生变化，请联网校准');
+      }
+      if ((operation == 'complete' || automaticComplete) &&
+          task.elapsedSeconds(at) < task.minimumSeconds) {
+        throw StateError('尚未达到最低有效时长');
+      }
+      if (all.length + (automaticComplete ? 2 : 1) > 500) {
+        throw StateError('待同步操作已达上限，请先联网同步');
+      }
+      final command = <String, dynamic>{
+        'command_id': commandId ?? const Uuid().v4(),
+        'task_id': task.id,
+        'kind': kind,
+        'lease_id': cache['lease_id'],
+        'expected_version': task.serverVersion,
+        'predecessor_id': chain.isEmpty ? null : chain.last['command_id'],
+        'occurred_at': at.toUtc().toIso8601String(),
+        if (startOrigin != null) 'start_origin': startOrigin.wire,
+        if (reviewItem != null) ...{
+          'question_id': questionId,
+          'question_version': reviewItem['question_version'],
+          'answer': answer,
+          if (confidence != null) 'answer_confidence': confidence.wire,
+        },
+      };
+      _check(owner);
       if (review != null && store.reviewGeneration(owner) != generation) {
         throw StateError('复习缓存已清理，请重新加载');
       }
@@ -703,14 +740,28 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
           'occurred_at': command['occurred_at'],
         });
       }
+      _check(owner);
+      final pending = {'task_id': task.id, 'state': 'pending'};
+      return (
+        childId: childId,
+        rows: [...all, pending, if (automaticComplete) pending],
+      );
     });
-    await _publish(
-      owner,
-      _state.phase == TaskSyncPhase.offline
-          ? TaskSyncPhase.offline
-          : TaskSyncPhase.syncing,
-    );
-    if (_foreground) _backgroundSync(childId, followUp: true);
+    _check(owner);
+    if (appended == null) return;
+    final phase = _state.phase == TaskSyncPhase.offline
+        ? TaskSyncPhase.offline
+        : TaskSyncPhase.syncing;
+    if (privacy != store.privacyGeneration ||
+        generation != store.reviewGeneration(owner)) {
+      // A cleanup can run as SQLite releases our transaction. Before publishing
+      // an older snapshot, recheck the child's visibility and read the new queue.
+      await _publish(owner, phase);
+      await _cache(owner, appended.childId, includeTasks: false);
+    } else {
+      _publishRows(owner, appended.rows, phase);
+    }
+    if (_foreground) _backgroundSync(appended.childId, followUp: true);
   });
 
   @override

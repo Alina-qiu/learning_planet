@@ -159,6 +159,53 @@ void main() {
     },
   );
 
+  test(
+    'online-only answers require the displayed version of the started question',
+    () async {
+      var status = 'ready';
+      final calls = <String>[];
+      final client = SupabaseClient(
+        'https://project.example.test',
+        'public-test-key',
+        httpClient: MockClient((request) async {
+          calls.add(request.url.pathSegments.last);
+          return http.Response(
+            jsonEncode({
+              'task': {'status': status},
+              'items': [
+                {'wrong_question_id': 'q', 'question_version': 2},
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+            request: request,
+          );
+        }),
+      );
+      try {
+        final repository = SupabaseReviewRepository(client);
+        await expectLater(
+          repository.answer('t', 'q', '4', 'k', questionVersion: 2),
+          throwsStateError,
+        );
+        status = 'in_progress';
+        await expectLater(
+          repository.answer('t', 'q', '4', 'k', questionVersion: 1),
+          throwsStateError,
+        );
+        await repository.answer('t', 'q', '4', 'k', questionVersion: 2);
+        expect(calls, [
+          'load_review_task',
+          'load_review_task',
+          'load_review_task',
+          'submit_review_answer',
+        ]);
+      } finally {
+        await client.dispose();
+      }
+    },
+  );
+
   testWidgets(
     'a child chooses confidence before submission and sees the recorded value after grading',
     (tester) async {

@@ -37,10 +37,12 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
       (ref.read(authAccountIdProvider), widget.childId, widget.taskId);
   bool _busy = false;
   bool _completionShown = false;
+  bool _hadConflict = false;
   final _controllers = <String, TextEditingController>{};
   final _commandIds = <String, String>{};
   final _confidence = <String, ReviewConfidence>{};
-  String _answerKey(String questionId) => '${widget.taskId}:$questionId';
+  String _answerKey(Map<String, dynamic> item) =>
+      '$_currentScope:${item['wrong_question_id']}:${item['question_version']}';
   final _completionKey = 'review:${const Uuid().v4()}';
 
   void _showCompletion(ReviewRepository repository, {required bool pending}) {
@@ -118,8 +120,37 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
         .when(
           data: (data) {
             ref.watch(feedbackPreferencesProvider);
+            final conflict = data['sync_conflict'] == true;
+            if (conflict && !_hadConflict) {
+              // The durable draft remains with its original prompt. A future
+              // adoption must not revive its text, confidence or command ID.
+              final discarded = _controllers.values.toList();
+              _controllers.clear();
+              _confidence.clear();
+              _commandIds.clear();
+              _completionShown = false;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                for (final controller in discarded) {
+                  controller.dispose();
+                }
+              });
+            }
+            _hadConflict = conflict;
             final task = data['task'] as Map<String, dynamic>;
             final items = (data['items'] as List).cast<Map<String, dynamic>>();
+            if (task['review_waiting_for_due'] == true ||
+                (items.isEmpty &&
+                    (task['status'] == 'ready' ||
+                        task['status'] == 'scheduled'))) {
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  TaskSyncBanner(childId: widget.childId),
+                  const Text('今天暂时没有到期的复习题'),
+                  const Text('有新题到期时，今天的复习任务会重新出现。'),
+                ],
+              );
+            }
             final answered = items
                 .where((item) => item['result'] != null)
                 .length;
@@ -143,8 +174,7 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
                 task['status'] == 'skipped' || task['status'] == 'expired';
             final offline = data['offline_cache'] == true;
             final unavailable =
-                (offline && data['offline_enabled'] != true) ||
-                data['sync_conflict'] == true;
+                (offline && data['offline_enabled'] != true) || conflict;
             final active = task['status'] == 'in_progress' && !abandoned;
             return ListView(
               padding: EdgeInsets.fromLTRB(
@@ -156,6 +186,8 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
               children: [
                 if (_busy) const LinearProgressIndicator(),
                 TaskSyncBanner(childId: widget.childId),
+                if (conflict)
+                  const Text('复习题单或任务状态已变化。本机答案已保留，请在同步中心核对后采用服务端状态。'),
                 Text(
                   '已判定 $answered / ${items.length} 题；正确 ${items.where((item) => item['result'] == true).length} 题',
                 ),
@@ -289,7 +321,7 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
                                 'answer-${item['wrong_question_id']}',
                               ),
                               controller: _controllers.putIfAbsent(
-                                _answerKey(item['wrong_question_id'] as String),
+                                _answerKey(item),
                                 TextEditingController.new,
                               ),
                               enabled: !_busy && !unavailable && active,
@@ -306,17 +338,11 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
                                   ChoiceChip(
                                     label: Text(level.label),
                                     selected:
-                                        _confidence[_answerKey(
-                                          item['wrong_question_id'] as String,
-                                        )] ==
-                                        level,
+                                        _confidence[_answerKey(item)] == level,
                                     onSelected: _busy || unavailable || !active
                                         ? null
                                         : (_) => setState(() {
-                                            _confidence[_answerKey(
-                                                  item['wrong_question_id']
-                                                      as String,
-                                                )] =
+                                            _confidence[_answerKey(item)] =
                                                 level;
                                           }),
                                   ),
@@ -330,18 +356,18 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
                                       final id =
                                           item['wrong_question_id'] as String;
                                       final answer =
-                                          _controllers[_answerKey(id)]!.text
+                                          _controllers[_answerKey(item)]!.text
                                               .trim();
                                       if (answer.isEmpty) {
                                         throw StateError('请先填写答案');
                                       }
                                       final confidence =
-                                          _confidence[_answerKey(id)];
+                                          _confidence[_answerKey(item)];
                                       if (confidence == null) {
                                         throw StateError('请选择这次作答的把握程度');
                                       }
                                       final command = _commandIds.putIfAbsent(
-                                        _answerKey(id),
+                                        _answerKey(item),
                                         () => const Uuid().v4(),
                                       );
                                       final repository = ref.read(
@@ -353,6 +379,8 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
                                         answer,
                                         command,
                                         confidence: confidence,
+                                        questionVersion:
+                                            item['question_version'] as int?,
                                       );
                                       if ((saved['task'] as Map)['status'] ==
                                           'completed') {

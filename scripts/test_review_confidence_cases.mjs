@@ -73,7 +73,9 @@ export async function reviewConfidenceCases({client,scalar,login,denied,check,ot
       const [days,hours,errors,confidence]=rules[i];
       await client.query("update public.wrong_questions set review_due_at=((public.family_today($2)::date+$3::integer)::timestamp at time zone 'Asia/Shanghai')+make_interval(hours=>$4),wrong_count=$5,last_answer_confidence=$6 where id=$1",[f.questions[i],f.child,days,hours,errors,confidence]);
     }
-    await auth();const id=await scalar('select public.generate_daily_wrong_review_task($1)',[f.child]),loaded=await load(id);
+    await auth();const id=await scalar('select public.generate_daily_wrong_review_task($1)',[f.child]);
+    await scalar('select public.start_task($1)',[id]);
+    const loaded=await load(id);
     const eligible=f.questions.slice(0,12).map((id,i)=>({id,rule:rules[i]})).sort((a,b)=>a.rule[0]-b.rule[0]||b.rule[2]-a.rule[2]||(a.rule[3]??9)-(b.rule[3]??9)||a.id.localeCompare(b.id)).slice(0,10);
     assert.deepEqual(loaded.items.map(i=>i.wrong_question_id),eligible.map(i=>i.id));
     assert.deepEqual(loaded.items.map(i=>i.previous_answer_confidence),eligible.map(i=>i.rule[3]));

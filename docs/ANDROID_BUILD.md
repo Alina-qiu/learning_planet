@@ -1,13 +1,21 @@
 # Android 调试构建
 
-## 2026-11-26 通用 Android 调试包
+## 2026-11-26 每日复习刷新版
+
+本机联调包 `app-local-debug.apk` 通过 ADB 转发连接电脑上的临时服务，可以用邮箱验证码登录家庭。普通调试包 `app-debug.apk` 启动后显示未配置服务的提示。两个包分别安装，有独立的应用 ID 和本机数据。当前产物的字节数、SHA-256 及所在目录由本机交付文档统一记录。[本轮安装包和校验](../build/review-refresh-20261126/DELIVERY.md) · [启动服务和安装](LOCAL_DEBUG.md)
+
+当日自动复习在首次开始前刷新到期题、题面、标准答案和预计奖励，开始后固定本次题单。孩子离线开始后，如服务端题目版本已变化，应用保留原作答供核对，孩子可采用更新后的题目重新开始。Windows 通过 894 项 Flutter 测试，110 个核心文件的行覆盖率为 90.92%（7051/7755）。数据库通过 419 项全库与 20 项历史升级检查。[复习规则](REVIEW_AUTO_COMPLETION.md) · [本机与接口结果](../build/review-refresh-20261126/local-quality.json) · [数据库结果](../build/review-refresh-20261126/review-refresh-database.json)
+
+已登录家庭的冷启动目标为 6 秒内显示孩子、当日任务和已确认余额。首页耗时按 Release 版本、冷启动条件和设备分别记录。[首页性能实测](APP_PERFORMANCE.md)
+
+## 2026-11-26 中文 OCR 和启动性能基线（上一版）
 
 Android 支持孩子的本地定时任务提醒和家长的应用内收件箱、前台提醒。首页冷启动从进程启动开始计时，到孩子、任务和余额均可见时结束，要求不超过 6 秒。
 
 | 安装包及用途 | 包名 | 字节数 | SHA-256 |
 |---|---|---:|---|
-| [本机联调包](../build/app/outputs/flutter-apk/app-local-debug.apk)，通过 ADB 连接电脑上的服务，可登录和建立家庭 | `com.learningplanet.learning_planet.local` | 215499695 | `bf68a465e96650e4bf48a52f7550f1946fe9bf5cc76c3ae271beb7cf14c815cd` |
-| [普通调试包](../build/app/outputs/flutter-apk/app-debug.apk)，可查看未配置后端提示 | `com.learningplanet.learning_planet` | 215499563 | `7c7f89c0677634edf90902f152bcd93c6880ca569fedfca3ca49be79c8a73efc` |
+| 基线版 `app-local-debug.apk` | `com.learningplanet.learning_planet.local` | 215499695 | `bf68a465e96650e4bf48a52f7550f1946fe9bf5cc76c3ae271beb7cf14c815cd` |
+| 基线版 `app-debug.apk` | `com.learningplanet.learning_planet` | 215499563 | `7c7f89c0677634edf90902f152bcd93c6880ca569fedfca3ca49be79c8a73efc` |
 
 安装包保存在本机工作区。Release 压缩配置修复前后各重建了两款 Debug，分别逐字节核对，同名 APK 完全一致。签名与运行环境列在交付记录中。[本轮安装包和验收](../build/acceptance-20261126/DELIVERY.md) · [本机试用步骤](LOCAL_DEBUG.md)
 

@@ -94,19 +94,21 @@ class OfflineStore extends GeneratedDatabase {
     notification_pending INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(owner,family_id))''');
 
+  static const _familyAccessRevokedSql = """
+      SELECT 1 FROM family_access a WHERE owner=?1 AND active=0 AND
+        (family_id=?2 OR EXISTS (SELECT 1 FROM json_each(a.child_ids) WHERE value=?3))
+      UNION ALL SELECT 1 FROM offline_cache WHERE owner=?1 AND
+        cache_key IN ('directory-hidden:family:' || ?2, 'directory-hidden:child:' || ?3)
+      LIMIT 1
+      """;
+
   Future<bool> familyAccessRevoked(
     String owner, {
     String? familyId,
     String? childId,
   }) async {
     final row = await customSelect(
-      """
-      SELECT 1 FROM family_access a WHERE owner=?1 AND active=0 AND
-        (family_id=?2 OR EXISTS (SELECT 1 FROM json_each(a.child_ids) WHERE value=?3))
-      UNION ALL SELECT 1 FROM offline_cache WHERE owner=?1 AND
-        cache_key IN ('directory-hidden:family:' || ?2, 'directory-hidden:child:' || ?3)
-      LIMIT 1
-      """,
+      _familyAccessRevokedSql,
       variables: [
         Variable(owner),
         Variable<String>(familyId),
@@ -699,12 +701,27 @@ class OfflineStore extends GeneratedDatabase {
     String childId,
     Map<String, dynamic> command,
   ) => transaction(() async {
-    if (await accountDeletionJob(owner) != null) {
-      throw StateError('账号已申请注销，不能继续离线打卡');
-    }
-    if (await isChildDeleted(childId)) throw StateError('孩子已删除，不能继续离线打卡');
-    if (await familyAccessRevoked(owner, childId: childId)) {
-      throw StateError('家庭访问权限已撤销');
+    // All three denial reasons are evaluated in the same SQLite snapshot, in
+    // the same priority order for standalone and already-transactional callers.
+    final access = await customSelect(
+      """SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM deleted_accounts WHERE owner=?1) THEN 'account'
+        WHEN EXISTS (SELECT 1 FROM deleted_children WHERE child_id=?3) THEN 'child'
+        WHEN EXISTS ($_familyAccessRevokedSql) THEN 'family'
+        END AS denied""",
+      variables: [
+        Variable(owner),
+        const Variable<String>(null),
+        Variable(childId),
+      ],
+    ).getSingle();
+    switch (access.readNullable<String>('denied')) {
+      case 'account':
+        throw StateError('账号已申请注销，不能继续离线打卡');
+      case 'child':
+        throw StateError('孩子已删除，不能继续离线打卡');
+      case 'family':
+        throw StateError('家庭访问权限已撤销');
     }
     await customStatement(
       'INSERT INTO task_outbox(owner,command_id,child_id,task_id,payload) VALUES(?,?,?,?,?)',

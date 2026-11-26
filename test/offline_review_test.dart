@@ -9,6 +9,7 @@ import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'package:learning_planet/features/tasks/data/offline_task_repository.dart';
 import 'package:learning_planet/features/tasks/data/task_repository.dart';
 import 'package:learning_planet/features/tasks/data/task_sync_remote.dart';
+import 'package:learning_planet/features/tasks/domain/task_start_origin.dart';
 import 'package:learning_planet/features/wrong_questions/data/review_repository.dart';
 import 'package:learning_planet/features/wrong_questions/presentation/review_session_screen.dart';
 import 'offline_tasks_test.dart' show FakeTaskRemote, clone;
@@ -28,6 +29,8 @@ class ReviewRemote extends FakeTaskRemote implements ReviewTaskSyncRemote {
   };
   bool conflictNext = false;
   Completer<void>? applyEntered, applyBarrier;
+  Completer<Map<String, dynamic>>? nextReview;
+  Completer<void>? reviewEntered;
   Completer<void>? snapshotEntered;
   @override
   Future<Map<String, dynamic>> snapshot(String childId) {
@@ -39,10 +42,18 @@ class ReviewRemote extends FakeTaskRemote implements ReviewTaskSyncRemote {
 
   Map<String, dynamic> review() => clone({
     'task': tasks['task-child'],
-    'items': [item],
+    'items': tasks['task-child']!['review_waiting_for_due'] == true
+        ? []
+        : [item],
   });
   @override
   Future<Map<String, dynamic>> reviewSnapshot(String taskId) async {
+    final delayed = nextReview;
+    if (delayed != null) {
+      nextReview = null;
+      reviewEntered?.complete();
+      return delayed.future;
+    }
     check();
     return review();
   }
@@ -64,7 +75,12 @@ class ReviewRemote extends FakeTaskRemote implements ReviewTaskSyncRemote {
       'server_at': now().toIso8601String(),
       'review': review(),
     });
-    if (conflictNext) return response('conflict');
+    if (conflictNext ||
+        (command['kind'] == 'review_start' &&
+            !receipts.containsKey(command['command_id']) &&
+            command['expected_version'] != task['sync_version'])) {
+      return response('conflict');
+    }
     if (!receipts.containsKey(command['command_id'])) {
       switch (command['kind']) {
         case 'review_start' || 'review_resume':
@@ -147,6 +163,110 @@ void main() {
     await reviews.transition('task-child', 'start');
     await reviews.answer('task-child', 'question', '4', 'answer-command');
   }
+
+  test(
+    'online start refreshes a previously cached preview and confirms it',
+    () async {
+      remote.online = true;
+      remote.tasks['task-child']!['sync_version'] = 8;
+      remote.item.addAll({'prompt': '7+6', 'question_version': 2});
+      await startReviewWithOrigin(
+        reviews,
+        'task-child',
+        TaskStartOrigin.childMode,
+      );
+      final start = remote.requests.single;
+      expect(start['expected_version'], 8);
+      expect(start['start_origin'], 'child_mode');
+      expect(await store.commands('parent'), isEmpty);
+      final data = await reviews.task('task-child');
+      expect(data['task']['status'], 'in_progress');
+      expect(data['items'][0]['prompt'], '7+6');
+      await expectLater(
+        reviews.answer(
+          'task-child',
+          'question',
+          '4',
+          'old',
+          questionVersion: 0,
+        ),
+        throwsStateError,
+      );
+      expect(await store.commands('parent'), isEmpty);
+    },
+  );
+
+  test(
+    'an open preview with no remaining due questions cannot start',
+    () async {
+      remote.online = true;
+      remote.tasks['task-child']!.addAll({
+        'review_waiting_for_due': true,
+        'sync_version': 8,
+        'status': 'skipped',
+      });
+      await expectLater(
+        reviews.transition('task-child', 'start'),
+        throwsStateError,
+      );
+      expect(remote.requests, isEmpty);
+      expect(await store.commands('parent'), isEmpty);
+      remote.online = false;
+      final data = await reviews.task('task-child');
+      expect(data['items'], isEmpty);
+      expect(data['task']['review_waiting_for_due'], true);
+      await expectLater(
+        reviews.transition('task-child', 'start'),
+        throwsStateError,
+      );
+    },
+  );
+
+  test(
+    'a changed question keeps the offline draft attached to the old prompt until adoption',
+    () async {
+      await queueAnswer();
+      await reviews.complete('task-child', 'finish');
+      remote.tasks['task-child']!['sync_version'] = 8;
+      remote.item.addAll({'prompt': '7+6', 'question_version': 2});
+      remote.online = true;
+      await tasks.synchronize('child');
+      final conflict = await reviews.task('task-child');
+      expect(conflict['sync_conflict'], true);
+      expect(conflict['items'][0]['prompt'], '2+2');
+      expect(conflict['items'][0]['question_version'], 0);
+      expect(conflict['items'][0]['conflict_answer'], '4');
+      expect(remote.requests.map((row) => row['kind']), ['review_start']);
+      expect(remote.receipts, isEmpty);
+      expect((await tasks.loadWallet('child')).coins, 100);
+      await tasks.acceptServer('child', 'task-child');
+      final fresh = await reviews.task('task-child');
+      expect(fresh['sync_conflict'], false);
+      expect(fresh['items'][0]['prompt'], '7+6');
+      expect(fresh['items'][0]['conflict_answer'], isNull);
+      expect(fresh['items'][0]['result'], isNull);
+      expect(await store.commands('parent'), isEmpty);
+    },
+  );
+
+  test(
+    'a late preview cannot replace the snapshot after the offline start',
+    () async {
+      final pending = Completer<Map<String, dynamic>>();
+      remote.nextReview = pending;
+      remote.reviewEntered = Completer<void>();
+      final reading = reviews.task('task-child');
+      await remote.reviewEntered!.future;
+      await queueAnswer();
+      remote.item.addAll({'prompt': '7+6', 'question_version': 2});
+      remote.tasks['task-child']!['sync_version'] = 8;
+      pending.complete(remote.review());
+      final original = await reading;
+      expect(original['items'][0]['prompt'], '2+2');
+      expect(original['items'][0]['pending_answer'], '4');
+      expect(original['items'][0]['question_version'], 0);
+    },
+  );
 
   test(
     'offline review saves answers immediately without grading or changing the wallet',

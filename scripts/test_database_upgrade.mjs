@@ -193,6 +193,21 @@ async function seedLegacyPushDevice() {
     values ($1,$2,$3,'upgrade:push','weekly','running',1,now()+interval '1 day',$4,3,'old hash',$5,now()+interval '2 minutes') returning id`,
     [data.family, owner, data.child, data.retired, data.pushLease]);
 }
+async function seedPendingReviewStart() {
+  await login(raceOwner);
+  const family = await scalar('select family_id from public.children where id=$1',[data.raceChild]);
+  await scalar("select public.verify_parent_pin($1,'2468')",[family]);
+  data.pendingReviewChild = await scalar("select public.create_child($1,'Pending review at upgrade',1::smallint)",[family]);
+  const prompt = {kind:'question',subject:'math',prompt:'2 + 2',answers:['4']};
+  data.editedQuestion = await scalar('select public.save_review_question($1,$2)',[data.pendingReviewChild,prompt]);
+  const cache = await scalar('select public.task_sync_snapshot($1)',[data.pendingReviewChild]);
+  const task = cache.tasks[0];
+  data.cachedReviewStart = {kind:'review_start', task_id:task.id, command_id:randomUUID(), lease_id:cache.lease_id,
+    expected_version:task.sync_version, occurred_at:await scalar('select clock_timestamp()::text')};
+  await scalar('select public.save_review_question($1,$2,$3)',
+    [data.pendingReviewChild,{...prompt,prompt:'2 + 3',answers:['5']},data.editedQuestion]);
+  assert.equal((await scalar('select public.load_review_task($1)',[task.id])).items[0].prompt,'2 + 2');
+}
 const checkpoints = new Map([
   ['202609160008_task_maintenance.sql', ['008: old family, children, completed/pending tasks and ledger', seedCore]],
   ['202609160011_wrong_question_pinyin_review.sql', ['011: partially answered frozen review with private answer keys', seedReview]],
@@ -201,6 +216,7 @@ const checkpoints = new Map([
   ['202611040030_durable_image_uploads.sql', ['030: pre-upgrade offline lease and unsent command IDs', seedOffline]],
   ['202611230072_cleanup_file_progress.sql', ['072: real empty daily review and protected snapshots with business history', seedEmptyReview]],
   ['202611240073_review_candidate_lock.sql', ['073: active parent devices and a leased delivery on a retired transport', seedLegacyPushDevice]],
+  ['202611260074_parent_push_transports.sql', ['074: published unstarted review, pre-upgrade offline start and later key edit', seedPendingReviewStart]],
 ]);
 
 try {
@@ -220,6 +236,22 @@ try {
   });
   assert.equal(report.checkpoints.length, checkpoints.size);
   report.serverVersion = database.serverVersion;
+  await check('an existing unstarted review detects pre-upgrade edits at first offline replay and freezes the refreshed key on retry', async () => {
+    await login(raceOwner);
+    const old = data.cachedReviewStart;
+    const stale = await scalar('select public.apply_task_command($1)',[old]);
+    assert.equal(stale.outcome,'conflict');
+    assert.equal(stale.reason,'题目快照已改变，请重新加载复习');
+    assert.equal(stale.review.task.id,old.task_id);
+    assert.equal(stale.review.task.sync_version,old.expected_version+1);
+    assert.equal(stale.review.items[0].prompt,'2 + 3');
+    assert.equal(stale.review.items[0].accepted_answers,null);
+    const start = {...old,command_id:randomUUID(),expected_version:stale.task.sync_version};
+    assert.equal((await scalar('select public.apply_task_command($1)',[start])).outcome,'applied');
+    const result = await scalar('select public.submit_review_answer($1,$2,$3,$4)',[old.task_id,data.editedQuestion,'5',randomUUID()]);
+    assert.equal(result.items[0].result,true);
+    assert.equal(result.task.status,'completed');
+  });
   await check('retired parent endpoint and lease are fenced, supported registrations survive', async () => {
     await clearIdentity();
     const old = await scalar('select to_jsonb(d) from public.parent_push_devices d where device_id=$1',[data.retired]);

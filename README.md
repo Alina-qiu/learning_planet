@@ -6,15 +6,13 @@
 
 截至 2026-11-26，**Android 本机联调包已可试用**。没有测试手机时，可在电脑的 Android 模拟器里登录、创建家庭、完成任务和复习错题。iOS 已通过未签名 Debug、Release 编译及 iPhone、iPad 模拟器检查。目标手机和云端服务仍待验收。
 
-Windows 已通过 885 项 Flutter 测试，110 个核心源文件行覆盖率为 90.85%。两款 Android 调试包和 x86_64 Release（SHA-256 前缀 `e237998a`）使用同一份应用源码。Android 10 模拟器已完成一次图库中文识别、孩子逐字段校对、保存及服务端刷新。题目保持“待家长确认”。[安装与验证](docs/ANDROID_BUILD.md) · [本轮交付记录](build/acceptance-20261126/DELIVERY.md) · [当前分支 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+本机试用请选择 `app-local-debug.apk`，通过 ADB 转发连接电脑的临时服务。普通版 `app-debug.apk` 用于查看服务配置提示。两个包的路径、字节数和 SHA-256 统一记录在本机交付文档中。[本轮安装包和校验](build/review-refresh-20261126/DELIVERY.md) · [启动服务与安装](docs/LOCAL_DEBUG.md)
 
-| 调试包 | SHA-256 |
-|---|---|
-| 本机联调 `app-local-debug.apk` | `bf68a465e96650e4bf48a52f7550f1946fe9bf5cc76c3ae271beb7cf14c815cd` |
-| 普通 `app-debug.apk` | `7c7f89c0677634edf90902f152bcd93c6880ca569fedfca3ca49be79c8a73efc` |
+孩子或家长打开今日复习时，应用会刷新到期题目。孩子首次开始后，题目、顺序和标准答案随本次复习固定。离线开始时如果题目已更新，应用保留原作答供核对，孩子可采用新题单重新作答。孩子自行录入的错题需由家长确认标准答案后才会进入奖励复习。[复习规则与验收](docs/REVIEW_AUTO_COMPLETION.md)
+
+Windows 通过 894 项 Flutter 测试，110 个核心源文件的行覆盖率为 90.92%（7051/7755）。数据库通过 419 项检查和 20 项历史升级检查。PostgREST 16.2 和 16.5 各通过 11 项接口测试，覆盖两端改题、离线作答冲突和奖励核账。[Windows 与接口结果](build/review-refresh-20261126/local-quality.json) · [数据库结果](build/review-refresh-20261126/review-refresh-database.json) · [当前分支 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
 
 - [当前需求覆盖与逐项验收](docs/CURRENT_STATUS.md)：ACC、TSK、ERR、AC-01至AC-11、非功能要求及剩余依赖。
-- 试用请选择 `app-local-debug.apk`，通过 ADB 端口转发连接电脑上的测试服务。服务每次启动都会建立空数据库。[当前 Android 安装包](docs/ANDROID_BUILD.md) · [启动服务和模拟器](docs/LOCAL_DEBUG.md)
 - 常规 CI 覆盖 Flutter、Android 构建、iOS 未签名构建与模拟器、数据库升级和备份恢复。同一家庭的 Android 与 iPhone 同步另设独立验收。[当前分支检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) · [历史测试记录](docs/TESTING.md)
 - [审阅分支与远程验证](docs/REVIEW_CANDIDATE.md)：草稿PR已公开，包含iOS Debug/Release未签名构建、Android构建、数据库/HTTP/Storage及iOS模拟器运行检查；后续提交结果见PR的Checks。
 - [本机备份恢复演练](docs/BACKUP_RESTORE.md)：新环境恢复数据库与私有图片/PDF，9项检查通过；目标云端备份仍待验收。

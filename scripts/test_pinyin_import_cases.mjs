@@ -76,6 +76,7 @@ export async function pinyinImportCases({client,scalar,login,denied,check,otherU
     const config={kind:'question',subject:'chinese',prompt:'给银行标注读音',answers:['yín háng']};
     const qid=await scalar('select public.save_review_question($1,$2)',[kid,config]);
     const task=await scalar('select public.generate_daily_wrong_review_task($1)',[kid]);
+    await client.query('select public.start_task($1)',[task]);
     const before=await scalar('select public.review_question_editor($1)',[qid]);
     await client.query('select public.save_review_question($1,$2,$3)',[kid,{...word(),expected_version:before.content_version},qid]);
     const after=await scalar('select public.review_question_editor($1)',[qid]);
@@ -83,7 +84,7 @@ export async function pinyinImportCases({client,scalar,login,denied,check,otherU
     await denied('select public.save_review_question($1,$2,$3)',[kid,{...word(),expected_version:before.content_version},qid]);
     const snapshot=(await scalar('select public.load_review_task($1)',[task])).items[0];
     assert.equal(snapshot.prompt,'给银行标注读音');assert.equal(snapshot.review_kind,'question');
-    await client.query('select public.start_task($1)',[task]);await client.query('select public.submit_review_answer($1,$2,$3,$4)',[task,qid,'yín háng',randomUUID()]);
+    await client.query('select public.submit_review_answer($1,$2,$3,$4)',[task,qid,'yín háng',randomUUID()]);
     assert.equal((await scalar('select public.review_question_editor($1)',[qid])).review_attempts,0);
   });
   await check('receipt isolation and deletion prevent old imports from recreating removed words or child data',async()=>{

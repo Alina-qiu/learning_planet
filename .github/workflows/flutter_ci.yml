@@ -252,7 +252,7 @@ jobs:
           done
 
   ios-simulator:
-    name: ios-simulator (${{ matrix.ios }}, ${{ matrix.family }})
+    name: ios-simulator (${{ matrix.ios }}, ${{ matrix.family }}${{ matrix.flow == 'ocr_native' && ', OCR' || '' }})
     # MLImage's arm64 slice targets devices, not Apple Silicon simulators.
     runs-on: macos-15-intel
     timeout-minutes: 45
@@ -272,10 +272,16 @@ jobs:
             xcode: '26.2'
             family: iPad
             artifact: ios26-ipad
+          - ios: '18.5'
+            xcode: '16.4'
+            family: iPhone
+            artifact: ios18-iphone
+            flow: ocr_native
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
       IOS_VERSION: ${{ matrix.ios }}
       SIMULATOR_FAMILY: ${{ matrix.family }}
+      FIXTURE: ${{ matrix.flow || 'task_flow' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check native push delivery policy
@@ -316,7 +322,8 @@ jobs:
           device = max(candidates, key=lambda item: item['name'])
           selected = {**device, 'runtime': runtime, 'device_family': family,
                       'requested_ios': os.environ['IOS_VERSION'],
-                      'scope': 'Simulator; synthetic tasks; no cloud or physical-device acceptance'}
+                      'fixture': os.environ['FIXTURE'],
+                      'scope': 'Simulator with synthetic data'}
           (report / 'selected.json').write_text(json.dumps(selected, indent=2) + '\n')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f"id={device['udid']}\nstate={device['state']}\n")
@@ -347,7 +354,7 @@ jobs:
         run: |
           set -o pipefail
           flutter build ios --simulator --debug --no-pub --publish-port \
-            --target=integration_test/task_flow_test.dart \
+            --target="integration_test/${FIXTURE}_test.dart" \
             --dart-define=TEST_DEVICE_LABEL=github-${{ matrix.artifact }} \
             -d "$SIMULATOR_ID" 2>&1 | tee build/ios-simulator/simulator-build.log
           python3 scripts/verify_ios_bundle.py build/ios/iphonesimulator/Runner.app \
@@ -360,11 +367,11 @@ jobs:
           set -o pipefail
           xcrun simctl boot "$SIMULATOR_ID"
           xcrun simctl bootstatus "$SIMULATOR_ID" -b 2>&1 | tee build/ios-simulator/resume-boot.log
-      - name: Run native encrypted offline task flow
+      - name: Run native ${{ matrix.flow || 'task_flow' }} fixture
         timeout-minutes: 14
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
-        run: python3 scripts/run_ios_simulator_flow.py
+        run: python3 scripts/run_ios_simulator_flow.py --driver "test_driver/${FIXTURE}_driver.dart"
       - name: Collect simulator launch diagnostics
         if: always() && steps.simulator.outputs.id != ''
         timeout-minutes: 2
@@ -398,7 +405,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-simulator-task-flow-${{ matrix.artifact }}
+          name: ios-simulator-${{ matrix.flow == 'ocr_native' && 'ocr' || 'task-flow' }}-${{ matrix.artifact }}
           path: |
             build/ios-simulator/
             build/integration_results/

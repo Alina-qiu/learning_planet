@@ -130,6 +130,7 @@ class FakeReviewRepository implements ReviewRepository {
     String answer,
     String commandId, {
     ReviewConfidence? confidence,
+    int? questionVersion,
   }) async {
     check();
     submitted = answer;

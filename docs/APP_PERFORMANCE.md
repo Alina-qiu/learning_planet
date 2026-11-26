@@ -144,7 +144,7 @@ API29预置首页就绪1322.807ms、任务页244.973ms、本机完成反馈217.2
 
 ## 验收边界
 
-本机环境为Windows/WHPX、AOSP API36 x86_64、Emulator37.2.13、SwiftShader、4核/2GB模拟器；它不是 Android 和 iPhone。测试绕过生产初始化、真实登录和后端，所以JSON始终标记`qualifies_for_prd_acceptance=false`。
+这组历史测量使用 Windows/WHPX 上的 Android API 36 x86_64 模拟器，配置为 Emulator 37.2.13、SwiftShader、4 核和 2 GB 内存。测试使用预置家庭数据，JSON 中记录为 `qualifies_for_prd_acceptance=false`。
 
 尚需在指定两类手机上，以profile模式分别测量正常冷启动、真实数据主列表、完成反馈、断网/恢复、后台/重启和大字号。iOS还需macOS/Xcode编译签名；模拟器上的KeyStore和加密库验证不能代替真机安全存储及备份验收。
 

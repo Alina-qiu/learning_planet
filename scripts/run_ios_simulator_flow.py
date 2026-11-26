@@ -1,4 +1,4 @@
-"""Run the native task fixture without racing Apple's unified log stream.
+"""Run a native integration fixture using Apple's retained unified logs.
 
 The simulator and prebuilt integration app must already exist. Read retained
 system logs for the PID returned by launch, including an early VM announcement.
@@ -61,6 +61,7 @@ def wait_for_service(device, pid, report, timeout=120):
 
 DEFAULT_DRIVER = "test_driver/task_flow_driver.dart"
 CROSS_DEVICE_DRIVER = "test_driver/cross_device_sync_driver.dart"
+OCR_DRIVER = "test_driver/ocr_native_driver.dart"
 
 
 def main(driver=DEFAULT_DRIVER, private_report=None, reuse_installed=False):
@@ -92,7 +93,7 @@ def main(driver=DEFAULT_DRIVER, private_report=None, reuse_installed=False):
     pid = launch_pid(launch.stdout, bundle)
     try:
         url = wait_for_service(device, pid, report)
-        print("Dart VM ready; running the unchanged native task assertions", flush=True)
+        print(f"Dart VM ready; running {driver}", flush=True)
         with (report / "task-flow.log").open("wb") as log:
             # This is the same Dart driver invocation used by Flutter's
             # FlutterDriverService.startTest. Avoid a second device discovery
@@ -139,7 +140,7 @@ def collect_diagnostics(device, report):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--driver", choices=[DEFAULT_DRIVER, CROSS_DEVICE_DRIVER], default=DEFAULT_DRIVER)
+    parser.add_argument("--driver", choices=[DEFAULT_DRIVER, CROSS_DEVICE_DRIVER, OCR_DRIVER], default=DEFAULT_DRIVER)
     parser.add_argument("--reuse-installed", action="store_true")
     args = parser.parse_args()
     sys.exit(main(args.driver, reuse_installed=args.reuse_installed))

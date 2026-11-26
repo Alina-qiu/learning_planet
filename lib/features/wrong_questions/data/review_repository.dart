@@ -26,6 +26,7 @@ abstract interface class ReviewRepository {
     String answer,
     String commandId, {
     ReviewConfidence? confidence,
+    int? questionVersion,
   });
   Future<void> complete(String taskId, String key);
 }
@@ -159,16 +160,37 @@ class SupabaseReviewRepository
     String answer,
     String commandId, {
     ReviewConfidence? confidence,
-  }) => client.rpc<Map<String, dynamic>>(
-    'submit_review_answer',
-    params: {
-      'target_task_id': taskId,
-      'target_question_id': questionId,
-      'answer': answer,
-      'command_id': commandId,
-      if (confidence != null) 'answer_confidence': confidence.wire,
-    },
-  );
+    int? questionVersion,
+  }) async {
+    if (questionVersion != null) {
+      final owner = client.auth.currentUser?.id;
+      final snapshot = await task(taskId);
+      if (client.auth.currentUser?.id != owner) throw StateError('登录账号已变化');
+      // The server freezes the items at first start. A stale screen can only
+      // submit against an item in that frozen version, including on retry.
+      final status = (snapshot['task'] as Map)['status'];
+      final matches = (snapshot['items'] as List).cast<Map>().any(
+        (item) =>
+            item['wrong_question_id'] == questionId &&
+            item['question_version'] == questionVersion,
+      );
+      if (!const {'in_progress', 'paused', 'completed'}.contains(status) ||
+          !matches) {
+        throw StateError('题目已更新，请查看新题后作答');
+      }
+    }
+    return client.rpc<Map<String, dynamic>>(
+      'submit_review_answer',
+      params: {
+        'target_task_id': taskId,
+        'target_question_id': questionId,
+        'answer': answer,
+        'command_id': commandId,
+        if (confidence != null) 'answer_confidence': confidence.wire,
+      },
+    );
+  }
+
   @override
   Future<void> complete(String taskId, String key) => client.rpc<void>(
     'complete_task',
@@ -201,13 +223,29 @@ class CachedReviewRepository
     try {
       final data = await fetch();
       check();
+      if (key.startsWith('review-task:')) {
+        final snapshot = await store.transaction(() async {
+          // An older read can return after the first offline start. Keep the
+          // questions that the pending answers and their versions belong to.
+          if (tasks != null) {
+            final taskId = key.substring('review-task:'.length);
+            final rows = await store.commands(
+              owner,
+              childId: (data['task'] as Map)['child_id'] as String?,
+            );
+            if (rows.any((row) => row['task_id'] == taskId)) {
+              final original = await store.read(owner, key);
+              if (original != null) return original;
+            }
+          }
+          await store.writeReviewCache(owner, key, data, generation);
+          return (await store.read(owner, key)) ?? data;
+        });
+        check();
+        return snapshot;
+      }
       await store.writeReviewCache(owner, key, data, generation);
       check();
-      if (key.startsWith('review-task:')) {
-        final current = await store.read(owner, key);
-        check();
-        return current ?? data;
-      }
       return data;
     } catch (error) {
       check();
@@ -278,12 +316,29 @@ class CachedReviewRepository
   @override
   Future<void> transition(String taskId, String operation) => tasks == null
       ? live.transition(taskId, operation)
+      : operation == 'start'
+      ? _start(taskId)
       : tasks!.queueReview(taskId, operation);
   @override
   Future<void> startWithOrigin(String taskId, TaskStartOrigin origin) =>
       tasks == null
       ? startReviewWithOrigin(live, taskId, origin)
-      : tasks!.queueReview(taskId, 'start', startOrigin: origin);
+      : _start(taskId, origin: origin);
+
+  Future<void> _start(String taskId, {TaskStartOrigin? origin}) async {
+    final owner = accountId();
+    final current = await task(taskId);
+    if (accountId() != owner) throw StateError('登录账号已变化');
+    if ((current['task'] as Map)['review_waiting_for_due'] == true ||
+        (current['items'] as List).isEmpty) {
+      throw StateError('今天暂时没有到期的复习题');
+    }
+    await tasks!.queueReview(taskId, 'start', startOrigin: origin);
+    if (current['offline_cache'] != true && accountId() == owner) {
+      await tasks!.synchronize((current['task'] as Map)['child_id'] as String);
+    }
+  }
+
   @override
   Future<Map<String, dynamic>> answer(
     String taskId,
@@ -291,6 +346,7 @@ class CachedReviewRepository
     String answer,
     String commandId, {
     ReviewConfidence? confidence,
+    int? questionVersion,
   }) async {
     if (tasks == null) {
       return live.answer(
@@ -299,12 +355,14 @@ class CachedReviewRepository
         answer,
         commandId,
         confidence: confidence,
+        questionVersion: questionVersion,
       );
     }
     await tasks!.queueReview(
       taskId,
       'answer',
       questionId: questionId,
+      questionVersion: questionVersion,
       answer: answer,
       commandId: commandId,
       confidence: confidence,

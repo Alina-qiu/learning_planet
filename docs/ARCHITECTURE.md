@@ -125,4 +125,4 @@ Flutter iOS/Android
 
 ## 自动错题复习任务
 
-定时函数使用家庭时区计算业务日期，并为每个孩子调用 `generate_daily_wrong_review_task(child_id, date, max_questions)`。数据库唯一约束负责最终防重。App 每次从离线恢复时可调用同一 RPC 作为补偿；由于 RPC 幂等，不会重复创建。生成后的题目通过 `task_review_items` 保存快照。
+定时函数使用家庭时区计算业务日期，并为每个孩子调用 `generate_daily_wrong_review_task(child_id, date, max_questions)`。数据库按孩子和业务日唯一生成任务。补同步、打开复习详情和首次开始都会核对当日到期题，只有题单或奖励依据发生变化才更新任务版本。第一次成功开始后，`task_review_items` 和服务端判题答案共同保存本次快照。离线开始遇到版本冲突时，客户端保留原题和作答，等用户核对服务端清单。[每日复习](REVIEW_AUTO_COMPLETION.md)

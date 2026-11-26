@@ -13,12 +13,23 @@ import 'task_feedback_test.dart' show MemoryFeedbackPreferences;
 
 class DeferredReview extends FakeReviewRepository {
   Completer<void>? wait;
+  int questionVersion = 0;
+  bool waitingForDue = false;
+  bool conflict = false;
   int reads = 0;
   @override
   Future<Map<String, dynamic>> task(String taskId) async {
     reads++;
     await wait?.future;
-    return super.task(taskId);
+    final snapshot = await super.task(taskId);
+    snapshot['sync_conflict'] = conflict;
+    if (waitingForDue) {
+      snapshot['task']['review_waiting_for_due'] = true;
+      snapshot['items'] = [];
+    } else {
+      snapshot['items'][0]['question_version'] = questionVersion;
+    }
+    return snapshot;
   }
 }
 
@@ -80,6 +91,76 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await sync.close();
   });
+
+  testWidgets(
+    'a new version clears old input and confidence, and an empty day has no start action',
+    (tester) async {
+      final repository = DeferredReview()..status = 'in_progress';
+      final sync = StreamController<TaskSyncState>.broadcast();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            reviewRepositoryProvider.overrideWithValue(repository),
+            taskRepositoryProvider.overrideWithValue(
+              const UnconfiguredTaskRepository(),
+            ),
+            taskSyncStateProvider.overrideWith((ref) => sync.stream),
+            feedbackPreferencesStoreProvider.overrideWithValue(
+              MemoryFeedbackPreferences(),
+            ),
+          ],
+          child: const MaterialApp(
+            home: ReviewSessionScreen(taskId: 'task', childId: 'child'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('有点把握'));
+      await tester.enterText(find.byType(TextField), 'yin2');
+      repository.questionVersion++;
+      sync.add(const TaskSyncState(revision: 1));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        isEmpty,
+      );
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '有点把握'))
+            .selected,
+        false,
+      );
+      await tester.enterText(find.byType(TextField), 'old draft');
+      await tester.tap(find.text('有点把握'));
+      repository.conflict = true;
+      sync.add(const TaskSyncState(revision: 2));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('本机答案已保留'), findsOneWidget);
+      repository.conflict = false;
+      sync.add(const TaskSyncState(revision: 3));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        isEmpty,
+      );
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '有点把握'))
+            .selected,
+        false,
+      );
+      repository.status = 'skipped';
+      repository.waitingForDue = true;
+      sync.add(const TaskSyncState(revision: 4));
+      await tester.pumpAndSettle();
+      expect(find.text('今天暂时没有到期的复习题'), findsOneWidget);
+      expect(find.text('开始复习'), findsNothing);
+      expect(find.text('放弃这次复习'), findsNothing);
+      expect(find.text('完成复习并结算'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await sync.close();
+    },
+  );
 
   test(
     'changing the repository still invalidates the previous task data',
