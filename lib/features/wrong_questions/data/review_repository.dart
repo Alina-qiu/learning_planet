@@ -350,7 +350,8 @@ class CachedReviewRepository
       await enqueue();
     } on TaskSnapshotMissing {
       checkScope();
-      if (current['offline_cache'] == true || current['local_pending'] == true) {
+      if (current['offline_cache'] == true ||
+          current['local_pending'] == true) {
         rethrow;
       }
       // The hub can see a newly restored review before the home list does.
