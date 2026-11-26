@@ -4,6 +4,8 @@ import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:learning_planet/core/offline/offline_store.dart';
+import 'package:learning_planet/core/time/family_time_zones.dart';
+import 'package:learning_planet/features/auth_family/presentation/family_time_screen.dart';
 import 'package:learning_planet/features/economy/presentation/economy_text.dart';
 import 'package:learning_planet/features/reports/data/family_activity_recorder.dart';
 import 'package:learning_planet/features/tasks/data/offline_task_repository.dart';
@@ -17,6 +19,21 @@ import 'support/task_workload.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('family picker names and previously saved IANA links resolve', () {
+    ensureFamilyTimeZones();
+    for (final name in familyTimezoneLabels.keys) {
+      expect(tz.getLocation(name).name, name);
+    }
+    expect(
+      EconomyTime('Asia/Chongqing').format('2026-09-16T16:00:00Z'),
+      '2026-09-17 00:00',
+    );
+    expect(
+      EconomyTime('US/Eastern').format('2026-07-01T04:00:00Z'),
+      '2026-07-01 00:00',
+    );
+  });
 
   test(
     'notification startup, the task repository and family activity share the loaded rules',

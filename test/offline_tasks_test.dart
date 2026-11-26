@@ -31,6 +31,7 @@ class FakeTaskRemote implements TaskSyncRemote {
   Completer<void>? snapshotBarrier;
   final receipts = <String, Map<String, dynamic>>{};
   final requests = <Map<String, dynamic>>[];
+  String timezone = 'Asia/Shanghai';
   final tasks = <String, Map<String, dynamic>>{};
   final wallets = <String, Map<String, dynamic>>{};
 
@@ -69,7 +70,7 @@ class FakeTaskRemote implements TaskSyncRemote {
       'lease_id': 'lease-$childId',
       'lease_expires_at': now().add(const Duration(days: 7)).toIso8601String(),
       'server_at': now().toIso8601String(),
-      'timezone': 'Asia/Shanghai',
+      'timezone': timezone,
       'day': '2026-09-16',
       'tasks': tasks.values
           .where((task) => task['child_id'] == childId)
@@ -684,6 +685,16 @@ void main() {
       expect(await repository.today('child'), DateTime(2026, 9, 17));
     },
   );
+
+  test('the home date follows a UTC family across offline midnight', () async {
+    remote.timezone = 'UTC';
+    now = DateTime.utc(2026, 9, 16, 23, 59);
+    await repository.synchronize('child');
+    expect(await repository.today('child'), DateTime(2026, 9, 16));
+    await offline();
+    now = now.add(const Duration(minutes: 2));
+    expect(await repository.today('child'), DateTime(2026, 9, 17));
+  });
 
   test(
     'minimum duration, invalid transitions and clock reversal enqueue nothing',

@@ -4,7 +4,7 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-本轮 Windows 通过 894 项 Flutter 测试，核心行覆盖率为 90.92%（7051/7755）。静态分析通过，292 个 Dart 文件通过格式检查。PostgREST 16.2、16.5 分别通过 11 项实际接口测试，各处理 154 次请求，覆盖两端改题、离线答题冲突、重新开始和奖励核账。[本机检查](../build/review-refresh-20261126/local-quality.json) · [分支最新 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+本轮 Windows 通过 896 项 Flutter 测试，核心行覆盖率为 90.93%（7052/7755）。静态分析通过，292 个 Dart 文件通过格式检查。PostgREST 16.2、16.5 分别通过 11 项实际接口测试，各处理 154 次请求，覆盖两端改题、离线答题冲突、重新开始和奖励核账。[本机检查](../build/review-refresh-20261126/local-quality.json) · [分支最新 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
 
 两份调试包的用途和本机运行步骤见[Android 构建记录](ANDROID_BUILD.md)。本次复习变更的接口、数据库、应用和安装包证据集中在[本机验收记录](../build/review-refresh-20261126/DELIVERY.md)。
 

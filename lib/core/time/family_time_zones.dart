@@ -1,4 +1,5 @@
-import 'package:timezone/data/latest.dart' as tzdata;
+// Family settings and existing server records may use IANA links such as UTC.
+import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 List<String>? _bundledNames;

@@ -13,7 +13,7 @@ Map<String, Object> taskAlarmPayload(int id, Map<String, dynamic> reminder) {
       !time.hasMatch(policy['quiet_end'] as String? ?? '')) {
     throw StateError('提醒策略需要更新，请联网刷新');
   }
-  // PostgreSQL and older clients use UTC; timezone 0.11.1 uses Etc/UTC.
+  // Keep the native alarm payload consistent with previously scheduled UTC alarms.
   final zone = policy['timezone'] == 'UTC'
       ? 'Etc/UTC'
       : policy['timezone'] as String;

@@ -4,7 +4,7 @@
 
 本机联调包 `app-local-debug.apk` 通过 ADB 转发连接电脑上的临时服务，可以用邮箱验证码登录家庭。普通调试包 `app-debug.apk` 启动后显示未配置服务的提示。两个包分别安装，有独立的应用 ID 和本机数据。当前产物的字节数、SHA-256 及所在目录由本机交付文档统一记录。[本轮安装包和校验](../build/review-refresh-20261126/DELIVERY.md) · [启动服务和安装](LOCAL_DEBUG.md)
 
-当日自动复习在首次开始前刷新到期题、题面、标准答案和预计奖励，开始后固定本次题单。孩子离线开始后，如服务端题目版本已变化，应用保留原作答供核对，孩子可采用更新后的题目重新开始。Windows 通过 894 项 Flutter 测试，110 个核心文件的行覆盖率为 90.92%（7051/7755）。数据库通过 419 项全库与 20 项历史升级检查。[复习规则](REVIEW_AUTO_COMPLETION.md) · [本机与接口结果](../build/review-refresh-20261126/local-quality.json) · [数据库结果](../build/review-refresh-20261126/review-refresh-database.json)
+当日自动复习在首次开始前刷新到期题、题面、标准答案和预计奖励，开始后固定本次题单。孩子离线开始后，如服务端题目版本已变化，应用保留原作答供核对，孩子可采用更新后的题目重新开始。Windows 通过 896 项 Flutter 测试，110 个核心文件的行覆盖率为 90.93%（7052/7755）。数据库通过 419 项全库与 20 项历史升级检查。[复习规则](REVIEW_AUTO_COMPLETION.md) · [本机与接口结果](../build/review-refresh-20261126/local-quality.json) · [数据库结果](../build/review-refresh-20261126/review-refresh-database.json)
 
 已登录家庭的冷启动目标为 6 秒内显示孩子、当日任务和已确认余额。首页耗时按 Release 版本、冷启动条件和设备分别记录。[首页性能实测](APP_PERFORMANCE.md)
 

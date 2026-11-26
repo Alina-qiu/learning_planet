@@ -4,7 +4,7 @@
 
 服务启动时创建空测试数据库，按顺序应用截至 075 的 77 份迁移。家庭每天 00:05 起可生成复习。已生成的当日题单在查看或开始时更新，到期题全部移除时撤回。首次开始后，题目、顺序和标准答案固定。离线开始遇到版本冲突时保留原作答，恢复连接后可选用新题单重新作答。[复习操作](REVIEW_AUTO_COMPLETION.md)
 
-本轮 Windows 通过 894 项 Flutter 测试，110 个核心文件行覆盖率为 90.92%（7051/7755）。PostgreSQL 15.19 通过 419 项全库检查和覆盖 8 个历史节点的 20 项升级检查。[本机与接口检查](../build/review-refresh-20261126/local-quality.json) · [全库与升级检查](../build/review-refresh-20261126/review-refresh-database.json)
+本轮 Windows 通过 896 项 Flutter 测试，110 个核心文件行覆盖率为 90.93%（7052/7755）。PostgreSQL 15.19 通过 419 项全库检查和覆盖 8 个历史节点的 20 项升级检查。[本机与接口检查](../build/review-refresh-20261126/local-quality.json) · [全库与升级检查](../build/review-refresh-20261126/review-refresh-database.json)
 
 ## 先前版本的联调记录
 
