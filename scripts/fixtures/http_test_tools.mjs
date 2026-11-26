@@ -83,7 +83,7 @@ export async function startPostgrest(database, secret, {maxRows} = {}) {
   const version = spawnSync(binary, ['--version'], {env, encoding: 'utf8', windowsHide: true, timeout: 10000});
   if (version.error || version.status !== 0) throw new Error('Set POSTGREST_BIN to an installed PostgREST executable. ' + (version.error?.message ?? version.stderr));
   console.log(`${version.stdout.trim()}; ${database.restored ? 'restored database' : `${database.migrationCount} application migrations`}`);
-  if (!database.restored) await database.client.query(`
+  if (!database.restored || database.httpRoleExists === false) await database.client.query(`
     create role http_authenticator login noinherit nocreatedb nocreaterole nosuperuser password 'http-test-only';
     grant anon, authenticated to http_authenticator;
   `);

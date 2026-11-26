@@ -1,12 +1,13 @@
 // Real Supabase Storage API and MinIO; isolated local data, keys and listeners.
 import assert from 'node:assert/strict';
-import {createHash, randomBytes} from 'node:crypto';
+import {createHash, createHmac, randomBytes} from 'node:crypto';
 import {createRequire} from 'node:module';
-import {cp, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {createServer} from 'node:net';
+import {cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-import {freePort, isolatedEnv, localProcess} from './http_test_tools.mjs';
+import {closeServer, freePort, isolatedEnv, listen, localProcess} from './http_test_tools.mjs';
 
 // MinIO's health endpoint can respond before its S3 subsystem finishes booting.
 // Retry only that explicit startup response; permissions and other errors fail immediately.
@@ -22,34 +23,101 @@ export async function initializeLocalBucket(createBucket, {timeoutMs = 10000} = 
   }
 }
 
-export async function createStorageBackend({secret, minimumObjects = 4}) {
+const bucket = 'learning-planet-integration';
+
+async function volumeId(dataDirectory) {
+  const format = JSON.parse(await readFile(join(dataDirectory, '.minio.sys', 'format.json'), 'utf8'));
+  assert.ok(format.version === '1' && format.format === 'xl-single' &&
+    typeof format.id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(format.id), 'Unrecognized local MinIO volume');
+  return format.id;
+}
+
+async function persistentVolume(directory, secret, requireExisting) {
+  const root = resolve(directory), manifest = join(root, 'storage.json'), data = join(root, 'objects');
+  assert.ok(typeof secret === 'string' && secret.length > 0, 'Persistent storage needs the local JWT secret');
+  const derive = label => createHmac('sha256', secret).update('learning-planet/persistent-minio/v1/' + label).digest('hex');
+  const identity = {version: 1, bucket, keyId: derive('identity')};
+  if (!requireExisting) await mkdir(root, {recursive: true, mode: 0o700});
+  let state;
+  try { state = JSON.parse(await readFile(manifest, 'utf8')); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    if (requireExisting || (await readdir(root)).length) throw new Error('Missing local storage manifest');
+    // A first startup interrupted before bucket creation can resume this initialization.
+    state = {...identity, port: await freePort(), volumeId: null};
+    await writeFile(manifest, JSON.stringify(state), {flag: 'wx', mode: 0o600});
+  }
+  assert.ok(state?.version === identity.version && state.bucket === bucket && state.keyId === identity.keyId &&
+    Number.isInteger(state.port) && state.port >= 1024 && state.port <= 65535 &&
+    Object.hasOwn(state, 'volumeId'), 'Incompatible local storage manifest or credentials');
+  if (state.volumeId === null) {
+    if (requireExisting) throw new Error('Local storage initialization is incomplete');
+    await mkdir(data, {recursive: true, mode: 0o700});
+  } else {
+    // Check before MinIO can initialize an empty replacement volume.
+    assert.equal(await volumeId(data), state.volumeId, 'Local MinIO volume identity changed');
+  }
+  // An orphaned MinIO can outlive a forcibly stopped gateway. Refuse to start another writer.
+  const probe = createServer();
+  await listen(probe, state.port);
+  await closeServer(probe);
+  return {data, port: state.port, accessKeyId: derive('access').slice(0, 24), secretAccessKey: derive('secret'),
+    initialized: state.volumeId !== null,
+    async publish() {
+      if (state.volumeId !== null) return;
+      const ready = {...state, volumeId: await volumeId(data)};
+      const temporary = manifest + '.new';
+      await writeFile(temporary, JSON.stringify(ready), {mode: 0o600});
+      await rename(temporary, manifest);
+    },
+  };
+}
+
+export async function createStorageBackend({secret, minimumObjects = 4, persistentDirectory, requireExisting = false}) {
   assert.ok(Number.isInteger(minimumObjects) && minimumObjects >= 0);
+  assert.ok(!requireExisting || persistentDirectory, 'Expected an existing persistent storage directory');
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Storage v1.72.1 requires Node >=24');
   if (!process.env.STORAGE_SOURCE) throw new Error('Set STORAGE_SOURCE to prepared Supabase Storage v1.72.1 source');
   const source = resolve(process.env.STORAGE_SOURCE);
   assert.equal(createHash('sha256').update(await readFile(join(source, 'package-lock.json'))).digest('hex'),
     'b97a9f0ab3f0f4efbb00f4294cad00fd197885b72d52bb8a18015ca399badae8', 'Expected the pinned Storage v1.72.1 dependency lock');
+  const volume = persistentDirectory ? await persistentVolume(persistentDirectory, secret, requireExisting) : null;
   const directory = await mkdtemp(join(tmpdir(), 'learning-planet-storage-'));
   await cp(join(source, 'migrations'), join(directory, 'migrations'), {recursive: true});
   // Use the provider's own locked AWS SDK, without adding it to the app dependencies.
   const require = createRequire(join(source, 'package.json'));
-  const {S3Client, CreateBucketCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand} = require('@aws-sdk/client-s3');
-  const minioPort = await freePort(), port = await freePort();
-  const accessKeyId = randomBytes(12).toString('hex'), secretAccessKey = randomBytes(32).toString('hex');
-  const bucket = 'learning-planet-integration';
+  const {S3Client, ListBucketsCommand, CreateBucketCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand} = require('@aws-sdk/client-s3');
+  const minioPort = volume?.port ?? await freePort(), port = await freePort();
+  const accessKeyId = volume?.accessKeyId ?? randomBytes(12).toString('hex');
+  const secretAccessKey = volume?.secretAccessKey ?? randomBytes(32).toString('hex');
   const endpoint = `http://127.0.0.1:${minioPort}`;
   let minio, storage;
   const s3 = new S3Client({endpoint, region: 'us-east-1', forcePathStyle: true,
     credentials: {accessKeyId, secretAccessKey}, maxAttempts: 1});
-  const stop = async () => { await storage?.stop(); s3.destroy(); await minio?.stop(); };
+  const stop = async () => {
+    try { await storage?.stop(); }
+    finally {
+      s3.destroy();
+      await minio?.stop();
+      if (volume) await rm(directory, {recursive: true, force: true});
+    }
+  };
   try {
     const minioEnv = isolatedEnv(['MINIO_']);
     Object.assign(minioEnv, {MINIO_ROOT_USER: accessKeyId, MINIO_ROOT_PASSWORD: secretAccessKey,
       MINIO_BROWSER: 'off', MINIO_UPDATE: 'off'});
-    minio = localProcess(process.env.MINIO_BIN ?? 'minio', ['server', '--address', `127.0.0.1:${minioPort}`, directory],
+    const data = volume?.data ?? join(directory, 'objects');
+    if (!volume) await mkdir(data);
+    minio = localProcess(process.env.MINIO_BIN ?? 'minio', ['server', '--address', `127.0.0.1:${minioPort}`, data],
       {env: minioEnv, cwd: directory, name: 'Local MinIO'});
     await minio.ready(`${endpoint}/minio/health/ready`);
-    await initializeLocalBucket(() => s3.send(new CreateBucketCommand({Bucket: bucket})));
+    await initializeLocalBucket(async () => {
+      const {Buckets = []} = await s3.send(new ListBucketsCommand({}));
+      if (Buckets.some(item => item.Name === bucket)) return;
+      if (volume?.initialized) throw new Error('Expected bucket is missing from the existing local MinIO volume');
+      await s3.send(new CreateBucketCommand({Bucket: bucket}));
+    });
+    await volume?.publish();
     return {
       port, stop,
       async quiesce() { await storage?.stop(); },

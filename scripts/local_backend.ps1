@@ -3,7 +3,8 @@ param(
     [ValidateSet('start','status','mail','stop')][string]$Command = 'start',
     [string]$Email,
     [string]$ToolsRoot = 'D:\learning-planet-tools',
-    [string]$NodeBinary = (Join-Path $env:USERPROFILE '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe')
+    [string]$NodeBinary = (Join-Path $env:USERPROFILE '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe'),
+    [switch]$KeepData
 )
 $ErrorActionPreference = 'Stop'
 $paths = @{
@@ -14,6 +15,7 @@ $paths = @{
 }
 if (-not (Test-Path -LiteralPath $NodeBinary -PathType Leaf)) { throw 'Set -NodeBinary to Node24 or newer.' }
 if ($Command -eq 'mail' -and -not $Email) { throw 'Specify -Email parent@example.test.' }
+if ($KeepData -and $Command -ne 'start') { throw '-KeepData applies to the start command.' }
 $previous = @{}
 Push-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 try {
@@ -22,7 +24,10 @@ try {
         [Environment]::SetEnvironmentVariable($name, $paths[$name], 'Process')
         if ($Command -eq 'start' -and -not (Test-Path -LiteralPath $paths[$name])) { throw "Missing local service: $name. See docs/STORAGE_INTEGRATION.md." }
     }
-    & $NodeBinary scripts/local_backend.mjs $Command $Email
+    $arguments = @($Command)
+    if ($Command -eq 'mail') { $arguments += $Email }
+    if ($KeepData) { $arguments += '--keep-data' }
+    & $NodeBinary scripts/local_backend.mjs @arguments
     $resultCode = $LASTEXITCODE
 } finally {
     foreach ($name in $previous.Keys) {

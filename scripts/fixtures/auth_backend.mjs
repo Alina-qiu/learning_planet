@@ -1,4 +1,4 @@
-// Real GoTrue + SMTP + PostgREST + app migrations; all services are disposable and loopback-only.
+// Loopback GoTrue, SMTP, PostgREST and application migrations.
 import {randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
@@ -7,6 +7,7 @@ import {constants as osConstants} from 'node:os';
 import {resolve} from 'node:path';
 import {startTestDatabase} from './database.mjs';
 import {localMailbox} from './local_mailbox.mjs';
+import {validateLocalCredentials} from './local_trial.mjs';
 import {freePort, listen, closeServer, forwardHttp, isolatedEnv, localProcess, signedJwt, startPostgrest} from './http_test_tools.mjs';
 
 // A cold verifier on a hosted Mac can take longer than the local default.
@@ -41,16 +42,12 @@ function startupStage(stage) {
   if (process.env.CROSS_DEVICE_STARTUP_STAGES === '1') console.log('AC01_BACKEND_STAGE ' + stage);
 }
 
-export async function withAuthBackend(run, {createStorage, verifyTraffic = true, tokenLifetimeSeconds = 1800, localCredentials, restoreDatabase} = {}) {
+export async function withAuthBackend(run, {createStorage, verifyTraffic = true, tokenLifetimeSeconds = 1800,
+  localCredentials, restoreDatabase, persistentDirectory, requireExisting = false} = {}) {
   if (!Number.isInteger(tokenLifetimeSeconds) || tokenLifetimeSeconds < 60 || tokenLifetimeSeconds > 86400) {
     throw new Error('Local token lifetime must be between one minute and one day');
   }
-  if (localCredentials && (!/^[a-zA-Z0-9_-]{64}$/.test(localCredentials.secret)
-    || !Number.isInteger(localCredentials.createdAt) || localCredentials.createdAt < 1577836800
-    || localCredentials.createdAt > Math.floor(Date.now()/1000)+60
-    || localCredentials.createdAt+315360000 <= Math.floor(Date.now()/1000))) {
-    throw new Error('Invalid or expired isolated local credentials');
-  }
+  if (localCredentials) validateLocalCredentials(localCredentials);
   const configuredBinary = process.env.GOTRUE_BIN ?? 'auth';
   // Later migrations change cwd. Probe and launch the same executable.
   const binary = /[/\\]/.test(configuredBinary) ? resolve(configuredBinary) : configuredBinary;
@@ -128,7 +125,8 @@ export async function withAuthBackend(run, {createStorage, verifyTraffic = true,
     });
     storage = await createStorage?.({secret, url});
     startupStage('database');
-    database = await startTestDatabase({port: await freePort(), restoreDatabase, bootstrapStorage: storage?.bootstrap, bootstrapAuth: async ({client, port, directory, restored}) => {
+    database = await startTestDatabase({port: await freePort(), restoreDatabase, persistentDirectory, requireExisting,
+      bootstrapStorage: storage?.bootstrap, bootstrapAuth: async ({client, port, directory, restored}) => {
       if (!restored) await client.query(`
         create role supabase_auth_admin login noinherit nocreatedb nocreaterole nosuperuser password 'auth-test-only';
         alter schema auth owner to supabase_auth_admin;

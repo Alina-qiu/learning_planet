@@ -1,4 +1,4 @@
-// Temporary real services for local app debugging; never connects to a cloud project.
+// Real loopback services for local app debugging.
 import assert from 'node:assert/strict';
 import {randomBytes, randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
@@ -8,6 +8,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {withAuthBackend} from './fixtures/auth_backend.mjs';
+import {openLocalTrial} from './fixtures/local_trial.mjs';
 import {createStorageBackend} from './fixtures/storage_backend.mjs';
 import {startLocalEdge} from './fixtures/local_edge.mjs';
 import {closeServer, forwardHttp, listen, signedJwt} from './fixtures/http_test_tools.mjs';
@@ -20,13 +21,13 @@ const respond=(response,status,body)=>{
   response.end(JSON.stringify(body));
 };
 
-async function start() {
+async function start(keepData) {
   let finish, ready=false, config, backendPort, timer, lifetime, maintenance;
   const done=new Promise(resolve=>{finish=resolve;});
   const runId=randomUUID(), shutdownKey=randomBytes(32).toString('hex'), edges=new Map();
   const gateway=createServer((request,response)=>{
     const path=new URL(request.url,origin).pathname;
-    if(path==='/__local/health') {respond(response,ready?200:503,{ready,runId,temporary:true});return;}
+    if(path==='/__local/health') {respond(response,ready?200:503,{ready,runId,temporary:!keepData});return;}
     if(path==='/__local/stop') {
       if(request.method!=='POST' || request.headers.authorization!==`Bearer ${shutdownKey}`) {
         respond(response,403,{error:'Local control authorization required'});return;
@@ -47,15 +48,7 @@ async function start() {
   process.once('SIGINT',stop);process.once('SIGTERM',stop);
   try {
     await mkdir(directory,{recursive:true});
-    const credentialPath=join(directory,'credentials.json');
-    let credentials;
-    try {credentials=JSON.parse(await readFile(credentialPath,'utf8'));}
-    catch(error) {
-      if(error.code!=='ENOENT')throw error;
-      credentials={secret:randomBytes(48).toString('base64url'),createdAt:Math.floor(Date.now()/1000)};
-      await writeFile(credentialPath,JSON.stringify(credentials)+'\n',{mode:0o600,flag:'wx'});
-    }
-    assert.ok(credentials && typeof credentials==='object','Invalid local credentials file');
+    const trial = await openLocalTrial(resolve('.learning-planet-trial'), directory, keepData);
     await withAuthBackend(async (publicConfig,{database,secret})=>{
       config=publicConfig;backendPort=Number(new URL(config.url).port);
       await database.client.query('grant service_role to http_authenticator');
@@ -77,6 +70,7 @@ async function start() {
       await writeFile(join(directory,'defines.json'),JSON.stringify({APP_ENV:'development',LOCAL_BACKEND:true,
         SUPABASE_URL:origin,SUPABASE_ANON_KEY:config.anon},null,2)+'\n',{mode:0o600});
       await writeFile(controlPath,JSON.stringify({runId,url:origin,mailUrl:config.url,mailboxKey:config.mailboxKey,shutdownKey},null,2)+'\n',{mode:0o600});
+      await trial.markReady?.();
       ready=true;
       timer=setInterval(()=>{
         if(maintenance)return;
@@ -85,7 +79,9 @@ async function start() {
       },60000);
       lifetime=setTimeout(()=>{console.log('Local session reached its 24-hour lifetime.');finish();},86400000);
       console.log(`LOCAL_BACKEND_READY ${origin}`);
-      console.log('Temporary empty database: use synthetic @example.test accounts only. Restarting starts a new database.');
+      console.log(keepData
+        ? 'Persistent local trial: use synthetic @example.test accounts. Restart with --keep-data to reopen the same family and files.'
+        : 'Temporary empty database: use synthetic @example.test accounts only. Restarting starts a new database.');
       console.log('Public build configuration: .dart_tool/local-backend/defines.json');
       const cli = localControlInvocation();
       console.log(`Read OTP: ${cli} mail parent@example.test`);
@@ -94,7 +90,12 @@ async function start() {
         ready=false;clearInterval(timer);clearTimeout(lifetime);await maintenance;
         for(const edge of edges.values())await edge.stop();edges.clear();
       }
-    },{createStorage:args=>createStorageBackend({...args,minimumObjects:0}),verifyTraffic:false,localCredentials:credentials});
+    }, {
+      createStorage: args => createStorageBackend({...args, minimumObjects: 0,
+        persistentDirectory: trial.storage, requireExisting: trial.requireExisting}),
+      persistentDirectory: trial.database, requireExisting: trial.requireExisting,
+      verifyTraffic: false, localCredentials: trial.credentials,
+    });
   } finally {
     ready=false;clearInterval(timer);clearTimeout(lifetime);
     for(const edge of edges.values())await edge.stop();
@@ -159,7 +160,12 @@ async function control() {
   const status=await localHealth(origin, 3000);
   assert.equal(status.runId,saved.runId,'Local control belongs to a different session');
   assert.equal(status.ready,true,'Local session is not ready');
-  if(command==='status') {console.log('Local services ready; temporary database; loopback only.');return;}
+  if(command==='status') {
+    console.log(status.temporary === false
+      ? 'Local services ready; persistent trial data; loopback only.'
+      : 'Local services ready; temporary database; loopback only.');
+    return;
+  }
   const email=(process.argv[3]??'').trim().toLowerCase();
   assert.match(email,/^[a-z0-9._+-]+@example\.test$/,'Use a synthetic @example.test address');
   const mailOrigin=new URL(saved.mailUrl);
@@ -172,6 +178,15 @@ async function control() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  if(!['start','mail','status','stop'].includes(command))throw new Error('Usage: local_backend.mjs start|status|stop|mail <email>');
-  if(command==='start')await start();else await control();
+  if (command === 'start') {
+    const options = process.argv.slice(3);
+    if (options.length > 1 || (options.length === 1 && options[0] !== '--keep-data')) {
+      throw new Error('Usage: local_backend.mjs start [--keep-data]');
+    }
+    await start(options.length === 1);
+  } else if (['mail','status','stop'].includes(command)) {
+    await control();
+  } else {
+    throw new Error('Usage: local_backend.mjs start [--keep-data] | status | stop | mail <email>');
+  }
 }

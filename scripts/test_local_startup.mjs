@@ -1,9 +1,59 @@
 import assert from 'node:assert/strict';
+import {access, mkdir, mkdtemp, readFile, rm, unlink, writeFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {test} from 'node:test';
 import {localControlInvocation, stopLocalSession} from './local_backend.mjs';
 import {closeServer, listen, localProcess} from './fixtures/http_test_tools.mjs';
 import {initializeLocalBucket} from './fixtures/storage_backend.mjs';
+import {openLocalTrial} from './fixtures/local_trial.mjs';
+
+async function trialPaths(t) {
+  const directory = await mkdtemp(join(tmpdir(), 'learning-planet-profile-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const generated = join(directory, 'generated'), trial = join(directory, 'trial');
+  await mkdir(generated);
+  return {trial, cached: join(generated, 'credentials.json'), profile: join(trial, 'profile.json'),
+    open: keepData => openLocalTrial(trial, generated, keepData)};
+}
+
+test('opt-in trial adopts the APK key and recovers it after generated files are cleared', async t => {
+  const {open, trial, cached, profile} = await trialPaths(t);
+  const original = await open(false);
+  await assert.rejects(access(trial), {code: 'ENOENT'});
+  const first = await open(true);
+  assert.deepEqual(first.credentials, original.credentials);
+  assert.equal(first.requireExisting, false);
+  assert.equal((await open(true)).requireExisting, false);
+  await first.markReady();
+  const saved = await readFile(profile, 'utf8');
+  for (const keepData of [false, true]) {
+    await unlink(cached);
+    const reopened = await open(keepData);
+    assert.deepEqual(reopened.credentials, original.credentials);
+    assert.deepEqual(JSON.parse(await readFile(cached, 'utf8')), original.credentials);
+    assert.equal(await readFile(profile, 'utf8'), saved);
+    assert.equal(reopened.requireExisting, keepData ? true : undefined);
+  }
+});
+
+test('a mismatched key and an incomplete trial are preserved for recovery', async t => {
+  const {open, trial, cached, profile} = await trialPaths(t);
+  await mkdir(trial);
+  await assert.rejects(open(true), /Unrecognized local trial/);
+  await assert.rejects(access(cached), {code: 'ENOENT'});
+  await writeFile(profile, JSON.stringify({version: 9, ready: true}));
+  await assert.rejects(open(true), /Unsupported local trial/);
+  const credentials = {secret: 'x'.repeat(64), createdAt: Math.floor(Date.now() / 1000)};
+  const original = JSON.stringify({version: 1, ready: true, credentials});
+  await writeFile(profile, original);
+  const different = JSON.stringify({...credentials, secret: 'y'.repeat(64)});
+  await writeFile(cached, different);
+  await assert.rejects(open(true), /signing configuration differ/);
+  assert.equal(await readFile(cached, 'utf8'), different);
+  assert.equal(await readFile(profile, 'utf8'), original);
+});
 
 async function withProbe(handler, check) {
   const server = createServer(handler);

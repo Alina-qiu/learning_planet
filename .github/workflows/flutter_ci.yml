@@ -25,6 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run test:local-startup
       - run: npm run test:db-version
+      - run: node scripts/test_trial_database.mjs
       - run: npm run test:db
       - run: npm run test:db-upgrade
       - uses: actions/upload-artifact@v4
@@ -147,7 +148,10 @@ jobs:
           unzip -q "$RUNNER_TEMP/minio.zip" -d "$RUNNER_TEMP"
           cd "$RUNNER_TEMP/minio-RELEASE.2025-09-07T16-13-09Z"
           CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/minio" .
-      - run: npm run test:storage
+      - name: Test Storage and reopen persistent private objects
+        run: |
+          npm run test:storage
+          node --test scripts/test_persistent_storage.mjs
         env:
           POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
           GOTRUE_BIN: ${{ runner.temp }}/gotrue/auth

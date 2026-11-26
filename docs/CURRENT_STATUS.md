@@ -4,13 +4,13 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-当前交付的 Android 联调 APK 来自 `ce1b5a0`。Windows 与 Linux 各通过 914 项 Flutter 测试，本机核心行覆盖率为 90.91%。Android 10 模拟器登录合成家庭后，完整首页三次冷启动上界分别为 3.22、2.93、4.12 秒。[本机交付与验收](../build/child-isolation-20261127/DELIVERY.md) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45880413235) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45880413245)
+当前交付的 Android 联调 APK 来自 `ce1b5a0`。Android 10 模拟器登录合成家庭后，完整首页三次冷启动上界分别为 3.22、2.93、4.12 秒。后续提交 `af9e3ab` 在 Windows 与 Linux 各通过 914 项 Flutter 测试，本机核心行覆盖率为 90.92%。[首页与安装包实测](../build/child-isolation-20261127/DELIVERY.md) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45896548864) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45896548867)
 
-两份调试包的用途和本机运行步骤见[Android 构建记录](ANDROID_BUILD.md)。双孩子共用设备的操作、两份安装包及启动实测见[本机交付记录](../build/child-isolation-20261127/DELIVERY.md)。
+现在可以用同一个本机安装包分几天试用同一测试家庭。在项目目录执行 `& ./scripts/local_backend.ps1 -KeepData` 后，关闭服务再用同一命令启动，家庭账号、孩子、账本和私有文件会保留。[本机运行步骤](LOCAL_DEBUG.md) · [两份调试包的用途](ANDROID_BUILD.md) · [双孩子与首页启动实测](../build/child-isolation-20261127/DELIVERY.md)
 
 全新 Android API 36 模拟器安装本机联调 APK 后，已走通收取验证码、首次登录、创建家庭与孩子、进入首页及首次设置家长 PIN。启动服务的窗口会打印能在本机直接使用的收件和停止命令。[首次试用图解](../build/iphone-isolation-20261127/entry/首次试用.md) · [本机安装指引](LOCAL_DEBUG.md)
 
-最新服务端使用 `a4-v3` 生成拼音练习卷。本机 419 项数据库检查、9 个历史节点的 22 项升级检查和 9 项备份恢复检查通过。孩子与家长的六个主要页面也可用独立的 HTML 原型离线体验。[拼音组卷验证](PDF_INTEGRATION.md) · [浏览器原型](demo/index.html)
+本机 PostgreSQL 15 已通过 420 项数据库检查，79 份迁移覆盖 9 个有数据的历史节点，22 项升级检查全部通过。新增的 077 修复家庭当地午夜至 00:05 的复习积压数。保留数据模式也在同一测试家庭上实际从 076 升到 077，原任务、两笔奖励流水和两张私有图片均已核对。[本机运行步骤](LOCAL_DEBUG.md) · [复习规则](REVIEW_AUTO_COMPLETION.md) · [数据库与版本升级](../scripts/test_database_upgrade.mjs)
 
 基线提交 `e178b18` 在 Android 10 模拟器上完成了邮箱验证码登录和一次实际中文印刷图识别，孩子校对并保存后，联网刷新仍显示“待家长确认”。[基线联调版首页](../build/acceptance-20261126/android-local-debug-home.json) · [中文识别与保存](../build/acceptance-20261126/android-release-ocr.json)
 
@@ -182,7 +182,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | AC-06 调账明细可追溯 | [实际界面报告](../build/wallet_details_results/walkthrough-20261106.json)记录 300 金币调账、操作者、时间和原因，重查时两条账本 ID 相同 | API 36 模拟器连接本机服务的场景通过 |
 | AC-07 PDF顺序/答案开关/预览一致 | [实际 PDF 联调](PDF_INTEGRATION.md)核对题目顺序和答案页，客户端比较预览与导出的文件字节 | Android API 36 已完成应用预览、系统打印和另存 PDF。[文件与逐页核对](../build/demo-20261127/android-print/verification.json) |
 | AC-08 多孩子隔离 | 两名孩子使用独立任务、余额和错题。Android 重连时停留在第二个孩子的首页，第一个孩子的离线操作仍只为本人结算一次。[界面回归](../test/child_switch_isolation_test.dart) · [设备与服务记录](../build/child-isolation-20261127/DELIVERY.md) | Android 和 iPhone 模拟器均通过。iOS 18.5 在线和断网时从小星切到小月再切回，六次界面核对通过。Android 完成任务后，iPhone 重连取得小星的 7 金币、5 XP，小月保有原来的 23 金币、11 XP。目标真机待验收。[配对作业](https://github.com/Alina-qiu/learning_planet/actions/runs/45886513966) |
-| AC-09 安静时段不推送、不扣分 | Android 闹钟过滤、静默与奖励回归已通过。iPhone 收到数据后复查安静时段。[远程提醒与原生检查](TASK_REMOTE_PUSH.md) | iOS 18.5 首次成功注入安静时段载荷后，35 秒内未取得处理回执。原生委托处理与系统注入分别核验。真实 APNs 与目标手机待验收。[该次运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45892450246) |
+| AC-09 安静时段不推送、不扣分 | Android 闹钟过滤、静默与奖励回归已通过。iOS 18.5 在后台直接调用正式应用委托，安静时段、范围不符及过期提醒均被抑制，允许的提醒送达。[远程提醒与原生检查](TASK_REMOTE_PUSH.md) | 同一提交的独立模拟器接收系统注入后，35 秒内仍未观测到应用委托入口。系统后台递送、真实 APNs 与目标手机待验收。[两条路径的作业记录](https://github.com/Alina-qiu/learning_planet/actions/runs/45896548909) |
 | AC-10 清楚说明并在承诺期限内注销 | [真实删除联调](PRIVACY_INTEGRATION.md)核对 74 个 S3 对象、两个过期租约、分页续办和其他成员的文件摘要 | 本机注销与中断恢复通过。目标环境的调度和 24 小时清理时限仍待验收 |
 | AC-11 三题唯一复习、全部作答自动结算 | API 36 与 API 29 对同一家庭独立登录。生成器重跑、零题孩子、系统拨快和拨慢 48 小时、离线冷启与逐题账本均有[同一家庭的验收记录](../build/ac11-device-acceptance/summary.json) | 两台 Android 模拟器连接本机服务通过。新版覆盖安装后保留三道答案和五项待同步操作，重放后任务及账本 ID 均相同 |
 

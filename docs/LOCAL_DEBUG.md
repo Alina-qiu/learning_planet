@@ -1,8 +1,8 @@
 # Android 本机联调
 
-用电脑启动临时服务，在 Android 模拟器或连接电脑的 Android 手机上打开“学习星球·本机”。工作区已有[本机联调 APK](../build/app/outputs/flutter-apk/app-local-debug.apk)，包名为 `com.learningplanet.learning_planet.local`。[两款安装包的大小和 SHA-256](../build/child-isolation-20261127/DELIVERY.md) · [Android 构建说明](ANDROID_BUILD.md)
+在电脑启动本机服务后，可在 Android 模拟器或连接电脑的 Android 手机上打开“学习星球·本机”。工作区已有[本机联调 APK](../build/app/outputs/flutter-apk/app-local-debug.apk)，包名为 `com.learningplanet.learning_planet.local`。[两款安装包的大小和 SHA-256](../build/child-isolation-20261127/DELIVERY.md) · [Android 构建说明](ANDROID_BUILD.md)
 
-服务每次启动创建一个空测试家庭环境。试用期间保持服务运行，关闭或重开 App 都可以继续使用当前数据。服务关闭后，该次临时家庭的数据不会带入下次会话。
+想分几天试用同一个家庭，每次启动都使用 `-KeepData`。家庭、任务、账本和私有文件会保存在本项目的 `.learning-planet-trial` 目录。只做一次性演示时，可以省略此参数，每次得到独立的空环境。两种模式都使用测试邮箱、虚构昵称和示例图片。
 
 ## 1. 启动电脑上的服务
 
@@ -10,10 +10,10 @@
 
 ```powershell
 & ./node_modules/deno/deno.exe check --config supabase/functions/worksheet-render/deno.json supabase/functions/worksheet-render/index.ts supabase/functions/permanent-cleanup/index.ts supabase/functions/account-deletion/index.ts
-& ./scripts/local_backend.ps1
+& ./scripts/local_backend.ps1 -KeepData
 ```
 
-看到 `LOCAL_BACKEND_READY http://127.0.0.1:54321` 后，保持这个窗口打开。服务仅监听电脑回环地址。
+看到 `LOCAL_BACKEND_READY http://127.0.0.1:54321` 后，保持这个窗口打开。服务仅监听电脑回环地址。已配置服务依赖的其他系统可用 `node scripts/local_backend.mjs start --keep-data` 启动。
 
 ## 2. 打开模拟器并安装 APK
 
@@ -48,7 +48,7 @@ $adb = 'D:/learning-planet-tools/android-sdk/platform-tools/adb.exe'
 
 ## 4. 结束本次试用
 
-在项目目录运行以下命令。停止后如要再次试用，请重新启动服务，在 App 退出旧账号，以新验证码登录并创建测试家庭。单次服务会话最长 24 小时。
+在项目目录运行以下命令。单次服务最长运行 24 小时。服务停止或电脑重新开机后，再用 `-KeepData` 打开同一项目即可继续。若 App 要求重新登录，使用原测试邮箱即可回到已有家庭。一次性演示模式则需要重新获取验证码并建家庭。
 
 ```powershell
 & ./scripts/local_backend.ps1 -Command status
@@ -65,11 +65,11 @@ $adb = 'D:/learning-planet-tools/android-sdk/platform-tools/adb.exe'
 & ./scripts/build_local_android.ps1 -NoPub
 ```
 
-服务的本机凭据保存在 Git 忽略的 `.dart_tool/local-backend/credentials.json`；公开构建配置保存在 `defines.json`，控制信息保存在 `control.json`。保留本机凭据后，重启服务可以继续使用原联调 APK。普通版 `app-debug.apk` 使用独立包名，适合查看服务配置提示。
+服务的本机凭据位于 Git 忽略的 `.dart_tool/local-backend/credentials.json`，同目录的 `defines.json` 用于构建，`control.json` 用于控制本次服务。保留数据模式另存一份本机签名凭据，执行 `flutter clean` 后重新启动服务仍可使用原联调 APK。需要备份本机试用时，先停止服务，再备份完整的 `.learning-planet-trial` 目录，其中包含家庭文件和签名凭据，请保存在本机私有位置。普通版 `app-debug.apk` 使用独立包名，可查看服务配置提示。
 
 ## 联调范围
 
-服务启动时依序应用工作区的 78 份迁移至 076。家庭每天从 00:05 起生成复习，开始前更新到期题单，首次开始后固定题目、顺序和标准答案。Android 模拟器已核对两名孩子的离线打卡、重开、重连、余额及错题的归属。[复习操作](REVIEW_AUTO_COMPLETION.md) · [双孩子与设备验证](../build/child-isolation-20261127/DELIVERY.md) · [迁移与恢复](../build/demo-20261127/DELIVERY.md)
+首次启动应用项目内全部数据库迁移，保留数据模式重启时校验已应用的迁移并补上新增迁移。家庭每天从 00:05 起生成复习，开始前更新到期题单，首次开始后固定题目、顺序和标准答案。Android 模拟器已核对两名孩子的离线打卡、重开、重连、余额及错题的归属。[复习操作](REVIEW_AUTO_COMPLETION.md) · [双孩子与设备验证](../build/child-isolation-20261127/DELIVERY.md) · [迁移与恢复](../build/demo-20261127/DELIVERY.md)
 
 模型、外部邮件、APNs 和 Realtime 需另外配置。
 

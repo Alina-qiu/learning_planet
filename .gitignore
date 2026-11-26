@@ -1,4 +1,5 @@
 .dart_tool/
+/.learning-planet-trial/
 __pycache__/
 node_modules/
 supabase/.temp/

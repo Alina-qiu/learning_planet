@@ -32,6 +32,63 @@ export async function reviewRefreshCases({client, scalar, login, denied, check, 
     return [parentToday.expected, report.tasks.expected, report.days[0].expected, report.start_metrics.eligible];
   }
 
+  await check('review overview reports only overflow before 00:05 and the actual queue afterwards in family time', async () => {
+    await client.query('begin');
+    try {
+      const children = [], dueCounts = [0, 3, 12];
+      for (const n of dueCounts) {
+        const cid = await child();
+        children.push(cid);
+        for (let i = 0; i < n; i++) await save(cid, 'Queue ' + i);
+      }
+      const cleanupChild = await child(), deleting = await save(cleanupChild, 'Pending cleanup');
+      await client.query('reset role');
+      await client.query("update public.wrong_questions set review_due_at='2030-01-01 12:00Z' where child_id=any($1::uuid[])", [[...children, cleanupChild]]);
+      await client.query("update public.wrong_questions set deleting=true where id=$1", [deleting]);
+      // Only this transaction on the disposable PostgreSQL instance sees the test clock.
+      // All application functions, their privileges, and the production reminder wrapper run unchanged.
+      await client.query(`alter function pg_catalog.now() rename to fixture_original_now;
+        create function pg_catalog.now() returns timestamptz language sql stable as
+          $$select current_setting('fixture.now')::timestamptz$$;
+        discard plans`);
+      for (const [zone, before, after] of [
+        ['Asia/Shanghai', '2030-01-01 16:03Z', '2030-01-01 16:05Z'],
+        ['America/New_York', '2030-01-03 05:03Z', '2030-01-03 05:05Z'],
+      ]) {
+        await client.query('reset role');
+        await client.query("select set_config('fixture.now',$1,true)", [before]);
+        await client.query('update public.families set timezone=$1 where id=$2', [zone, family]);
+        await auth();
+        for (const [at, generated] of [[before, false], [after, true]]) {
+          await client.query("select set_config('fixture.now',$1,true)", [at]);
+          const overflow = [];
+          for (const [i, cid] of children.entries()) {
+            const n = dueCounts[i], result = await scalar('select public.review_overview($1)', [cid]);
+            const description = zone + ' ' + at + ' with ' + n + ' due';
+            assert.equal(result.due, n, description);
+            overflow.push(result.backlog);
+            assert.equal(result.task_id !== null, generated && n > 0, description);
+            assert.equal(Object.hasOwn(result, 'reminder'), generated && n > 0, description);
+            if (result.task_id) assert.equal((await detail(result.task_id)).items.length, Math.min(n, 10));
+          }
+          assert.deepEqual(overflow, [0, 0, 2], zone + ' ' + at + ' overflow for 0, 3 and 12 due');
+          const cleanup = await scalar('select public.review_overview($1)', [cleanupChild]);
+          assert.equal(cleanup.due, 0);
+          assert.equal(cleanup.backlog, 0);
+          assert.equal(cleanup.task_id, null);
+        }
+      }
+      await login(otherUid);
+      await client.query('savepoint outsider');
+      await denied('select public.review_overview($1)', [children[1]]);
+      await client.query('rollback to outsider');
+      assert.equal(await scalar("select has_function_privilege(current_user,'public.review_overview_before_snooze(uuid)','execute')"), false);
+    } finally {
+      await client.query('rollback');
+      await auth();
+    }
+  });
+
   await check('unstarted review preserves its ID and cap while refreshing order, private keys and estimates once per change', async () => {
     const cid = await child(), a = await save(cid,'A'), b = await save(cid,'B');
     const tid = await generate(cid, 2), first = await detail(tid);
