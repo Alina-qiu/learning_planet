@@ -2,6 +2,10 @@
 
 PRD第9章要求支持当前及前两个iOS主版本，并保持平板可用。截至2026-11-12，Apple已发布[iOS27.2.1](https://developer.apple.com/news/releases/?id=11092026b)。当前及前两个实际发行主版本为27、26、18，不能把最低部署版本15.5或一次iOS18.5构建当作全部兼容性证据。
 
+## 两名孩子共用 iPhone
+
+Android 与 iPhone 的配对作业使用同一个临时家庭。iOS 18.5 的 iPhone 模拟器先从首页查看小星的任务、余额和错题，再切到小月并切回小星。设备与服务断开连接后重复切换，检查两人各自的缓存。随后冷启动同一 iPhone 会话，由 Android 完成小星的任务；恢复连接后核对新状态、小星的唯一奖励和小月原有的两条账本。运行记录随每次提交保存在 `cross-device-sync-evidence` 产物中。[设备端操作](../integration_test/cross_device_sync_test.dart) · [服务端核账](../scripts/test_cross_device_sync.mjs) · [分支检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+
 ## 持续运行矩阵
 
 CI在同一份源码上执行以下独立任务，每项均使用真实Keychain、加密SQLite和同一个千任务离线流程：

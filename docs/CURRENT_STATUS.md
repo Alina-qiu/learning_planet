@@ -4,7 +4,7 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-此前提交 `8f39cdc`通过 902 项 Flutter 测试，核心行覆盖率为 90.90%。PostgREST 16.2、16.5 各通过 12 项接口测试。远程 11 项常规作业及 3 项 Android 与 iPhone 同步作业全部通过，iPhone 模拟器恢复联网后 8.217 秒读到另一端完成的任务。[本机检查](../build/review-refresh-20261126/local-quality.json) · [该版常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45858279249) · [该版双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45858279347) · [分支最新检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+当前交付的 Android 联调 APK 来自 `ce1b5a0`。Windows 与 Linux 各通过 914 项 Flutter 测试，本机核心行覆盖率为 90.91%。Android 10 模拟器登录合成家庭后，完整首页三次冷启动上界分别为 3.22、2.93、4.12 秒。[本机交付与验收](../build/child-isolation-20261127/DELIVERY.md) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45880413235) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45880413245)
 
 两份调试包的用途和本机运行步骤见[Android 构建记录](ANDROID_BUILD.md)。双孩子共用设备的操作、两份安装包及启动实测见[本机交付记录](../build/child-isolation-20261127/DELIVERY.md)。
 
@@ -115,7 +115,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | PRD项 | 已有实现与可定位证据 | 当前剩余范围 |
 |---|---|---|
 | ACC-01 邮箱登录/跨端家庭 | [验证码](EMAIL_LOGIN.md)、[真实Auth联调](AUTH_INTEGRATION.md)，`lib/features/auth_family` | 外部收信、云端及Android/iOS同账号实机同步 |
-| ACC-02 多孩子隔离 | Android API 36 模拟器切换两名孩子后，分别核对首页、余额和错题本。见 [AC-08 本机记录](../build/child-isolation-20261127/DELIVERY.md) | iPhone 同场景及家庭试用 |
+| ACC-02 多孩子隔离 | Android API 36 已核对首页、余额、错题及奖励归属。iPhone 的配对作业在在线、离线两种情况下从正式页面切换两名孩子。[Android 实测](../build/child-isolation-20261127/DELIVERY.md) · [iPhone 配对流程](../integration_test/cross_device_sync_test.dart) | 目标手机与家庭试用 |
 | ACC-03 离线查看/打卡/同步 | Android 断开本机服务后打卡、切换孩子、结束进程并离线重开。重连后自动同步给原孩子。[离线任务](OFFLINE_TASKS.md) · [双孩子验收](../build/child-isolation-20261127/DELIVERY.md) | 无线网络切换、系统后台调度及目标手机 |
 | ACC-04 服务端判奖 | [数据库测试](../scripts/test_database.mjs)、[复习结算](REVIEW_AUTO_COMPLETION.md)，服务器时间/唯一回执 | 云端时钟与真实设备改时场景 |
 | ACC-05 导出/注销 | [孩子导出](CHILD_DATA_EXPORT.md)、[真实删除集成](PRIVACY_INTEGRATION.md) | 托管清理Cron、真实承诺期限及外部已导出副本说明的实机验收 |
@@ -172,14 +172,14 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 
 | 编号 | 当前证据 | PRD 场景状态 |
 |---|---|---|
-| AC-01 Android/iOS同步且只奖励一次 | iPhone 缓存待办和零余额并离线重开，Android 完成同一任务。iPhone 重连后 3.495 秒发起首个新快照请求，双方最终显示 7 金币、5 XP。数据库中开始和完成各一个回执，金币与 XP 各一条账本。[双端完整运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45870781604) | 提交 `dbefe06` 已在 Android 10、iOS 18.5 两个原生模拟器和同一数据库上通过，目标手机待验收。[后续检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) |
+| AC-01 Android/iOS同步且只奖励一次 | iPhone 缓存待办和零余额并离线重开，Android 完成同一任务。iPhone 重连后 9.276 秒发起首个新快照请求，双方最终显示 7 金币、5 XP。数据库中开始和完成各一个回执，金币与 XP 各一条账本。[双端完整运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45880413245) | 提交 `ce1b5a0` 已在 Android 10、iOS 18.5 两个原生模拟器和同一数据库上通过，目标手机待验收。[后续检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) |
 | AC-02 重复提交只有一条奖励 | [并发报告](../build/concurrency_integration/results.json)记录 80 条命令重放、4 次丢回执及每个孩子的账本行数 | 本机服务重放场景通过 |
 | AC-03 改时不重复生成或领奖 | API 36 模拟器产生三天连续奖励，系统日期分别拨快、拨慢 48 小时，冷启动并重新从本机服务读取，核对原任务、奖励与账本 ID | 系统改时场景在 Android 模拟器与本机服务通过 |
 | AC-04 离线打卡、上线余额一致 | API 29 实际应用在服务已记账而手机丢失回执时重发同一命令。第二次断网打卡后重开，联网自动补传，两项任务合计 50 金币、40 XP。后续同步的四条账本 ID 及金额均一致。[API 29 记录](../build/acceptance-20261124/android-reconnect.json) · [API 36 记录](../build/auto_sync_device_results/walkthrough.json) | 两个 Android 模拟器版本分别连接本机服务通过 |
 | AC-05 拒绝兑换退回冻结金币 | [奖励 HTTP 报告](../build/economy_integration/results.json)及[并发退款](../build/concurrency_integration/results.json)，八次并发退款只入账一次 | 本机服务场景通过 |
 | AC-06 调账明细可追溯 | [实际界面报告](../build/wallet_details_results/walkthrough-20261106.json)记录 300 金币调账、操作者、时间和原因，重查时两条账本 ID 相同 | API 36 模拟器连接本机服务的场景通过 |
 | AC-07 PDF顺序/答案开关/预览一致 | [实际 PDF 联调](PDF_INTEGRATION.md)核对题目顺序和答案页，客户端比较预览与导出的文件字节 | Android API 36 已完成应用预览、系统打印和另存 PDF。[文件与逐页核对](../build/demo-20261127/android-print/verification.json) |
-| AC-08 多孩子隔离 | 两名孩子使用独立任务、余额和错题。Android 重连时停留在第二个孩子的首页，第一个孩子的离线操作仍只为本人结算一次。[界面回归](../test/child_switch_isolation_test.dart) · [设备与服务记录](../build/child-isolation-20261127/DELIVERY.md) | 本机 Android 模拟器通过，iPhone 同场景和家庭实测待验收 |
+| AC-08 多孩子隔离 | 两名孩子使用独立任务、余额和错题。Android 重连时停留在第二个孩子的首页，第一个孩子的离线操作仍只为本人结算一次。[界面回归](../test/child_switch_isolation_test.dart) · [设备与服务记录](../build/child-isolation-20261127/DELIVERY.md) | Android 模拟器通过。iPhone 在配对作业中分别核对两名孩子的任务、余额和错题，并从数据库核对另一名孩子的账本。[配对作业结果](https://github.com/Alina-qiu/learning_planet/pull/1/checks)；目标真机待验收 |
 | AC-09 安静时段不推送、不扣分 | Android实际闹钟过滤、静默与奖励回归 | **未完成验收**：已按用户选择改为收到后校验，Swift策略与构建已通过，仍待真实供应商/目标手机 |
 | AC-10 清楚说明并在承诺期限内注销 | [真实删除联调](PRIVACY_INTEGRATION.md)核对 74 个 S3 对象、两个过期租约、分页续办和其他成员的文件摘要 | 本机注销与中断恢复通过。目标环境的调度和 24 小时清理时限仍待验收 |
 | AC-11 三题唯一复习、全部作答自动结算 | API 36 与 API 29 对同一家庭独立登录。生成器重跑、零题孩子、系统拨快和拨慢 48 小时、离线冷启与逐题账本均有[同一家庭的验收记录](../build/ac11-device-acceptance/summary.json) | 两台 Android 模拟器连接本机服务通过。新版覆盖安装后保留三道答案和五项待同步操作，重放后任务及账本 ID 均相同 |

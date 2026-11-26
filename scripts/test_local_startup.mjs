@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {test} from 'node:test';
+import {localControlInvocation, stopLocalSession} from './local_backend.mjs';
 import {closeServer, listen, localProcess} from './fixtures/http_test_tools.mjs';
 import {initializeLocalBucket} from './fixtures/storage_backend.mjs';
 
@@ -89,4 +90,77 @@ test('bucket startup keeps a terminal initialization failure visible', async () 
   const started = performance.now();
   await assert.rejects(initializeLocalBucket(async () => { throw error; }, {timeoutMs: 50}), value => value === error);
   assert.ok(performance.now() - started < 1000);
+});
+
+
+test('printed controls use the selected runtime with shell-safe quoting', () => {
+  assert.equal(localControlInvocation("C:/family's tools/node.exe", 'win32'),
+    "& 'C:/family''s tools/node.exe' scripts/local_backend.mjs");
+  assert.equal(localControlInvocation("/family's tools/node", 'linux'),
+    String.raw`'/family'\''s tools/node' scripts/local_backend.mjs`);
+});
+
+test('stop waits through a 503 until the local port can be reused', {timeout: 5000}, async () => {
+  const saved = {runId: 'session', shutdownKey: 'test-only'};
+  const draining = Promise.withResolvers();
+  let accepted = false;
+  const server = createServer((request, response) => {
+    if (request.url === '/__local/stop') {
+      assert.equal(request.headers.authorization, 'Bearer test-only');
+      accepted = true;
+      response.writeHead(202).end();
+    } else {
+      response.writeHead(accepted ? 503 : 200).end(JSON.stringify({ready: !accepted, runId: saved.runId}));
+      if (accepted) draining.resolve();
+    }
+  });
+  await listen(server);
+  const port = server.address().port, origin = `http://127.0.0.1:${port}`;
+  let finished = false;
+  const stopping = stopLocalSession(origin, saved).then(() => { finished = true; });
+  try {
+    await draining.promise;
+    assert.equal(finished, false);
+  } finally {
+    await closeServer(server);
+    await stopping;
+  }
+  await stopLocalSession(origin, saved);
+  const replacement = createServer();
+  try { await listen(replacement, port); }
+  finally { await closeServer(replacement); }
+});
+
+test('stop never sends its key to a replacement session or stops it during cleanup', async () => {
+  let runId = 'original', posts = 0;
+  const server = createServer((request, response) => {
+    if (request.url === '/__local/stop') {
+      posts++;
+      runId = 'replacement';
+      response.writeHead(202).end();
+    } else {
+      response.end(JSON.stringify({ready: true, runId}));
+    }
+  });
+  await listen(server);
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const original = {runId, shutdownKey: 'test-only'};
+    await stopLocalSession(origin, original);
+    assert.equal(posts, 1);
+    await assert.rejects(stopLocalSession(origin, original), /different session/);
+    assert.equal(posts, 1);
+  } finally { await closeServer(server); }
+});
+
+test('stop reports a deadline while the original listener remains open', async () => {
+  const server = createServer((request, response) => {
+    if (request.url === '/__local/stop') response.writeHead(202).end();
+    else response.writeHead(503).end(JSON.stringify({ready: false, runId: 'closing'}));
+  });
+  await listen(server);
+  try {
+    await assert.rejects(stopLocalSession(`http://127.0.0.1:${server.address().port}`,
+      {runId: 'closing', shutdownKey: 'test-only'}, {timeoutMs: 150}), /still in progress/);
+  } finally { await closeServer(server); }
 });

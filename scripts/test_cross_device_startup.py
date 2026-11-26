@@ -15,6 +15,20 @@ from unittest.mock import Mock, patch
 import run_cross_device_sync as runner
 
 
+def isolated_children():
+    primary = {"child_id":"child", "nickname":"A", "task_id":"task", "title":"reading",
+               "question":"sails", "coin_balance":0, "xp":0}
+    sibling = {"child_id":"sibling", "nickname":"B", "task_id":"other", "title":"drawing",
+               "question":"whales", "coin_balance":23, "xp":11}
+    sibling_state = {**sibling, "status":"ready", "frozen_balance":0, "command_count":0, "ledger":[
+        {"id":"s1", "asset_type":"coin", "amount":23, "source_type":"parent_adjustment"},
+        {"id":"s2", "asset_type":"xp", "amount":11, "source_type":"parent_adjustment"},
+    ]}
+    views = [dict(child, task_action="start") for child in (primary, sibling, primary)]
+    return ({"online_child_views":views, "offline_child_views":views},
+            {"childProfiles":[primary, sibling], "siblingInitial":sibling_state, "siblingFinal":sibling_state})
+
+
 class StartupTests(unittest.TestCase):
     def exercise_stages(self, occupied=None, android_result="passed"):
         udid = "10000000-0000-0000-0000-000000000001"
@@ -23,6 +37,7 @@ class StartupTests(unittest.TestCase):
         base = {"test":"AC-01", "task_id":"task", "child_id":"child", "family_id":"family",
                 "ready_with_zero_wallet":True}
         paid = {"completed":True, "coins":7, "xp":5}
+        child_views, sibling_proof = isolated_children()
 
         def report(name, data):
             runner.RESULTS.mkdir(parents=True, exist_ok=True)
@@ -53,7 +68,7 @@ class StartupTests(unittest.TestCase):
                 self.assertTrue(state["iphone"])
                 if state["phase"] == "initial":
                     self.assertNotIn("--reuse-installed", args)
-                    report("ios_initial", {**base, "device":"ios", "reader_pass":"initial"})
+                    report("ios_initial", {**base, **child_views, "device":"ios", "reader_pass":"initial"})
                     state["phase"] = "reader-ready"
                     events.append("initial reader")
                 else:
@@ -62,7 +77,7 @@ class StartupTests(unittest.TestCase):
                     self.assertIn("Android released", events)
                     report("ios", {**base, **paid, "device":"ios", "reader_pass":"restore",
                                   "offline_state_after_android_completion":True})
-                    proof = {"passed":True, "separateLogins":True, "readerSessionRetained":True,
+                    proof = {**sibling_proof, "passed":True, "separateLogins":True, "readerSessionRetained":True,
                              "initial":{"status":"ready","coin_balance":0,"frozen_balance":0,"xp":0},
                              "final":{"status":"completed","coin_balance":7,"frozen_balance":0,"xp":5},
                              "childId":"child", "taskId":"task", "blockedAfterWriter":1, "blockedReaderRequests":1,
@@ -201,6 +216,17 @@ class StartupTests(unittest.TestCase):
         for outcome in ("failed", "missing", "stalled login"):
             with self.subTest(outcome=outcome):
                 self.assertNotIn("restored reader", self.exercise_stages(android_result=outcome))
+
+    def test_child_views_reject_mixed_notebooks_or_a_sibling_reward(self):
+        initial, proof = isolated_children()
+        proof.update(childId="child", taskId="task")
+        runner.verify_child_views(initial, proof)
+        mixed = [dict(view) for view in initial["offline_child_views"]]
+        mixed[1]["question"] = mixed[0]["question"]
+        with self.assertRaisesRegex(RuntimeError, "offline_child_views"):
+            runner.verify_child_views({**initial, "offline_child_views":mixed}, proof)
+        with self.assertRaisesRegex(RuntimeError, "Sibling data changed"):
+            runner.verify_child_views(initial, {**proof, "siblingFinal":{**proof["siblingFinal"], "xp":16}})
 
     def test_ios_failure_reports_only_bounded_counts_status_and_mailbox_category(self):
         data = {"iosHttp":{"otp":1,"otpStatus":429,"verify":False,"snapshotStatus":"secret",

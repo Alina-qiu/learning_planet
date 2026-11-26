@@ -10,6 +10,8 @@ import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';
 import 'package:learning_planet/core/config/app_config.dart';
 import 'package:learning_planet/features/home/presentation/home_screen.dart';
+import 'package:learning_planet/features/tasks/presentation/task_presentation.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/review_hub_screen.dart';
 import 'package:learning_planet/main.dart' as app;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -287,7 +289,12 @@ Future<void> _selectChild(
   final item = find.byWidgetPredicate(
     (widget) => widget is PopupMenuItem<String> && widget.value == child,
   );
-  await _until(tester, 'child menu', () => item.evaluate().isNotEmpty);
+  await _until(tester, 'child menu', () {
+    final entry = item.evaluate().singleOrNull;
+    return entry != null &&
+        ModalRoute.of(entry)?.animation?.isCompleted == true &&
+        item.hitTestable().evaluate().isNotEmpty;
+  });
   await tester.tap(item);
   await _until(
     tester,
@@ -319,6 +326,123 @@ Future<void> showFixtureTarget(
   });
   await tester.ensureVisible(target);
   await tester.pump();
+}
+
+/// Read each child's home and notebook through the production routes. Returning
+/// to the primary child also exercises a second switch on the same session.
+Future<List<Map<String, Object>>> observeFixtureChildViews(
+  WidgetTester tester,
+  String family,
+  List<Map<String, dynamic>> profiles, {
+  required bool offline,
+}) async {
+  expect(profiles, hasLength(2));
+  final views = <Map<String, Object>>[];
+  String wallet(Map<String, dynamic> profile) =>
+      '金币 ${profile['coin_balance']} · 冻结 0 · XP ${profile['xp']}';
+  for (final index in const [0, 1, 0]) {
+    final profile = profiles[index], other = profiles[1 - index];
+    final child = profile['child_id'] as String;
+    final task = profile['task_id'] as String;
+    await _selectChild(tester, child, family);
+    final scroll = find.descendant(
+      of: find.byKey(PageStorageKey('home:$child')),
+      matching: find.byType(Scrollable),
+    );
+    final nickname = find.text(profile['nickname'] as String);
+    await showFixtureTarget(tester, scroll, nickname, 'child nickname');
+    final displayedName = tester.widget<Text>(nickname).data!;
+    expect(find.text(other['nickname'] as String), findsNothing);
+    final balance = find.text(wallet(profile));
+    await showFixtureTarget(tester, scroll, balance, 'child wallet');
+    expect(find.text(wallet(other)), findsNothing);
+
+    final card = find.byKey(ValueKey('home-task:$child:$task'));
+    final start = find.descendant(of: card, matching: find.text('开始'));
+    await showFixtureTarget(
+      tester,
+      scroll,
+      start,
+      'child ready task',
+      bottom: true,
+    );
+    final heading = tester.widget<TaskHeading>(
+      find.descendant(of: card, matching: find.byType(TaskHeading)),
+    );
+    expect(heading.task.childId, child);
+    expect(heading.task.id, task);
+    expect(
+      find.descendant(
+        of: card,
+        matching: find.text(profile['title'] as String),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text(other['title'] as String), findsNothing);
+    final action = tester.widget<FilledButton>(
+      find.ancestor(of: start, matching: find.byType(FilledButton)),
+    );
+    expect(action.onPressed, isNotNull);
+
+    final notebook = find.text('错题本与拼音复习');
+    await showFixtureTarget(
+      tester,
+      scroll,
+      notebook,
+      'child notebook',
+      bottom: true,
+    );
+    await tester.tap(notebook);
+    final hub = find.byType(ReviewHubScreen);
+    final question = find.descendant(
+      of: hub,
+      matching: find.text(profile['question'] as String),
+    );
+    final catalogScroll = find.descendant(
+      of: find.descendant(of: hub, matching: find.byType(ListView)),
+      matching: find.byType(Scrollable),
+    );
+    await showFixtureTarget(
+      tester,
+      catalogScroll,
+      question,
+      'child question',
+      bottom: true,
+    );
+    final displayedQuestion = tester.widget<Text>(question).data!;
+    expect(tester.widget<ReviewHubScreen>(hub).childId, child);
+    expect(find.text(other['question'] as String), findsNothing);
+    final offlineMessage = find.textContaining('离线查看：仅包含该筛选最近同步的首批记录');
+    if (offline) {
+      await showFixtureTarget(
+        tester,
+        catalogScroll,
+        offlineMessage,
+        'offline notebook',
+      );
+    } else {
+      expect(offlineMessage, findsNothing);
+    }
+    views.add({
+      'child_id': heading.task.childId,
+      'nickname': displayedName,
+      'task_id': heading.task.id,
+      'title': heading.task.title,
+      'question': displayedQuestion,
+      'coin_balance': profile['coin_balance'] as int,
+      'xp': profile['xp'] as int,
+      'task_action': 'start',
+    });
+    await tester.pageBack();
+    await _until(
+      tester,
+      'home after notebook',
+      () =>
+          hub.evaluate().isEmpty &&
+          find.byTooltip('切换孩子').hitTestable().evaluate().isNotEmpty,
+    );
+  }
+  return views;
 }
 
 Future<void> _tapTaskAction(
@@ -468,7 +592,26 @@ void main() {
       );
       report['ready_with_zero_wallet'] = true;
       if (reader && !restoring) {
+        final profiles = (scenario['child_profiles'] as List)
+            .cast<Map<String, dynamic>>();
+        expect(profiles.first['child_id'], child);
+        report['stage'] = 'online_child_views';
+        report['online_child_views'] = await observeFixtureChildViews(
+          tester,
+          family,
+          profiles,
+          offline: false,
+        );
         await control.mark('reader-ready', task);
+        // The acknowledgement closes this device's data gateway. The
+        // coordinator waits for this initial driver to finish before shutdown.
+        report['stage'] = 'offline_child_views';
+        report['offline_child_views'] = await observeFixtureChildViews(
+          tester,
+          family,
+          profiles,
+          offline: true,
+        );
         report['stage'] = 'cached_before_shutdown';
         return;
       }

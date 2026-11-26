@@ -27,9 +27,11 @@ PHASES = ("initial", "reader-ready", "writer-complete", "reader-reconnect", "rea
 UI_STAGES = {*PHASES, "/scenario", "/otp", "email sign-in screen", "enabled OTP form", "home after OTP verification",
              "home with the fixture child", "child menu", "selected child", "initial wallet", "ready task", "offline cached ready task",
              "offline cached wallet", "enabled start action", "in-progress task", "enabled completion action",
-             "completed task", "confirmed wallet", "home from the offline iPhone session"}
+             "completed task", "confirmed wallet", "home from the offline iPhone session",
+             "child nickname", "child wallet", "child ready task", "child notebook",
+             "child question", "offline notebook", "home after notebook"}
 LOGIN_STAGES = {"email_login", "login_form_visible", "otp_send_tapped", "otp_received", "otp_form_ready", "otp_verify_tapped"}
-REPORT_STAGES = {"fixture", *LOGIN_STAGES, "restore_offline_session", "load_family_task_and_wallet",
+REPORT_STAGES = {"fixture", *LOGIN_STAGES, "online_child_views", "offline_child_views", "restore_offline_session", "load_family_task_and_wallet",
                  "cached_before_shutdown", "reconnect", "complete_task", "confirm_task_and_wallet", "confirmed"}
 ANDROID_DRIVER_STAGES = {"APK metadata", "installation", "activity launch"}
 ANDROID_APP_STAGES = {"fixture", *LOGIN_STAGES, "load_family_task_and_wallet", "complete_task",
@@ -130,6 +132,27 @@ def control_phase():
     return control_status("ios")[0]
 
 
+def verify_child_views(initial, server):
+    primary, sibling = server["childProfiles"]
+    require(primary["child_id"] == server["childId"] and primary["task_id"] == server["taskId"],
+            "Primary child does not match the shared task")
+    marker_keys = ("child_id", "nickname", "task_id", "title", "question", "coin_balance", "xp")
+    require(set(primary) == set(sibling) == set(marker_keys) and
+            all(primary[key] != sibling[key] for key in marker_keys), "Child markers are not distinct")
+    expected = [dict(profile, task_action="start") for profile in (primary, sibling, primary)]
+    for stage in ("online_child_views", "offline_child_views"):
+        require(initial.get(stage) == expected, f"Incomplete iPhone child switch in {stage}")
+    before = server["siblingInitial"]
+    require(before == server["siblingFinal"] and all(before[key] == sibling[key] for key in marker_keys),
+            "Sibling data changed during the paired run")
+    require(before["status"] in ("ready", "scheduled") and before["frozen_balance"] == 0
+            and before["command_count"] == 0, "Sibling task or wallet changed")
+    require(len({r["id"] for r in before["ledger"]}) == 2 and
+            [(r["asset_type"], r["amount"], r["source_type"]) for r in before["ledger"]] ==
+            [("coin", sibling["coin_balance"], "parent_adjustment"), ("xp", sibling["xp"], "parent_adjustment")],
+            "Sibling reward ledger mismatch")
+
+
 def verify_evidence(initial, ios, android, server):
     require(server["passed"] is True and server["separateLogins"] is True and server["readerSessionRetained"] is True,
             "Server proof incomplete")
@@ -155,6 +178,7 @@ def verify_evidence(initial, ios, android, server):
             [("coin", final["coin_balance"]), ("xp", final["xp"])], "Reward ledger mismatch")
     require(server["receipts"] == [{"kind": "start", "outcome": "applied"},
                                    {"kind": "complete", "outcome": "applied"}], "Task receipts mismatch")
+    verify_child_views(initial, server)
 
 
 def stop_group(process):

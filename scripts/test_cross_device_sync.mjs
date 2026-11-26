@@ -6,6 +6,7 @@ import {createServer} from 'node:http';
 import {link, mkdir, rm, writeFile} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {readingReward, seedPairedChildren, siblingState} from './fixtures/cross_device_children.mjs';
 import {withAuthBackend} from './fixtures/auth_backend.mjs';
 import {closeServer, forwardHttp, listen} from './fixtures/http_test_tools.mjs';
 import {realApiClient} from './fixtures/real_api_client.mjs';
@@ -13,8 +14,7 @@ import {realApiClient} from './fixtures/real_api_client.mjs';
 const directory = process.env.CROSS_DEVICE_RESULTS_DIR ?? 'build/cross-device';
 const ports = {ios: 54325, android: 54326};
 const publicKey = 'sb_publishable_cross_device_loopback_fixture';
-const title = '跨设备阅读';
-const coins = 7, xp = 5;
+const {coins,xp} = readingReward;
 const phases = ['initial', 'reader-ready', 'writer-complete', 'reader-reconnect', 'reader-confirmed'];
 const androidReportPath = process.env.ANDROID_REPORT_PATH ?? 'build/integration_results/cross_device_sync_android.json';
 const androidStages = ['fixture','email_login','login_form_visible','otp_send_tapped','otp_received',
@@ -153,21 +153,23 @@ async function run(config, {database}) {
   const client = realApiClient(config);
   const owner = await client.account();
   const family = await client.family(owner);
-  const day = await client.rpc('family_today', owner.token, {target_child_id:family.child});
-  const template = await client.rpc('save_task_schedule', owner.token, {target_child_id:family.child,
-    config:{title, recurrence:'once', starts_on:day, ends_on:day, start_time:'00:00',
-      due_time:'23:59:59', coins, xp, minimum_seconds:0}});
-  await client.rpc('generate_scheduled_tasks',owner.token,{target_child_id:family.child});
+  const profiles = await seedPairedChildren(client,owner,family,database);
+  const [{task_id:taskId,title},sibling] = profiles;
+  const siblingInitial = await siblingState(database,sibling.child_id);
+  assert.deepEqual(siblingInitial.ledger.map(row=>[row.asset_type,row.amount,row.source_type]),
+    [['coin',sibling.coin_balance,'parent_adjustment'],['xp',sibling.xp,'parent_adjustment']]);
+  assert.equal(siblingInitial.command_count,0);
+  assert.equal(siblingInitial.frozen_balance,0);
+  assert.ok(['ready','scheduled'].includes(siblingInitial.status));
   const select = async (sql, params) => (await database.client.query(sql,params)).rows;
-  const [task] = await select('select id from public.task_instances where template_id=$1 and child_id=$2',[template,family.child]);
-  assert.ok(task?.id, 'Scheduled task missing');
-  const scenario = {email:owner.email,title,coins,xp,task_id:task.id,child_id:family.child,family_id:family.id};
-  const ledger = () => select('select id,asset_type,amount from public.ledger_entries where child_id=$1 and source_id=$2 order by asset_type',[family.child,task.id]);
+  const scenario = {email:owner.email,title,coins,xp,task_id:taskId,child_id:family.child,
+    family_id:family.id,child_profiles:profiles};
+  const ledger = () => select('select id,asset_type,amount from public.ledger_entries where child_id=$1 and source_id=$2 order by asset_type',[family.child,taskId]);
   const receipts = () => select(`select request->>'kind' kind,outcome from public.task_command_receipts
-    where task_id=$1 order by created_at`,[task.id]);
+    where task_id=$1 order by created_at`,[taskId]);
   const applied = [{kind:'start',outcome:'applied'},{kind:'complete',outcome:'applied'}];
   const state = async () => (await select(`select i.status,w.coin_balance,w.frozen_balance,w.xp
-    from public.task_instances i join public.wallets w on w.child_id=i.child_id where i.id=$1`,[task.id]))[0];
+    from public.task_instances i join public.wallets w on w.child_id=i.child_id where i.id=$1`,[taskId]))[0];
   const initial = await state();
   assert.ok(['ready','scheduled'].includes(initial.status));
   assert.deepEqual([initial.coin_balance,initial.frozen_balance,initial.xp],[0,0,0]);
@@ -187,7 +189,7 @@ async function run(config, {database}) {
   const interrupt = () => fail(new Error('Cross-device run interrupted'));
   async function verifiedWriterLedger() {
     assert.ok(sessions.android && sessions.ios && sessions.android!==sessions.ios);
-    assert.ok(observations.some(o=>o.device==='android' && o.phase==='reader-ready'));
+    assert.ok(observations.some(o=>o.device==='android' && o.child===family.child && o.phase==='reader-ready'));
     assert.deepEqual(await state(),{status:'completed',coin_balance:coins,frozen_balance:0,xp});
     const rows = await ledger();
     assert.deepEqual(rows.map(r=>[r.asset_type,r.amount]),[['coin',coins],['xp',xp]]);
@@ -205,7 +207,7 @@ async function run(config, {database}) {
         (select count(*)::int from public.task_command_receipts r where r.task_id=i.id
           and r.request->>'kind'='complete' and r.outcome='applied') as applied_completions,
         (select count(*)::int from public.ledger_entries l where l.child_id=i.child_id and l.source_id=i.id) as ledger_rows
-        from public.task_instances i where i.id=$1`,[task.id]);
+        from public.task_instances i where i.id=$1`,[taskId]);
       await writeFile(directory+'/server.json',JSON.stringify({passed:false,status:'android_failed',checkpoint,taskState},null,2)+'\n');
     },
   });
@@ -238,16 +240,29 @@ async function run(config, {database}) {
         // PostgREST validates the actual bearer. Retain only the session identifier
         // from successful snapshots to distinguish the two OTP logins.
         if (snapshot) {
+          // Observe only the two fixture IDs. Sibling refreshes cannot satisfy the
+          // primary child's post-reconnect timer or session checks.
+          let target = null, input = '';
+          req.on('data', chunk => {
+            if (input.length <= 200) input += chunk.toString('utf8',0,201);
+          });
+          req.once('end', () => {
+            if (input.length > 200) return;
+            try {
+              const id = JSON.parse(input).target_child_id;
+              if (profiles.some(child=>child.child_id===id)) target=id;
+            } catch { /* The real service validates the request. */ }
+          });
           const payload = req.headers.authorization?.split('.')[1];
           res.once('finish',() => {
-            if (res.statusCode!==200 || !payload) return;
+            if (res.statusCode!==200 || !payload || !target) return;
             try {
               const claims=JSON.parse(Buffer.from(payload,'base64url'));
               assert.equal(claims.sub,owner.id);
               assert.ok(claims.session_id);
               if (sessions[device]) assert.equal(claims.session_id,sessions[device]);
               sessions[device]=claims.session_id;
-              observations.push({device,phase:atPhase,at:acceptedAt});
+              observations.push({device,child:target,phase:atPhase,at:acceptedAt});
             } catch (err) { fail(err); }
           });
         }
@@ -290,11 +305,13 @@ async function run(config, {database}) {
       let body='';
       for await (const part of req) { body+=part; if (body.length>1024) throw Error('Unexpected phase body'); }
       const signal=JSON.parse(body), next=signal.phase;
-      assert.equal(signal.task_id,task.id);
+      assert.equal(signal.task_id,taskId);
       assert.equal(device,next==='writer-complete'?'android':'ios');
       assert.equal(next,phases[phases.indexOf(phase)+1]);
       if (next==='reader-ready') {
-        assert.ok(observations.some(o=>o.device==='ios' && o.phase==='initial'));
+        for (const profile of profiles) {
+          assert.ok(observations.some(o=>o.device==='ios' && o.phase==='initial' && o.child===profile.child_id));
+        }
         assert.deepEqual(await state(),initial);
         // Close keepalive and any response currently in flight before the writer runs.
         servers[0].closeAllConnections();
@@ -305,13 +322,15 @@ async function run(config, {database}) {
         assert.ok(blockedAfterWriter>0,'Reader never attempted to use the unavailable network after completion');
         reconnectAt=Date.now();
       } else {
-        const fresh=observations.find(o=>o.device==='ios' && o.phase==='reader-reconnect');
+        const fresh=observations.find(o=>o.device==='ios' && o.child===family.child && o.phase==='reader-reconnect');
         assert.ok(fresh,'Reader never fetched a fresh snapshot');
         const rows=await ledger();
         assert.deepEqual(rows,committedLedger);
         const finalReceipts=await receipts();
         assert.deepEqual(finalReceipts,applied);
-        const result={passed:true,childId:family.child,taskId:task.id,separateLogins:true,initial,final:await state(),
+        const siblingFinal=await siblingState(database,sibling.child_id);
+        assert.deepEqual(siblingFinal,siblingInitial);
+        const result={childProfiles:profiles,siblingInitial,siblingFinal,passed:true,childId:family.child,taskId:taskId,separateLogins:true,initial,final:await state(),
           ledger:rows,receipts:finalReceipts,blockedReaderRequests:blocked,blockedAfterWriter,readerSessionRetained:true,
           firstSnapshotAfterReconnectMs:fresh.at-reconnectAt,
           phaseTimes:{...phaseTimes,[next]:Date.now()},snapshotCounts:Object.fromEntries(['ios','android'].map(d=>[d,observations.filter(o=>o.device===d).length]))};

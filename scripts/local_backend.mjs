@@ -2,6 +2,9 @@
 import assert from 'node:assert/strict';
 import {randomBytes, randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
+import {realpathSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
+import {setTimeout as delay} from 'node:timers/promises';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {withAuthBackend} from './fixtures/auth_backend.mjs';
@@ -84,8 +87,9 @@ async function start() {
       console.log(`LOCAL_BACKEND_READY ${origin}`);
       console.log('Temporary empty database: use synthetic @example.test accounts only. Restarting starts a new database.');
       console.log('Public build configuration: .dart_tool/local-backend/defines.json');
-      console.log('Read OTP: node scripts/local_backend.mjs mail parent@example.test');
-      console.log('Stop cleanly: node scripts/local_backend.mjs stop');
+      const cli = localControlInvocation();
+      console.log(`Read OTP: ${cli} mail parent@example.test`);
+      console.log(`Stop cleanly: ${cli} stop`);
       try {await done;} finally {
         ready=false;clearInterval(timer);clearTimeout(lifetime);await maintenance;
         for(const edge of edges.values())await edge.stop();edges.clear();
@@ -99,18 +103,63 @@ async function start() {
   }
 }
 
+// The runtime selected by the launcher may differ from the shell's default Node.
+export function localControlInvocation(binary = process.execPath, platform = process.platform) {
+  const quoted = platform === 'win32'
+    ? "& '" + binary.replaceAll("'", "''") + "'"
+    : "'" + binary.replaceAll("'", "'\\''") + "'";
+  return `${quoted} scripts/local_backend.mjs`;
+}
+
+async function localHealth(origin, timeoutMs) {
+  const response = await fetch(`${origin}/__local/health`, {signal: AbortSignal.timeout(timeoutMs)});
+  const status = await response.json();
+  assert.equal(typeof status.runId, 'string', 'Unrecognized local service');
+  return status;
+}
+
+export async function stopLocalSession(origin, saved, {timeoutMs = 60000} = {}) {
+  try {
+    const status = await localHealth(origin, 3000);
+    assert.equal(status.runId, saved.runId, 'Local control belongs to a different session');
+    const response = await fetch(`${origin}/__local/stop`, {
+      method: 'POST', headers: {Authorization: `Bearer ${saved.shutdownKey}`}, signal: AbortSignal.timeout(3000),
+    });
+    await response.arrayBuffer();
+    assert.equal(response.status, 202, 'Local shutdown request was refused');
+  } catch (error) {
+    if (error.cause?.code === 'ECONNREFUSED') return;
+    throw error;
+  }
+
+  // The public listener closes last, after Storage, Auth, the workers and PostgreSQL.
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    const remaining = Math.max(1, Math.ceil(deadline - performance.now()));
+    try {
+      const status = await localHealth(origin, Math.min(remaining, 1000));
+      if (status.runId !== saved.runId) return;
+    } catch (error) {
+      if (error.cause?.code === 'ECONNREFUSED') return;
+      // The final HTTP probe can be interrupted as the listener closes.
+      if (!['UND_ERR_SOCKET', 'ECONNRESET'].includes(error.cause?.code) && error.name !== 'TimeoutError') throw error;
+    }
+    await delay(Math.min(150, Math.max(0, deadline - performance.now())));
+  }
+  throw new Error('Local shutdown is still in progress. Check the service terminal and run stop again.');
+}
+
 async function control() {
   const saved=JSON.parse(await readFile(controlPath,'utf8'));
   assert.equal(saved.url,origin,'Only this local origin is supported');
-  const health=await fetch(`${origin}/__local/health`,{signal:AbortSignal.timeout(3000)});
-  const status=await health.json();
+  if(command==='stop') {
+    await stopLocalSession(origin, saved);
+    console.log('Local services stopped.');return;
+  }
+  const status=await localHealth(origin, 3000);
   assert.equal(status.runId,saved.runId,'Local control belongs to a different session');
   assert.equal(status.ready,true,'Local session is not ready');
   if(command==='status') {console.log('Local services ready; temporary database; loopback only.');return;}
-  if(command==='stop') {
-    const response=await fetch(`${origin}/__local/stop`,{method:'POST',headers:{Authorization:`Bearer ${saved.shutdownKey}`},signal:AbortSignal.timeout(3000)});
-    assert.equal(response.status,202);console.log('Local shutdown requested.');return;
-  }
   const email=(process.argv[3]??'').trim().toLowerCase();
   assert.match(email,/^[a-z0-9._+-]+@example\.test$/,'Use a synthetic @example.test address');
   const mailOrigin=new URL(saved.mailUrl);
@@ -122,5 +171,7 @@ async function control() {
   console.log(`Local OTP for ${email}: ${message.code}`);
 }
 
-if(!['start','mail','status','stop'].includes(command))throw new Error('Usage: local_backend.mjs start|status|stop|mail <email>');
-if(command==='start')await start();else await control();
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  if(!['start','mail','status','stop'].includes(command))throw new Error('Usage: local_backend.mjs start|status|stop|mail <email>');
+  if(command==='start')await start();else await control();
+}
