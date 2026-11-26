@@ -19,4 +19,4 @@
 
 实现：`lib/features/economy/presentation/economy_screen.dart`、`economy_pending_command.dart`；回归：`test/economy_layout_test.dart`。本机复现、回归及截图日志保留在忽略的`tmp/economy-layout-*`中。
 
-这些是生产组件的窗口模拟检查，不能替代华为鸿蒙4.2/iPhone真机、读屏或平板系统分屏验证。用户当前没有可连接的测试手机，真机项目继续列为待验收。
+这些是生产组件的窗口模拟检查，不能替代 Android 和 iPhone 真机、读屏或平板系统分屏验证。用户当前没有可连接的测试手机，真机项目继续列为待验收。

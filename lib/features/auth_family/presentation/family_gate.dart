@@ -54,6 +54,23 @@ class FamilyGate extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(familiesProvider, (_, next) {
+      if (next.isLoading) return;
+      final families = next.asData?.value;
+      if (families == null) return;
+      final children = families.expand((family) => family.children);
+      if (children.isEmpty) return;
+      final selected = ref.read(selectedChildIdProvider);
+      final child = children.firstWhere(
+        (child) => child.id == selected,
+        orElse: () => children.first,
+      );
+      // Permission and deletion checks have completed. Start the same providers
+      // consumed by the home widgets before laying out their first frame.
+      ref.read(tasksProvider(child.id));
+      ref.read(walletProvider(child.id));
+      ref.read(familyTodayProvider(child.id));
+    });
     ref.listen(familyAccessChangesProvider, (_, next) {
       final change = next.valueOrNull;
       if (change == null ||

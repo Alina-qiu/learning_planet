@@ -28,4 +28,4 @@
 
 最终完整分析38.6秒无问题，271个Dart文件格式无变化。临时截图脚本的两项lint已修正，失败日志与最终日志分别为`tmp/ocr-source-analyze.log`和`tmp/ocr-source-analyze-final.log`。Windows测试和覆盖率检查均从同一ASCII工作区映射运行，以正确解析LCOV相对路径。构建所用临时后端已正常关闭，未用该空库执行新的业务联调。
 
-本轮未重跑SQL或原生JVM；其结果分别沿用此前387项和34项。完整静态分析见[测试记录](TESTING.md)。没有用此Widget测试替代真实手写/公式识别、手机相册/相机、华为鸿蒙4.2或iPhone验收。
+本轮未重跑SQL或原生JVM；其结果分别沿用此前387项和34项。完整静态分析见[测试记录](TESTING.md)。没有用此Widget测试替代真实手写/公式识别、手机相册/相机、Android 和 iPhone 验收。

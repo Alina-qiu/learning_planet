@@ -27,5 +27,5 @@
 - 新增6组数据库检查，全量296组通过（迁移001–051）。两个真实PostgreSQL连接竞争提交/停止只得到一种结果；已受理申请在价格变化和下架后重放不再次冻结，调账只追加一次，变更原因或孩子被拒绝。
 - 全量536项Flutter通过，核心覆盖率5035/5694（88.43%，88个源文件）。修正大字号页签后，25项经济模块回归和1项截图检查再次通过；分析/格式与产物记录见[测试说明](TESTING.md)、[Android构建](ANDROID_BUILD.md)。
 - 首次Widget等待夹具将钱包的固定XP进度条也当作加载中，导致4项超时；改为只等待不确定进度及异步操作后通过。大额测试另有一次按钮文案定位错误，修正后通过。原日志分别保留为`tmp/economy-command-indicator-fixture-failure.log`和`tmp/economy-command-button-fixture-failure.log`。
-- 使用实际中文字体复核360px普通/双倍字号待办及停止确认截图，保存在`tmp/economy-pending-*.png`和`tmp/economy-stop-*.png`。SQL、HTTP使用本地隔离库/模拟传输，不代表真实Supabase或华为/iPhone已验收。
+- 使用实际中文字体复核360px普通/双倍字号待办及停止确认截图，保存在`tmp/economy-pending-*.png`和`tmp/economy-stop-*.png`。SQL、HTTP使用本地隔离库/模拟传输，不代表真实Supabase或 Android 和 iPhone 已验收。
 - 持久请求恢复限定本设备、同一账号；不同设备分别明确创建的请求仍是独立申请，继续由服务端库存/次数/余额限制控制。通知、审批履约、商品编辑等已有流程不因此获得新的跨重启命令队列；本次修复的是会新建冻结或调账记录的两类操作。

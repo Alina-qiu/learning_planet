@@ -25,4 +25,4 @@
 - 相关模块25项和1项截图检查通过。360px普通/双倍字号大厅及成长页截图位于`tmp/growth-snapshot-{home,growth}-{1,2}x.png`，已复核。截图使用合成数据，不作为真机验收。
 - 全量数据库首次遇到已有留存测试跨纽约夏令时的日期假设错误：固定小时偏移并非家庭日历日期。已按队列日历日期构造第1/7天样本，未修改留存产品逻辑；失败记录保留为`tmp/growth-snapshots-retention-dst-fixture-failure.log`。
 
-完整测试、覆盖率和普通APK见[测试记录](TESTING.md)及[构建记录](ANDROID_BUILD.md)。尚需迁移部署、真实双设备装扮同步、华为/iPhone飞行模式与后台恢复验收。普通本地APK仍未配置Supabase，只显示服务配置提示。
+完整测试、覆盖率和普通APK见[测试记录](TESTING.md)及[构建记录](ANDROID_BUILD.md)。尚需迁移部署、真实双设备装扮同步、Android 和 iPhone 飞行模式与后台恢复验收。普通本地APK仍未配置Supabase，只显示服务配置提示。

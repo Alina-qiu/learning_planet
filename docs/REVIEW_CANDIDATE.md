@@ -44,4 +44,4 @@
 
 `8a1dc7f`的[诊断复验](https://github.com/Alina-qiu/learning_planet/actions/runs/42149149028)已在iOS18.5模拟器实际启动并执行本机加密任务流程，失败原因定位为旧测试脚本仍查找`ListView`，与已改为`CustomScrollView`的任务页不符。现使用页面既有滚动区域标识，并补充实际滚动及按需构建断言。该轮在滚动前失败，不能算完整通过；最新结果见PR的Checks。
 
-工作流由PR或`main`上的push触发，后续修复继续提交至草稿分支。签名安装、iPhone/鸿蒙4.2实机、云端配置、iOS后台安静边界、真实性能和家庭试用仍须单独完成。
+工作流由PR或`main`上的push触发，后续修复继续提交至草稿分支。签名安装、Android 和 iPhone 实机、云端配置、iOS后台安静边界、真实性能和家庭试用仍须单独完成。

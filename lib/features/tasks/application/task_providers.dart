@@ -7,9 +7,14 @@ import '../domain/task_sync_state.dart';
 import '../domain/task_item.dart';
 import '../domain/wallet_summary.dart';
 
-final _taskDataRevision = taskSyncStateProvider.select(
-  (sync) => sync.whenData((state) => state.dataRevision),
-);
+final _taskDataRevision = Provider<int>((ref) {
+  final repository = ref.watch(taskRepositoryProvider);
+  final revision = ref.watch(
+    taskSyncStateProvider.select((sync) => sync.valueOrNull?.dataRevision),
+  );
+  return revision ??
+      (repository is OfflineTaskRepository ? repository.state.dataRevision : 0);
+});
 
 final taskFamilyTimezoneProvider = FutureProvider.family<String?, String>((
   ref,

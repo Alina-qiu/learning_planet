@@ -36,4 +36,4 @@
 
 报告：[实际APK验证结果](../build/wallet_details_results/walkthrough-20261106.json)。截图：[孩子账本](../tmp/wallet-details-child-ledger.png)、[调账明细](../tmp/wallet-details-normal.png)、[双倍字号](../tmp/wallet-details-double-top.png)。验证后已恢复系统字号，关闭临时服务和专用模拟器。
 
-两种APK的资源、原入口、三ABI加密库及v2签名通过，摘要见[构建记录](ANDROID_BUILD.md)。初次启动10092ms报告timeout，最终APK的一次暖启动9426ms；本轮没有冷启动达标结论。远程迁移部署、华为鸿蒙4.2/iPhone、iOS构建、真实家庭和完整启动性能仍待验收。
+两种APK的资源、原入口、三ABI加密库及v2签名通过，摘要见[构建记录](ANDROID_BUILD.md)。初次启动10092ms报告timeout，最终APK的一次暖启动9426ms；本轮没有冷启动达标结论。远程迁移部署、Android 和 iPhone、iOS构建、真实家庭和完整启动性能仍待验收。

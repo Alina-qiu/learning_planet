@@ -168,6 +168,31 @@ async function seedEmptyReview() {
   await capture('ledger_entries', 'source_id=$1', [ledger]);
   await capture('audit_logs', 'target_id=$1', [audited]);
 }
+async function seedLegacyPushDevice() {
+  await clearIdentity();
+  // A formerly valid transport may still have a live token and an outstanding
+  // delivery lease. Allow a retired fixture value in the pre-upgrade schema.
+  await client.query("alter table public.parent_push_devices drop constraint parent_push_devices_transport_check, add constraint parent_push_devices_transport_check check (transport in ('retired','apns','gateway'))");
+  const token = 'b'.repeat(64);
+  for (const transport of ['retired', 'apns', 'gateway']) {
+    const device = randomUUID();
+    data[transport] = device;
+    await client.query(`insert into public.parent_push_devices
+      (device_id, family_id, owner_id, secret_hash, intent_version, scope_nonce, state, transport, registration_token, registration_hash, expires_at)
+      values ($1, $2, $3, 'test', 3, $4, 'enabled', $5, $6, $7, now()+interval '1 day')`,
+      [device, data.family, owner, randomUUID(), transport, token, createHash('sha256').update(token).digest('hex')]);
+    if (transport !== 'retired') await capture('parent_push_devices', 'device_id=$1', [device]);
+    await clearIdentity();
+  }
+  await client.query(`insert into public.parent_notification_settings (family_id,user_id,enabled,weekly_reports,quiet_start,quiet_end)
+    values ($1,$2,true,true,'00:00','00:00') on conflict (family_id,user_id) do update
+    set enabled=true,weekly_reports=true,quiet_start='00:00',quiet_end='00:00'`,[data.family,owner]);
+  data.pushLease = randomUUID();
+  data.pushJob = await scalar(`insert into public.parent_push_jobs
+    (family_id,owner_id,child_id,notification_key,kind,state,attempts,expires_at,device_id,device_version,device_token_hash,lease_token,lease_until)
+    values ($1,$2,$3,'upgrade:push','weekly','running',1,now()+interval '1 day',$4,3,'old hash',$5,now()+interval '2 minutes') returning id`,
+    [data.family, owner, data.child, data.retired, data.pushLease]);
+}
 const checkpoints = new Map([
   ['202609160008_task_maintenance.sql', ['008: old family, children, completed/pending tasks and ledger', seedCore]],
   ['202609160011_wrong_question_pinyin_review.sql', ['011: partially answered frozen review with private answer keys', seedReview]],
@@ -175,6 +200,7 @@ const checkpoints = new Map([
   ['202609170017_worksheet_dispatch.sql', ['017: queued v1 worksheet with frozen mixed question order', seedWorksheet]],
   ['202611040030_durable_image_uploads.sql', ['030: pre-upgrade offline lease and unsent command IDs', seedOffline]],
   ['202611230072_cleanup_file_progress.sql', ['072: real empty daily review and protected snapshots with business history', seedEmptyReview]],
+  ['202611240073_review_candidate_lock.sql', ['073: active parent devices and a leased delivery on a retired transport', seedLegacyPushDevice]],
 ]);
 
 try {
@@ -194,6 +220,25 @@ try {
   });
   assert.equal(report.checkpoints.length, checkpoints.size);
   report.serverVersion = database.serverVersion;
+  await check('retired parent endpoint and lease are fenced, supported registrations survive', async () => {
+    await clearIdentity();
+    const old = await scalar('select to_jsonb(d) from public.parent_push_devices d where device_id=$1',[data.retired]);
+    assert.equal(old.state, 'disabled');
+    assert.equal(old.intent_version, 3);
+    for (const key of ['transport','registration_token','registration_hash','expires_at','prepared_until']) assert.equal(old[key], null);
+    const job = await scalar('select to_jsonb(j) from public.parent_push_jobs j where id=$1',[data.pushJob]);
+    assert.equal(job.state, 'queued');
+    assert.equal(job.attempts, 0);
+    for (const key of ['lease_token','lease_until','device_id','device_version','device_token_hash']) assert.equal(job[key], null);
+    assert.equal((await scalar('select public.authorize_parent_push_job($1,$2)',[data.pushJob,data.pushLease])).status,'stale');
+    assert.equal((await scalar("select public.finish_parent_push_job($1,$2,'accepted')",[data.pushJob,data.pushLease])).status,'stale');
+    await assert.rejects(client.query("update public.parent_push_devices set transport='retired' where device_id=$1",[data.retired]),{code:'23514'});
+    await assert.rejects(client.query("select public.claim_parent_push_jobs(1,'[\"retired\"]')"), /INVALID_PUSH_CLAIM/);
+    const [next] = await scalar('select public.claim_parent_push_jobs(1,$1::jsonb)', [JSON.stringify(['apns'])]);
+    assert.equal(next.job_id, data.pushJob);
+    assert.notEqual(next.lease_token, data.pushLease);
+    assert.equal(await scalar('select device_id from public.parent_push_jobs where id=$1',[data.pushJob]), data.apns);
+  });
   await check('the historical zero-item review releases the date and a later due question is selected exactly once', async () => {
     await login(raceOwner);
     assert.equal(await scalar('select count(*)::int from public.task_instances where id=$1', [data.emptyReview]), 0);

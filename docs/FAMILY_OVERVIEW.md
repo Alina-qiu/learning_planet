@@ -24,6 +24,6 @@
 - 新增5组数据库检查，全量301组通过；家庭七日与单孩子报告逐日结果一致，覆盖请假/放弃/跨日、独立孩子计数、过期分类、1000条历史、只读执行、跨国际日期线的家庭时区、空家庭、会话PIN/成员权限及孩子删除。
 - 实际中文字体的360×800截图位于`tmp/family-overview-summary-{1,2}x.png`与`tmp/family-overview-pending-{1,2}x.png`；截图检查通过。
 - 首次迁移因`day`别名缺少`AS`而解析失败，已修正后完整迁移通过，日志`tmp/family-overview-sql-syntax-failure.log`保留。首次界面验证发现进度条语义值不能使用“完成/应完成”字符串，已改用默认数值百分比和包含数量的标签。嵌套ProviderScope及SemanticsHandle释放时机两处测试夹具已修正，失败记录保留。
-- 本地检查使用隔离PostgreSQL及模拟HTTP，不证明远程Supabase、真实网络或指定手机已验收。未部署迁移，普通调试包仍未配置后端；真实页面响应时间、读屏设备、华为鸿蒙4.2及iPhone仍待验证。
+- 本地检查使用隔离PostgreSQL及模拟HTTP，不证明远程Supabase、真实网络或指定手机已验收。未部署迁移，普通调试包仍未配置后端；真实页面响应时间、读屏设备、Android 和 iPhone 仍待验证。
 
 最终全量检查及APK记录见[测试说明](TESTING.md)和[构建说明](ANDROID_BUILD.md)。

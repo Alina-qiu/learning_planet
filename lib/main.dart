@@ -24,6 +24,7 @@ import 'features/tasks/data/task_sync_remote.dart';
 import 'features/auth_family/data/auth_repository.dart';
 import 'features/auth_family/data/email_otp.dart';
 import 'features/auth_family/data/family_repository.dart';
+import 'features/data_management/data/account_deletion_repository.dart';
 import 'features/tasks/data/task_repository.dart';
 import 'features/tasks/data/notification_scheduler.dart';
 import 'features/notifications/data/remote_parent_push.dart';
@@ -41,11 +42,18 @@ Future<void> main() async {
     );
   }
   installRuntimeErrorHandlers(runtimeDiagnostics);
+  Future<Widget> load() =>
+      measureStartup(StartupPhase.initialization, initializeApp);
+  final initialLoad = load();
+  // runApp mounts the gate on a scheduled frame. Keep an immediate failure
+  // handled until that frame attaches its recovery UI to this same Future.
+  initialLoad.ignore();
   runApp(
     RuntimeDiagnosticsLifecycle(
       diagnostics: runtimeDiagnostics,
       child: StartupGate(
-        load: () => measureStartup(StartupPhase.initialization, initializeApp),
+        load: load,
+        initialLoad: initialLoad,
         onFailure: (error) => runtimeDiagnostics.record(
           DiagnosticOperation.startup,
           error: error,
@@ -65,6 +73,7 @@ Future<Widget> initializeApp() async {
   final AuthRepository authRepository;
   final FamilyRepository familyRepository;
   final TaskRepository taskRepository;
+  SupabaseAccountDeletionRepository? accountDeletion;
   const nativePush = MethodChannelParentPush();
   RemoteParentPush? remotePush;
   RemoteTaskPush? remoteTasks;
@@ -80,19 +89,18 @@ Future<Widget> initializeApp() async {
   );
   // Clear the previous process's local alerts before restoring credentials or
   // opening a family. This also applies to an unconfigured debug installation.
-  // Do this before acquiring backend/database resources so a failed clear can
-  // safely retry through StartupGate.
-  await measureStartup(
+  Future<void> clearNotifications() => measureStartup(
     StartupPhase.notifications,
     () => notifications.setScope(null),
   );
 
   if (config.hasAnyBackendConfig) {
-    config.validate();
-    final store = await measureStartup(
-      StartupPhase.database,
-      OfflineStore.open,
-    );
+    try {
+      config.validate();
+    } catch (_) {
+      await clearNotifications();
+      rethrow;
+    }
     final authValues = SecureAuthValues(
       secrets: const NativeDeviceSecrets(),
       backendUrl: config.supabaseUrl,
@@ -103,13 +111,22 @@ Future<Widget> initializeApp() async {
           (jsonDecode(encoded) as Map)['access_token'] ==
           Supabase.instance.client.auth.currentSession?.accessToken,
     );
-    // Preflight migration before the SDK starts session refresh or deep links.
+    // Migrate the keychain entries, open the encrypted DB and fence old native
+    // notifications. Auth restoration starts only after all three succeed.
+    OfflineStore? openedStore;
     try {
-      await measureStartup(StartupPhase.credentials, sessionStorage.initialize);
+      await Future.wait<void>([
+        measureStartup(StartupPhase.database, OfflineStore.open).then((value) {
+          openedStore = value;
+        }),
+        clearNotifications(),
+        measureStartup(StartupPhase.credentials, sessionStorage.initialize),
+      ]);
     } catch (_) {
-      await store.close();
+      await openedStore?.close();
       rethrow;
     }
+    final store = openedStore!;
     final transport = DiagnosticHttpClient(
       http.Client(),
       Uri.parse(config.supabaseUrl),
@@ -139,27 +156,37 @@ Future<Widget> initializeApp() async {
       await store.close();
       rethrow;
     }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // The backend retires these registrations during migration. Retry local
+      // cleanup on later launches if the device keystore is temporarily locked.
+      unawaited(
+        RemoteParentPush.clearRetiredRegistration(
+          const NativeDeviceSecrets(),
+          config.supabaseUrl,
+        ).catchError((Object _) {}),
+      );
+    }
     final client = Supabase.instance.client;
     String? accountId() => client.auth.currentUser?.id;
-    remotePush = RemoteParentPush(
-      native: nativePush,
-      remote: SupabaseParentPushRemote(
-        client,
-        SupabaseClient(
-          config.supabaseUrl,
-          config.supabaseAnonKey,
-          authOptions: const AuthClientOptions(autoRefreshToken: false),
-        ),
-      ),
-      secrets: const NativeDeviceSecrets(),
-      backendUrl: config.supabaseUrl,
-      accountId: accountId,
-      privacyGeneration: () => store.privacyGeneration,
-      configured: config.parentRemotePush,
-    );
     try {
-      await measureStartup(StartupPhase.push, remotePush.initialize);
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        remotePush = RemoteParentPush(
+          native: nativePush,
+          remote: SupabaseParentPushRemote(
+            client,
+            SupabaseClient(
+              config.supabaseUrl,
+              config.supabaseAnonKey,
+              authOptions: const AuthClientOptions(autoRefreshToken: false),
+            ),
+          ),
+          secrets: const NativeDeviceSecrets(),
+          backendUrl: config.supabaseUrl,
+          accountId: accountId,
+          privacyGeneration: () => store.privacyGeneration,
+          configured: config.parentRemotePush,
+        );
+        await measureStartup(StartupPhase.push, remotePush.initialize);
         remoteTasks = RemoteTaskPush(
           native: nativeTasks,
           remote: SupabaseTaskPushRemote(
@@ -248,6 +275,10 @@ Future<Widget> initializeApp() async {
       accountId: accountId,
       refreshFamilyAccess: access.refresh,
     );
+    accountDeletion = SupabaseAccountDeletionRepository(
+      client,
+      offline: offline,
+    )..prepareEntryCheck();
     client.auth.onAuthStateChange.listen((_) {
       offline.scopeChanged();
       runtimeDiagnostics.scopeChanged();
@@ -256,6 +287,7 @@ Future<Widget> initializeApp() async {
     unawaited(nativeDiagnostics.synchronize());
     taskRepository = offline;
   } else {
+    await clearNotifications();
     unawaited(
       const MethodChannelNativeDiagnostics()
           .read(null)
@@ -274,5 +306,6 @@ Future<Widget> initializeApp() async {
     taskRepository: taskRepository,
     notificationScheduler: notifications,
     remotePush: remotePush,
+    accountDeletion: accountDeletion,
   );
 }

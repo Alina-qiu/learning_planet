@@ -62,6 +62,6 @@ $env:PG_CLIENT_BIN = 'D:/learning-planet-tools/postgresql-15.19-5/pgsql/bin'
 - 这是停止写入后生成的一组数据库/对象备份，不证明在线并发跨服务快照、PITR、灾备RPO/RTO、跨版本或生产回滚可用；59.8秒是小型本机测试总耗时，不是恢复时间承诺。
 - 托管Supabase数据库备份只有Storage元数据，实际对象需要单独保护；不能用本次MinIO恢复证明托管对象已备份。[Supabase官方备份说明](https://supabase.com/docs/guides/platform/backups)
 - 单库逻辑归档和集群全局角色分开保存，本测试没有额外表空间、托管扩展或自定义数据库配置；实际部署应按环境核对这些内容。[PostgreSQL pg_dump说明](https://www.postgresql.org/docs/15/app-pgdump.html)
-- 本轮仅在内存中复用测试JWT签名密钥、重新设置固定测试角色密码。真实环境还需安全恢复/轮换签名密钥、SMTP、模型、HMS/APNs、Edge配置、调度及监控；不能把备份文件写入应用包或公开日志。
+- 本轮仅在内存中复用测试JWT签名密钥、重新设置固定测试角色密码。真实环境还需安全恢复/轮换签名密钥、SMTP、模型、APNs、Edge配置、调度及监控；不能把备份文件写入应用包或公开日志。
 - 真实备份的加密、访问控制、保留/销毁、已删除孩子资料的恢复后再清理、目标环境迁移/回滚及外部文件副本仍待验收。本次不是生产恢复操作手册，不能直接套用到托管角色和真实数据。
-- 华为鸿蒙4.2/iPhone、云端双端流程、iOS编译与后台通知、性能和家庭试用仍按[当前需求覆盖](CURRENT_STATUS.md)推进。
+- Android 和 iPhone、云端双端流程、iOS编译与后台通知、性能和家庭试用仍按[当前需求覆盖](CURRENT_STATUS.md)推进。

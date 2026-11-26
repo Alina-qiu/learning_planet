@@ -28,6 +28,6 @@
 
 `scripts/test_task_note_cases.mjs`的5组检查覆盖无PIN共享、任务/钱包不变、旧回执不覆盖新说明、取消屏障、长度和权限、两个真实PostgreSQL连接竞争、40类导出以及删除级联。已有导出测试同时验证所有服务端类别可被Flutter ZIP生成器接收。最终全量574项Flutter、310组数据库通过，核心覆盖率89.37%。
 
-360px普通/双倍字号中文截图已复核（`tmp/task-notes-1x.png`、`tmp/task-notes-2x.png`、`tmp/task-notes-2x-actions.png`）。这些是Widget渲染验证，不代表华为/iPhone真机验收。全量结果及APK见[测试记录](TESTING.md)和[构建记录](ANDROID_BUILD.md)。
+360px普通/双倍字号中文截图已复核（`tmp/task-notes-1x.png`、`tmp/task-notes-2x.png`、`tmp/task-notes-2x-actions.png`）。这些是Widget渲染验证，不代表 Android 和 iPhone 真机验收。全量结果及APK见[测试记录](TESTING.md)和[构建记录](ANDROID_BUILD.md)。
 
 尚需部署迁移054，并完成真实网络中断、跨设备共享、两类手机输入法/后台恢复及数据清理验收。未配置Supabase的本地普通包仍只显示服务配置提示。

@@ -28,4 +28,4 @@
 - 客户端新增12项回归：真实SDK请求形状、SQLite关闭后恢复、筛选隔离和缓存上限、权限拒绝、范围/游标校验、清理及迟到响应屏障、加载更多重试/去重、控制器刷新/销毁、千条注入列表的可见行构建、搜索防抖和标签页范围。
 - 360px正常/双倍字号中文截图：`tmp/question-catalog-{overview,list}-{1,2}x.png`。旧转换测试改为滚动后查找，提醒测试改为注入当前列表仓库；首次失败日志保留在`tmp/question-catalog-existing-tests.log`和`tmp/question-catalog-old-provider-failure.log`。
 
-全量验证和普通APK记录见[测试记录](TESTING.md)与[Android构建](ANDROID_BUILD.md)。本地测试不替代生产数据量、真实网络、Huawei鸿蒙4.2/iPhone性能、跨设备更新及离线恢复验收。当前普通APK未配置Supabase，仍仅显示配置提示。
+全量验证和普通APK记录见[测试记录](TESTING.md)与[Android构建](ANDROID_BUILD.md)。本地测试不替代生产数据量、真实网络、Android 和 iPhone 性能、跨设备更新及离线恢复验收。当前普通APK未配置Supabase，仍仅显示配置提示。

@@ -1,4 +1,4 @@
--- Reviewed target only: migration045 + deployed parent-push + configured HMS/APNs.
+-- Reviewed target only: current database migrations + deployed parent-push + configured APNs or gateway.
 -- This script is never run by the mobile app or the local test suite.
 do $$ begin
   if not exists(select 1 from pg_extension where extname='pg_cron')

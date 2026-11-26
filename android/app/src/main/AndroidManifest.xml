@@ -9,13 +9,6 @@
         android:label="${appLabel}"
         android:name=".LearningPlanetApplication"
         android:icon="@mipmap/ic_launcher">
-        <meta-data android:name="push_kit_auto_init_enabled" android:value="false" />
-        <meta-data android:name="com.huawei.hms.client.appid" android:value="${hmsAppId}" />
-        <service android:name=".ParentPushService" android:exported="false">
-            <intent-filter>
-                <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
         <receiver android:name=".TaskAlarmReceiver" android:exported="false" />
         <receiver android:name=".TaskAlarmBootReceiver" android:exported="false">
             <intent-filter>

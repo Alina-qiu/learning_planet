@@ -20,7 +20,7 @@
 
 ## 定位依据与处理
 
-报错明确指出`GL_MAX_FRAGMENT_UNIFORM_VECTORS (261)`；261是驱动上限。日志展开的渐变shader声明`colors[256]`和`stop_pairs[128]`等uniform数组。SDK附带的引擎源码`impeller/entity/contents/content_context.cc`显示，非SSBO路径会预创建这些渐变管线，所以仅显示文字的启动页也可能在初始化时触发链接失败。这些证据及同APK的后端对照指向当前引擎与低uniform上限环境的兼容问题，尚不能据此断言所有Android10或华为设备受影响。
+报错明确指出`GL_MAX_FRAGMENT_UNIFORM_VECTORS (261)`；261是驱动上限。日志展开的渐变shader声明`colors[256]`和`stop_pairs[128]`等uniform数组。SDK附带的引擎源码`impeller/entity/contents/content_context.cc`显示，非SSBO路径会预创建这些渐变管线，所以仅显示文字的启动页也可能在初始化时触发链接失败。这些证据及同APK的后端对照指向当前引擎与低uniform上限环境的兼容问题，尚不能据此断言所有Android10设备受影响。
 
 API36既有SwiftShader记录保留自己的环境标签。启动测量脚本现记录系统公告的GLES版本和SurfaceFlinger的GLES行；崩溃测试报告也读取实际GLES行，移除固定SwiftShader标签。SurfaceFlinger上下文只作环境证据，不等同Flutter后端。
 
@@ -40,7 +40,7 @@ API36既有SwiftShader记录保留自己的环境标签。启动测量脚本现�
 
 测试结束恢复同一普通debug包，内容检查与摘要一致；API29/SwiftShader配置页COLD 9516ms且语义核对通过，6次uniform错误仍在，无未捕获致命异常或阶段计时输出。报告`startup-debug-20261104T221637785Z.json`单独保存，未混入前面3个后端对照。已移除确切路径的临时探针，并停止本轮专用模拟器和独立Gradle守护进程。
 
-需继续在华为鸿蒙4.2和iPhone实测；若指定设备出现同类错误，再依据实际GPU/驱动、引擎日志和复现页面选择引擎版本或设备级处理方案。当前没有全局关闭Impeller、提高最低Android版本或删除页面绘制功能。
+需继续在 Android 和 iPhone 实测；若指定设备出现同类错误，再依据实际GPU/驱动、引擎日志和复现页面选择引擎版本或设备级处理方案。当前没有全局关闭Impeller、提高最低Android版本或删除页面绘制功能。
 
 ## 重复探针
 

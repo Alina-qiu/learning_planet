@@ -4,7 +4,7 @@
 
 ## 需求核对和修复
 
-本轮重新提取工作区的`学习星球_产品需求文档_PRD.docx`，确认与此前读取的正文一致。原文件SHA256为`4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`。
+本轮重新提取工作区的`学习星球_产品需求文档_PRD.docx`，确认与此前读取的正文一致。验收时的文件SHA256为`4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`。
 
 360px宽度、双倍字号下，原组卷配置的固定横排选项出现42px及167px横向溢出；原PDF预览延伸到底部导航区域，横屏未避开左右安全区域。实际页面测试的失败证据见`tmp/worksheet-layout-reproduction.log`。
 
@@ -28,6 +28,6 @@
 
 使用实际页面、应用主题、Noto中文字体和Material图标完成五张截图并逐张检查：`tmp/worksheet-config-1x.png`、`tmp/worksheet-config-2x.png`、`tmp/worksheet-history-1x.png`、`tmp/worksheet-history-2x.png`、`tmp/worksheet-preview-landscape-2x.png`。捕获脚本`tmp/capture_worksheet_layout_test.dart`及最终日志`tmp/worksheet-layout-capture-final.log`。预览区域使用明确标记的测试占位，验证的是页面布局，不作为本轮PDF内容、原生打印或生成服务验收；实际PDF证据仍见[PDF集成](PDF_INTEGRATION.md)。
 
-测试使用仓库与系统导出替身；本轮没有新云端调用或手机安装。完整测试与安装包见[测试记录](TESTING.md)及[构建记录](ANDROID_BUILD.md)。华为鸿蒙4.2/iPhone、系统读屏、真实打印/分享、云端与iOS编译仍待对应环境验收。
+测试使用仓库与系统导出替身；本轮没有新云端调用或手机安装。完整测试与安装包见[测试记录](TESTING.md)及[构建记录](ANDROID_BUILD.md)。Android 和 iPhone、系统读屏、真实打印/分享、云端与iOS编译仍待对应环境验收。
 
 普通及本机APK已重建并通过内容、签名和摘要检查。构建所用临时后端已正常退出，54321端口关闭；该空库没有开展新的业务联调。

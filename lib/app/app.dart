@@ -6,6 +6,7 @@ import '../features/auth_family/application/family_providers.dart';
 import '../features/auth_family/data/auth_repository.dart';
 import '../features/auth_family/data/family_repository.dart';
 import '../features/auth_family/presentation/auth_gate.dart';
+import '../features/data_management/data/account_deletion_repository.dart';
 import '../features/tasks/application/task_providers.dart';
 import '../features/tasks/data/task_repository.dart';
 import '../features/tasks/data/notification_scheduler.dart';
@@ -20,6 +21,7 @@ class LearningPlanetApp extends StatelessWidget {
     required this.taskRepository,
     this.notificationScheduler = const DisabledNotificationScheduler(),
     this.remotePush,
+    this.accountDeletion,
     super.key,
   });
 
@@ -28,6 +30,7 @@ class LearningPlanetApp extends StatelessWidget {
   final TaskRepository taskRepository;
   final NotificationScheduler notificationScheduler;
   final RemoteParentPush? remotePush;
+  final AccountDeletionRepository? accountDeletion;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +41,8 @@ class LearningPlanetApp extends StatelessWidget {
         taskRepositoryProvider.overrideWithValue(taskRepository),
         notificationSchedulerProvider.overrideWithValue(notificationScheduler),
         remoteParentPushProvider.overrideWithValue(remotePush),
+        if (accountDeletion case final repository?)
+          accountDeletionRepositoryProvider.overrideWithValue(repository),
       ],
       child: MaterialApp(
         title: '学习星球',

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +9,7 @@ import 'package:learning_planet/features/growth/presentation/growth_screen.dart'
 import 'package:learning_planet/features/growth/presentation/learning_event_screen.dart';
 import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'package:learning_planet/features/tasks/data/task_repository.dart';
+import 'package:learning_planet/features/tasks/domain/wallet_summary.dart';
 
 class FakeGrowth implements GrowthRepository {
   bool failEquip = false, failAward = false;
@@ -85,7 +88,47 @@ class FakeGrowth implements GrowthRepository {
   Future<List<Map<String, dynamic>>> history(String childId) async => [];
 }
 
+class CountingGrowth extends FakeGrowth {
+  int reads = 0;
+
+  @override
+  Future<Map<String, dynamic>> load(String childId) {
+    reads++;
+    return super.load(childId);
+  }
+}
+
 void main() {
+  test(
+    'growth reads once per wallet refresh and remains available on error',
+    () async {
+      final growth = CountingGrowth();
+      var pending = Completer<WalletSummary>();
+      final wallet = walletProvider('child');
+      final overview = growthProvider('child');
+      final container = ProviderContainer(
+        overrides: [
+          growthRepositoryProvider.overrideWithValue(growth),
+          wallet.overrideWith((_) => pending.future),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.listen(overview, (_, _) {});
+      expect(growth.reads, 0);
+      pending.complete(const WalletSummary(coins: 0, frozen: 0, xp: 0));
+      expect((await container.read(overview.future))['streak'], 7);
+      await container.pump();
+      expect(growth.reads, 1);
+
+      pending = Completer<WalletSummary>();
+      container.invalidate(wallet);
+      final refreshed = container.read(overview.future);
+      pending.completeError(StateError('wallet unavailable'));
+      expect((await refreshed)['streak'], 7);
+      await container.pump();
+      expect(growth.reads, 2);
+    },
+  );
   Future<ProviderContainer> mount(
     WidgetTester tester,
     FakeGrowth repository, {

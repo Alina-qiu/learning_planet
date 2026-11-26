@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,9 +8,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:learning_planet/core/offline/family_access_state.dart';
 import 'package:learning_planet/core/offline/offline_store.dart';
+import 'package:learning_planet/core/offline/offline_media_store.dart';
 import 'package:learning_planet/features/auth_family/application/auth_providers.dart';
 import 'package:learning_planet/features/auth_family/application/family_providers.dart';
 import 'package:learning_planet/features/auth_family/data/offline_family_repository.dart';
+import 'package:learning_planet/features/auth_family/data/family_access_repository.dart';
 import 'package:learning_planet/features/data_management/data/account_deletion_repository.dart';
 import 'package:learning_planet/features/tasks/data/offline_task_repository.dart';
 import 'package:learning_planet/features/tasks/data/task_repository.dart';
@@ -166,6 +170,26 @@ void main() {
   });
 
   for (final user in ['parent', 'different']) {
+    test(
+      'a prepared deletion check is discarded on a new session for $user',
+      () async {
+        await restore(expired: false);
+        final repository = SupabaseAccountDeletionRepository(
+          h.client,
+          offline: tasks,
+        );
+        repository.prepareEntryCheck();
+        await Future<void>.delayed(Duration.zero);
+        expect(h.calls, hasLength(1));
+        await h.client.auth.setInitialSession(jsonEncode(session(user: user)));
+        h.handle = (r) =>
+            MockSupabase.json(r, {'id': 'job', 'status': 'pending'});
+        expect((await repository.status())?['id'], 'job');
+        expect(h.calls, hasLength(2));
+        expect(await store.accountDeletionJob(user), 'job');
+      },
+    );
+
     test('a replacement session for $user rechecks the server', () async {
       await restore();
       recordFailure();
@@ -177,6 +201,82 @@ void main() {
       );
     });
   }
+
+  test(
+    'the prepared account check is used once and local deletion still wins',
+    () async {
+      await restore(expired: false);
+      final repository = SupabaseAccountDeletionRepository(
+        h.client,
+        offline: tasks,
+      )..prepareEntryCheck();
+      await store.removeAccountData('parent', 'local-job');
+      expect((await repository.status())?['id'], 'local-job');
+      expect(h.calls, hasLength(1));
+      expect((await repository.status())?['id'], 'local-job');
+      expect(h.calls, hasLength(2));
+    },
+  );
+
+  for (final offline in [false, true]) {
+    test(
+      'a pending account status respects a newer local deletion, offline=$offline',
+      () async {
+        await restore(expired: false);
+        final entered = Completer<void>();
+        final release = Completer<void>();
+        h.handle = (request) async {
+          if (!entered.isCompleted) entered.complete();
+          await release.future;
+          if (offline) throw http.ClientException('offline');
+          return MockSupabase.json(request, null);
+        };
+        final repo = SupabaseAccountDeletionRepository(
+          h.client,
+          offline: tasks,
+        );
+        var cleared = false;
+        final result = repo.status(onOnlineClear: (_) => cleared = true);
+        await entered.future;
+        await store.removeAccountData('parent', 'accepted-locally');
+        release.complete();
+        expect((await result)?['id'], 'accepted-locally');
+        expect(cleared, isFalse);
+      },
+    );
+  }
+
+  test(
+    'a denied membership discards the cache even when tombstones time out',
+    () async {
+      await restore(expired: false);
+      final online = h.handle;
+      h.handle = (r) => r.url.path.endsWith('/child_deletion_tombstones')
+          ? throw http.ClientException('offline')
+          : online(r);
+      final membership = FamilyAccessRepository(
+        store: store,
+        accountId: () => h.client.auth.currentUser?.id,
+        load: () async =>
+            throw const PostgrestException(message: 'denied', code: '42501'),
+        cancelNotifications: (_) async {},
+      );
+      addTearDown(membership.dispose);
+      final repository = OfflineFamilyRepository(
+        h.client,
+        store,
+        () => h.client.auth.currentUser?.id,
+        access: membership,
+      );
+      await expectLater(
+        repository.loadFamilies(),
+        throwsA(
+          isA<PostgrestException>().having((e) => e.code, 'code', '42501'),
+        ),
+      );
+      expect(await store.read('parent', 'families'), isNull);
+    },
+  );
 
   test(
     'an unreachable business RPC with a valid token still checks families',
@@ -195,6 +295,200 @@ void main() {
       expect(h.calls[1].url.path, endsWith('accept_family_invitations'));
     },
   );
+
+  test(
+    'a reachable child tombstone is honored during a membership outage',
+    () async {
+      await restore(expired: false);
+      await store.write('parent', 'families', {
+        'items': [
+          {
+            'id': 'old',
+            'name': 'Cached',
+            'timezone': 'UTC',
+            'children': [
+              {'id': 'removed'},
+            ],
+          },
+        ],
+      });
+      final online = h.handle;
+      h.handle = (r) => r.url.path.endsWith('/child_deletion_tombstones')
+          ? MockSupabase.json(r, [
+              {'child_id': 'removed'},
+            ])
+          : online(r);
+      final membership = FamilyAccessRepository(
+        store: store,
+        accountId: () => h.client.auth.currentUser?.id,
+        load: () async => throw http.ClientException('offline'),
+        cancelNotifications: (_) async {},
+      );
+      addTearDown(membership.dispose);
+      final repository = OfflineFamilyRepository(
+        h.client,
+        store,
+        () => h.client.auth.currentUser?.id,
+        access: membership,
+      );
+      expect(await repository.loadFamilies(), isEmpty);
+      expect(await store.isChildDeleted('removed'), isTrue);
+    },
+  );
+
+  test(
+    'a complete directory restricts families, children and queued work before an offline fallback',
+    () async {
+      await restore(expired: false);
+      Map<String, dynamic> family(String id, List<String> children) => {
+        'id': id,
+        'name': id,
+        'timezone': 'UTC',
+        'children': [
+          for (final child in children)
+            {'id': child, 'family_id': id, 'nickname': child, 'grade': 2},
+        ],
+      };
+      final initial = [
+        family('old', ['lost']),
+        family('kept', ['left', 'stays']),
+      ];
+      await store.write('parent', 'families', {'items': initial});
+      for (final child in ['left', 'stays', 'lost']) {
+        final familyId = child == 'lost' ? 'old' : 'kept';
+        for (final account in ['parent', 'other']) {
+          await store.write(account, 'tasks:$child', {
+            'family_id': familyId,
+            'tasks': [],
+          });
+          await store.writeImageDraft(
+            account,
+            child,
+            familyId,
+            'draft-$child',
+            {},
+            Uint8List(4),
+            null,
+          );
+          await store.enqueue(account, child, {
+            'command_id': 'command-$child',
+            'task_id': child,
+          });
+        }
+      }
+      final online = h.handle;
+      var directory = [
+        family('kept', ['stays']),
+      ];
+      var partial = true;
+      h.handle = (r) => r.url.path.endsWith('/families')
+          ? MockSupabase.json(r, directory)
+          : online(r);
+      final membership = FamilyAccessRepository(
+        store: store,
+        accountId: () => h.client.auth.currentUser?.id,
+        load: () async {
+          if (partial) throw http.ClientException('membership unavailable');
+          return {'owner_id': 'parent', 'states': []};
+        },
+        cancelNotifications: (_) async {},
+      );
+      addTearDown(membership.dispose);
+      final repository = OfflineFamilyRepository(
+        h.client,
+        store,
+        () => h.client.auth.currentUser?.id,
+        access: membership,
+      );
+      Future<void> checkRestricted() async {
+        final families = await repository.loadFamilies();
+        expect(families.single.id, 'kept');
+        expect(families.single.children.single.id, 'stays');
+        for (final child in ['lost', 'left']) {
+          expect(await store.read('parent', 'tasks:$child'), isNull);
+          expect(await store.readTaskSummary('parent', child), isNull);
+          expect(await store.imageDraft('parent', 'draft-$child'), isNull);
+          expect(await store.read('other', 'tasks:$child'), isNotNull);
+          expect(await store.imageDraft('other', 'draft-$child'), isNotNull);
+          expect(await store.isChildDeleted(child), isFalse);
+        }
+        expect((await store.commands('parent')).single['child_id'], 'stays');
+        expect((await store.imageDrafts('parent')).single['child_id'], 'stays');
+      }
+
+      await checkRestricted();
+      final fetch = h.handle;
+      h.handle = (_) => throw http.ClientException('offline');
+      await checkRestricted();
+      h.handle = fetch;
+      directory = initial;
+      await checkRestricted();
+      partial = false;
+      expect(
+        (await repository.loadFamilies()).expand((f) => f.children).length,
+        3,
+      );
+      expect(await store.commands('parent'), hasLength(3));
+      expect(await store.imageDrafts('parent'), hasLength(3));
+    },
+  );
+
+  test('a later family page failure cannot revoke a cached family', () async {
+    await restore(expired: false);
+    final online = h.handle;
+    var pages = 0;
+    h.handle = (r) {
+      if (!r.url.path.endsWith('/families')) return online(r);
+      if (++pages > 1) throw http.ClientException('page unavailable');
+      return MockSupabase.json(
+        r,
+        List.generate(
+          1000,
+          (i) => {
+            'id': 'new-$i',
+            'created_at': '2026-11-01T00:00:00Z',
+            'name': 'New',
+            'timezone': 'UTC',
+            'children': [],
+          },
+        ),
+      );
+    };
+    expect((await container.read(familiesProvider.future)).single.id, 'old');
+    expect(pages, greaterThanOrEqualTo(2));
+    expect(await store.familyAccessRevoked('parent', familyId: 'old'), isFalse);
+  });
+
+  test('a late older directory cannot reopen a missing family', () async {
+    await restore(expired: false);
+    final online = h.handle;
+    final entered = Completer<void>();
+    final reply = Completer<http.Response>();
+    late http.Request first;
+    h.handle = (r) {
+      if (!r.url.path.endsWith('/families')) return online(r);
+      if (entered.isCompleted) return MockSupabase.json(r, []);
+      first = r;
+      entered.complete();
+      return reply.future;
+    };
+    final repository = OfflineFamilyRepository(
+      h.client,
+      store,
+      () => h.client.auth.currentUser?.id,
+    );
+    final older = repository.loadFamilies();
+    await entered.future;
+    expect(await repository.loadFamilies(), isEmpty);
+    reply.complete(
+      MockSupabase.json(first, [
+        {'id': 'old', 'name': 'Stale', 'timezone': 'UTC', 'children': []},
+      ]),
+    );
+    await expectLater(older, throwsStateError);
+    expect(await store.familyAccessRevoked('parent', familyId: 'old'), isTrue);
+    expect((await store.read('parent', 'families'))!['items'], isEmpty);
+  });
 
   test(
     'a deletion marker still blocks the cached family during handoff',

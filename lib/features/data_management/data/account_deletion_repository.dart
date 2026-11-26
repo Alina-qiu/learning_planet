@@ -60,6 +60,17 @@ class SupabaseAccountDeletionRepository implements AccountDeletionRepository {
   SupabaseAccountDeletionRepository(this.client, {this.offline});
   final SupabaseClient client;
   final OfflineTaskRepository? offline;
+  ({Session session, Future<Map<String, dynamic>?> result})? _entryRead;
+
+  void prepareEntryCheck() {
+    final session = client.auth.currentSession;
+    if (session == null) return;
+    final result = _rpc<Map<String, dynamic>?>('account_deletion_status');
+    // The UI will handle errors through status(), including retryable refresh
+    // failures. A session replaced before then must discard its pending result.
+    result.ignore();
+    _entryRead = (session: session, result: result);
+  }
 
   Future<T> _rpc<T>(String name, [Map<String, dynamic>? params]) async {
     final owner = client.auth.currentUser?.id;
@@ -114,34 +125,51 @@ class SupabaseAccountDeletionRepository implements AccountDeletionRepository {
     void Function(String)? onOnlineClear,
   }) async {
     final session = client.auth.currentSession;
+    final prepared = _entryRead;
+    _entryRead = null;
     final owner = session?.user.id;
     if (owner == null) return null;
-    final local = await offline?.store.accountDeletionJob(owner);
     Map<String, dynamic>? result;
+    Object? networkError;
     try {
-      result = await _rpc<Map<String, dynamic>?>('account_deletion_status');
+      result = await (prepared != null && identical(session, prepared.session)
+          ? prepared.result
+          : _rpc<Map<String, dynamic>?>('account_deletion_status'));
     } catch (error) {
       if (!isNetworkFailure(error)) rethrow;
-      if (client.auth.currentUser?.id != owner) throw StateError('登录账号已变化');
-      if (local == null &&
-          error is AuthRetryableFetchException &&
-          session != null &&
-          session.isExpired &&
-          session.refreshToken != null &&
-          identical(session, client.auth.currentSession)) {
-        onRefreshFailure?.call(session, error);
-      }
-      return local == null
-          ? null
-          : {'id': local, 'status': 'unknown', 'offline': true};
+      networkError = error;
     }
+    void checkOwner() {
+      if (client.auth.currentUser?.id != owner) throw StateError('登录账号已变化');
+    }
+
+    checkOwner();
     if (result != null) {
       await offline?.forgetAccount(owner, result['id'] as String);
-    } else if (local == null) {
-      onOnlineClear?.call(owner);
+      checkOwner();
+      return result;
     }
-    return result ??
-        (local == null ? null : {'id': local, 'status': 'unknown'});
+    // A deletion can be accepted locally while a prior status request is in
+    // flight. Its durable receipt takes precedence over a late empty response.
+    final local = await offline?.store.accountDeletionJob(owner);
+    checkOwner();
+    if (local != null) {
+      return {
+        'id': local,
+        'status': 'unknown',
+        if (networkError != null) 'offline': true,
+      };
+    }
+    if (networkError == null) {
+      onOnlineClear?.call(owner);
+    } else if (networkError is AuthRetryableFetchException &&
+        session != null &&
+        session.isExpired &&
+        session.refreshToken != null &&
+        identical(session, client.auth.currentSession)) {
+      onRefreshFailure?.call(session, networkError);
+    }
+    return null;
   }
 
   @override

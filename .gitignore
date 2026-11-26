@@ -10,7 +10,7 @@ coverage/
 flutter_*.log
 .env
 android/local.properties
-android/app/agconnect-services.json
+android/app/*-services.json
 android/.kotlin/
 ios/Pods/
 ios/.symlinks/

@@ -1,5 +1,7 @@
 package com.learningplanet.learning_planet
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -28,6 +30,9 @@ internal object TaskAlarms {
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "task-alarms").apply { isDaemon = true } }
     private val main = Handler(Looper.getMainLooper())
     private data class State(val revision: Long, val clock: TaskAlarmClock, val alarms: List<TaskAlarm>)
+    private fun notificationsPermitted(context: Context) =
+        (Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) &&
+            context.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
     private fun clock(context: Context) = TaskAlarmClock(System.currentTimeMillis(), SystemClock.elapsedRealtime(),
         runCatching { Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT) }.getOrDefault(-1))
     private fun prefs(context: Context) = context.getSharedPreferences(storeName, Context.MODE_PRIVATE)
@@ -100,11 +105,11 @@ internal object TaskAlarms {
             if (existing != null && existing.copy(token = entry.token, consumed = false) == entry) existing else entry
         }.filter { it.at > now.wall }
         require(rows.map { it.id }.toSet().size == rows.size)
-        if (rows == old.alarms && TaskAlarmPolicy.clockValid(old.clock, now) && ParentPushGate.permitted(context)) return
+        if (rows == old.alarms && TaskAlarmPolicy.clockValid(old.clock, now) && notificationsPermitted(context)) return
         // Retire all old intents before any replacement is eligible to display.
         save(context, old.copy(alarms = emptyList()))
         cancel(context, old)
-        val next = State(old.revision, now, if (ParentPushGate.permitted(context)) rows else emptyList())
+        val next = State(old.revision, now, if (notificationsPermitted(context)) rows else emptyList())
         save(context, next)
         try { schedule(context, next) } catch (error: Exception) { clear(context); throw error }
     }
@@ -138,10 +143,10 @@ internal object TaskAlarms {
             if (uri.pathSegments[0].toLongOrNull() != state.revision) return@execute
             val row = state.alarms.find { it.id == uri.pathSegments[1].toIntOrNull() && it.token == uri.pathSegments[2] } ?: return@execute
             if (row.consumed) return@execute
-            val permitted = ParentPushGate.permitted(context) && TaskAlarmPolicy.mayDeliver(row, state.clock, clock(context))
+            val permitted = notificationsPermitted(context) && TaskAlarmPolicy.mayDeliver(row, state.clock, clock(context))
             save(context, state.copy(alarms = state.alarms.map { if (it.id == row.id) it.copy(consumed = true) else it }))
             // Recheck after durable consumption, including a quiet boundary crossed during IO.
-            if (permitted && TaskAlarmPolicy.mayDeliver(row, state.clock, clock(context)) && ParentPushGate.permitted(context)) show(context, row)
+            if (permitted && TaskAlarmPolicy.mayDeliver(row, state.clock, clock(context)) && notificationsPermitted(context)) show(context, row)
         } catch (_: Exception) { /* Fail closed; no notification on corrupt state or failed persistence. */ }
         finally { finished() }
     }
@@ -159,7 +164,7 @@ internal object TaskAlarms {
         try {
             val state = read(context)
             val now = clock(context)
-            if (timeChanged || !ParentPushGate.permitted(context) || !TaskAlarmPolicy.canRestore(state.clock, now)) {
+            if (timeChanged || !notificationsPermitted(context) || !TaskAlarmPolicy.canRestore(state.clock, now)) {
                 clear(context)
             } else {
                 val next = state.copy(clock = now, alarms = state.alarms.filter { !it.consumed && it.at > now.wall && it.at - now.wall <= TaskAlarmPolicy.horizon })
@@ -179,6 +184,14 @@ class TaskAlarmReceiver : BroadcastReceiver() {
 class TaskAlarmBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in setOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_TIME_CHANGED)) return
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            // Clear the retired parent notification channel on upgrade.
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.cancel("parent-remote-v1", 1)
+            manager.cancel("parent-remote-v1", 2)
+            if (Build.VERSION.SDK_INT >= 26) manager.deleteNotificationChannel("parent_remote_v1")
+            context.deleteSharedPreferences("parent_push_gate_v1")
+        }
         val pending = goAsync()
         TaskAlarms.restore(context.applicationContext, intent.action == Intent.ACTION_TIME_CHANGED) { pending.finish() }
     }

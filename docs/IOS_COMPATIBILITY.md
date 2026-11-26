@@ -70,4 +70,4 @@ DEVELOPER_DIR=/Applications/Xcode_27.2.app/Contents/Developer IOS_VERSION=27.2 p
 - 18.5与26.2只是各主版本中的具体运行点，不代表所有补丁版本或所有设备通过。
 - iPad检查覆盖合成任务页和本机数据流程，不代表所有页面、分屏、相机、OCR、系统导出或读屏已验收。
 - 测试使用Debug和合成家庭，未经过生产登录、实际后端与推送；不能用于冷启动、完成反馈等PRD性能达标判断。
-- 签名安装、华为鸿蒙4.2/iPhone真机、真实APNs/HMS和双端同步仍待验收。
+- 签名安装、Android 和 iPhone 真机、真实APNs和双端同步仍待验收。

@@ -197,7 +197,7 @@ jobs:
 
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -238,6 +238,8 @@ jobs:
         with:
           name: android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
+      - name: Build the production entry with Android release shrinking
+        run: flutter build apk --release --target-platform android-arm64
 
   ios-simulator:
     name: ios-simulator (${{ matrix.ios }}, ${{ matrix.family }})

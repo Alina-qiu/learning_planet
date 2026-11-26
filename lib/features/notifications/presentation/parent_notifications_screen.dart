@@ -181,10 +181,10 @@ class _ParentNotificationsScreenState
             RemotePushStatus.unconfigured => '此版本尚未开通后台提醒，可继续查看应用内消息。',
             RemotePushStatus.unavailable => '此设备暂不支持后台提醒，可继续使用应用内消息。',
             RemotePushStatus.revoking => '本机已关闭提醒，联网后继续完成服务端撤销。',
-            RemotePushStatus.enabled => '通过华为或苹果推送接收兑换与周报提醒；网络、省电和强制退出可能影响送达。',
+            RemotePushStatus.enabled => '通过苹果推送接收兑换与周报提醒；网络、省电和强制退出可能影响送达。',
             RemotePushStatus.disabled =>
               parentMode && inbox.settings.enabled
-                  ? '启用后通过华为或苹果推送接收兑换与周报提醒，锁屏不显示孩子资料。'
+                  ? '启用后通过苹果推送接收兑换与周报提醒，锁屏不显示孩子资料。'
                   : '先启用此设备的家长提醒，再开启后台接收。',
           };
           return ListTile(

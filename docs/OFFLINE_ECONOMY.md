@@ -41,4 +41,4 @@ API36 模拟器 `emulator-5580` 使用本轮最终本机包 `ae218bdb…`，从�
 
 本机服务首次Storage冷启动超过60秒而失败，第二次Storage就绪但Edge旧等待策略超时；错误日志保留为 `tmp/offline-economy-backend.log` 和 `tmp/offline-economy-backend-rerun.log`。Edge现复用有界探测，OPTIONS必须返回204，上限60秒，并记录实际耗时；7项启动工具检查通过，最终所有服务启动成功。没有把失败尝试计入通过。
 
-首次启动和断网重启的 `am start -W` 分别在11937ms、10373ms报告timeout，之后实际进入登录页/首页。因此功能场景通过不表示启动性能达标。其余待办包括既有账本来源代码/日期显示的中文可读性、华为鸿蒙4.2、iPhone、飞行模式、iOS构建、云端部署、双设备库存竞争和真实家庭使用。APK 和使用方法见[构建记录](ANDROID_BUILD.md)、[本机联调](LOCAL_DEBUG.md)。
+首次启动和断网重启的 `am start -W` 分别在11937ms、10373ms报告timeout，之后实际进入登录页/首页。因此功能场景通过不表示启动性能达标。其余待办包括既有账本来源代码/日期显示的中文可读性、Android 和 iPhone、飞行模式、iOS构建、云端部署、双设备库存竞争和真实家庭使用。APK 和使用方法见[构建记录](ANDROID_BUILD.md)、[本机联调](LOCAL_DEBUG.md)。

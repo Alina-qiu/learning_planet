@@ -37,7 +37,7 @@ try {
     PARENT_PUSH_APNS_TEAM_ID:'DEF1234567',PARENT_PUSH_APNS_TOPIC:'com.learningplanet.learning_planet',PARENT_PUSH_APNS_ENVIRONMENT:'sandbox',
     TEST_PUSH_ORIGIN:`https://127.0.0.1:${server.address().port}`,TEST_PUSH_CERT:certificate});
   const binary=process.platform==='win32'?resolve('node_modules/deno/deno.exe'):resolve('node_modules/.bin/deno');
-  await exec(binary,['run','--cached-only','--cert',certificate,'--allow-env=PARENT_PUSH_HMS_APP_ID,PARENT_PUSH_HMS_APP_SECRET,PARENT_PUSH_APNS_KEY,PARENT_PUSH_APNS_KEY_ID,PARENT_PUSH_APNS_TEAM_ID,PARENT_PUSH_APNS_TOPIC,PARENT_PUSH_APNS_ENVIRONMENT,PARENT_PUSH_GATEWAY_URL,PARENT_PUSH_GATEWAY_KEY,TEST_PUSH_ORIGIN,TEST_PUSH_CERT',
+  await exec(binary,['run','--cached-only','--cert',certificate,'--allow-env=PARENT_PUSH_APNS_KEY,PARENT_PUSH_APNS_KEY_ID,PARENT_PUSH_APNS_TEAM_ID,PARENT_PUSH_APNS_TOPIC,PARENT_PUSH_APNS_ENVIRONMENT,PARENT_PUSH_GATEWAY_URL,PARENT_PUSH_GATEWAY_KEY,TEST_PUSH_ORIGIN,TEST_PUSH_CERT',
     `--allow-read=${certificate}`,`--allow-net=127.0.0.1:${server.address().port}`,'scripts/fixtures/parent_push_http2.mjs'],
   {windowsHide:true,env,timeout:20000});
   assert.equal(requests,1);

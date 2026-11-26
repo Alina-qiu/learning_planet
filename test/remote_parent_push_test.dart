@@ -44,7 +44,7 @@ class Native implements ParentPushNative {
   int revision = 0, tokenCalls = 0, enables = 0;
   int samples = 0;
   bool enabled = false, configured = true, available = true, permit = true;
-  String transport = 'hms';
+  String transport = 'apns';
   String? deviceToken = 'device-token';
   Completer<int>? disableAck;
   Map<String, dynamic>? gate;
@@ -105,7 +105,7 @@ class Remote implements ParentPushRemote {
       'scope_nonce': prepared!['requested_nonce'],
       'intent_version': p['requested_version'],
       'state': name == 'prepare_parent_push_device' ? 'prepared' : 'enabled',
-      'transport': p['requested_transport'] ?? 'hms',
+      'transport': p['requested_transport'] ?? 'apns',
       'server_time': '2026-11-05T04:00:00Z',
       'expires_at': '2026-12-05T04:00:00Z',
     };
@@ -160,6 +160,30 @@ Future<void> drain() async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'retiring an installation only removes its backend-scoped capability',
+    () async {
+      final h = Harness();
+      h.secrets.values[h.push.storageKey] = 'old capability';
+      h.secrets.values['session'] = 'active credential';
+      await RemoteParentPush.clearRetiredRegistration(
+        h.secrets,
+        'https://other.test',
+      );
+      expect(h.secrets.values[h.push.storageKey], 'old capability');
+      await RemoteParentPush.clearRetiredRegistration(
+        h.secrets,
+        'https://project.test',
+      );
+      expect(h.secrets.values, {'session': 'active credential'});
+      await RemoteParentPush.clearRetiredRegistration(
+        h.secrets,
+        'https://project.test',
+      );
+      expect(h.secrets.values['session'], 'active credential');
+    },
+  );
+
   test(
     'failed native family revocation retains its scope for a later retry',
     () async {
@@ -297,8 +321,8 @@ void main() {
       expect(h.row['native_revision'], h.native.revision);
       expect(h.native.gate!['scope_nonce'], h.row['nonce']);
       expect(h.native.gate!['settings_version'], 2);
-      expect(h.native.gate!['rtt_ms'], isA<int>());
-      expect(h.native.samples, 0);
+      expect(h.native.gate!['clock_sample'], 'sample-1');
+      expect(h.native.samples, 1);
       expect(await h.push.status('family'), RemotePushStatus.enabled);
       expect(await h.push.status('another'), RemotePushStatus.disabled);
       await h.push.setScope('parent:parent-a:family');
@@ -310,13 +334,12 @@ void main() {
     'APNs samples before activation and recalibrates existing opt-in',
     () async {
       final h = Harness();
-      h.native.transport = 'apns';
       h.remote.intercept = (name, params) {
         final reply = h.remote.reply(name, params);
         if (name == 'prepare_parent_push_device') return reply;
         expect(h.native.samples, name == 'activate_parent_push_device' ? 1 : 2);
         expect(params.containsKey('clock_sample'), false);
-        return {...reply, 'transport': 'apns'};
+        return reply;
       };
       await h.enable();
       expect(h.native.gate!['clock_sample'], 'sample-1');
@@ -810,7 +833,7 @@ void main() {
   test(
     'method channel sends typed revision, startup and gate arguments',
     () async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final calls = <MethodCall>[];
       final messenger =
@@ -820,7 +843,7 @@ void main() {
       ) async {
         calls.add(call);
         return switch (call.method) {
-          'availability' => {'transport': 'hms', 'configured': true},
+          'availability' => {'transport': 'apns', 'configured': true},
           'startup' || 'disable' => 7,
           'token' => 'token',
           'enable' => true,
@@ -834,7 +857,7 @@ void main() {
         ),
       );
       const native = MethodChannelParentPush();
-      expect((await native.availability())['transport'], 'hms');
+      expect((await native.availability())['transport'], 'apns');
       expect(await native.disable(startup: true), 7);
       expect(await native.disable(), 7);
       expect(await native.token(7), 'token');
@@ -847,7 +870,7 @@ void main() {
         'enable',
       ]);
       expect(calls[3].arguments, {'revision': 7});
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
       expect(await native.availability(), isEmpty);
       expect(await native.disable(), 0);
       expect(calls.length, 5);

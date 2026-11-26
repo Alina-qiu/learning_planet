@@ -50,4 +50,4 @@ npm run test:pdf-integration
 
 集成夹具曾将PG bigint字符串与文件长度数字直接比较，已修正类型转换；失败日志保留为 `tmp/worksheet-fixture-byte-size-failure.log`。Flutter分析首次在中文路径下发生LSP消息解析异常，改在已有ASCII路径映射下运行通过；日志保留。这两项是测试环境问题，与上述真实版本缺陷分开记录。
 
-仍需云端HTTPS/网关、迁移与Edge部署、真实Cron及30天保留期限、华为鸿蒙4.2/iPhone打印分享、设备缓存和iOS构建验收。提前设置合成任务过期时间验证的是清理规则，未实际等待30天；签名链接在物理删除前仍受原有效期约束。
+仍需云端HTTPS/网关、迁移与Edge部署、真实Cron及30天保留期限、Android 和 iPhone 打印分享、设备缓存和iOS构建验收。提前设置合成任务过期时间验证的是清理规则，未实际等待30天；签名链接在物理删除前仍受原有效期约束。

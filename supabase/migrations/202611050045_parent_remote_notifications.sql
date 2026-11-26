@@ -47,7 +47,7 @@ create table public.parent_push_devices (
   intent_version bigint not null check(intent_version between 1 and 9007199254740991),
   scope_nonce uuid not null,
   state text not null check(state in ('prepared','enabled','disabled')),
-  transport text check(transport in ('hms','apns','gateway')),
+  transport text check(transport in ('apns','gateway')),
   registration_token text,
   registration_hash text,
   prepared_until timestamptz,
@@ -124,9 +124,8 @@ begin
     raise exception 'PUSH_ACCESS_DENIED' using errcode='42501'; end if;
   perform public.require_parent_authorization(device.family_id);
   if requested_version is distinct from device.intent_version or device.state='disabled' then raise exception 'STALE_PUSH_DEVICE_INTENT'; end if;
-  if requested_transport is null or requested_transport not in ('hms','apns','gateway') or push_token is null or
+  if requested_transport is null or requested_transport not in ('apns','gateway') or push_token is null or
     length(push_token) not between 1 and 4096 or push_token !~ '^[!-~]+$' or
-    (requested_transport='hms' and length(push_token)<20) or
     (requested_transport='apns' and push_token !~ '^[0-9a-f]{64}$') then raise exception 'INVALID_PUSH_TOKEN'; end if;
   token_hash:=encode(sha256(convert_to(push_token,'UTF8')),'hex');
   if device.state='enabled' then
@@ -172,7 +171,6 @@ begin
   if requested_version is distinct from device.intent_version or device.state<>'enabled' or device.expires_at<now() then
     raise exception 'STALE_PUSH_DEVICE_INTENT'; end if;
   if push_token is null or length(push_token) not between 1 and 4096 or push_token !~ '^[!-~]+$' or
-    (device.transport='hms' and length(push_token)<20) or
     (device.transport='apns' and push_token !~ '^[0-9a-f]{64}$') then raise exception 'INVALID_PUSH_TOKEN'; end if;
   update public.parent_push_devices set registration_token=push_token,registration_hash=encode(sha256(convert_to(push_token,'UTF8')),'hex'),
     expires_at=now()+interval '30 days',updated_at=now() where device_id=target_device_id;
@@ -265,8 +263,8 @@ language plpgsql security definer set search_path='' as $$
 declare job record; claims jsonb:='[]'; token uuid;
 begin
   if max_jobs is null or max_jobs not between 1 and 20 or jsonb_typeof(transports) is distinct from 'array'
-    or jsonb_array_length(transports) not between 1 and 3 or exists(select 1 from jsonb_array_elements(transports) t
-      where jsonb_typeof(t)<>'string' or t#>>'{}' not in ('hms','apns','gateway')) then raise exception 'INVALID_PUSH_CLAIM'; end if;
+    or jsonb_array_length(transports) not between 1 and 2 or exists(select 1 from jsonb_array_elements(transports) t
+      where jsonb_typeof(t)<>'string' or t#>>'{}' not in ('apns','gateway')) then raise exception 'INVALID_PUSH_CLAIM'; end if;
   update public.parent_push_jobs set state='cancelled',result_code='expired',finished_at=now(),lease_until=null
     where state in ('queued','running') and (expires_at<=now() or attempts>=5 and (state='queued' or lease_until<=now()));
   for job in

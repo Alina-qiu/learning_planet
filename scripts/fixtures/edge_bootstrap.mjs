@@ -10,10 +10,8 @@ if (kind === 'ai') {
 }
 if (kind === 'parent-push') {
   const fetcher=globalThis.fetch;
-  globalThis.fetch=(url,options)=>fetcher(url==='https://oauth-login.cloud.huawei.com/oauth2/v3/token'
-    ? `${Deno.env.get('SUPABASE_URL')}/push-auth`
-    : url==='https://push-api.cloud.huawei.com/v1/123456789/messages:send'
-      ? `${Deno.env.get('SUPABASE_URL')}/push-send` : url,options);
+  globalThis.fetch=(url,options)=>fetcher(url==='https://push.example.test/send'
+    ? `${Deno.env.get('SUPABASE_URL')}/push-send` : url,options);
 }
 if (kind === 'task-push') {
   const fetcher=globalThis.fetch;

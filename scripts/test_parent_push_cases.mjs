@@ -25,12 +25,12 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
     await scalar('select public.save_parent_notification_settings($1,$2,0)',[family,JSON.stringify(settings)]);
     const prepare=(version=1,n=nonce,id=device,s=secret)=>scalar('select public.prepare_parent_push_device($1,$2,$3,$4,$5)',[family,id,s,version,n]);
     const token=`test-token-${randomUUID()}`;
-    const activate=(version=1,t=token,transport='hms',id=device,s=secret)=>scalar('select public.activate_parent_push_device($1,$2,$3,$4,$5)',[id,s,version,transport,t]);
+    const activate=(version=1,t=token,transport='gateway',id=device,s=secret)=>scalar('select public.activate_parent_push_device($1,$2,$3,$4,$5)',[id,s,version,transport,t]);
     const revoke=(version=2,s=secret)=>scalar('select public.revoke_parent_push_device($1,$2,$3)',[device,s,version]);
     const renew=(t=token,version=1,s=secret)=>scalar('select public.renew_parent_push_device($1,$2,$3,$4)',[device,s,version,t]);
     const readDevice=async()=>{await admin();return scalar('select to_jsonb(d) from public.parent_push_devices d where device_id=$1',[device]);};
     const enqueue=async()=>{await service();return scalar('select public.enqueue_parent_push_jobs()');};
-    const claim=async(transports=['hms'],limit=20)=>{await service();return scalar('select public.claim_parent_push_jobs($1,$2)',[limit,JSON.stringify(transports)]);};
+    const claim=async(transports=['gateway'],limit=20)=>{await service();return scalar('select public.claim_parent_push_jobs($1,$2)',[limit,JSON.stringify(transports)]);};
     const authorize=async j=>{await service();return scalar('select public.authorize_parent_push_job($1,$2)',[j.job_id,j.lease_token]);};
     const finish=async(j,outcome)=>{await service();return scalar('select public.finish_parent_push_job($1,$2,$3)',[j.job_id,j.lease_token,outcome]);};
     return {owner,peer,family,child,reward,redemption,key:`redemption:${redemption}`,device,secret,nonce,token,
@@ -40,7 +40,7 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
     const f=await fixture();
     for (const table of ['parent_push_devices','parent_push_jobs']) await denied(`select * from public.${table}`);
     for (const sql of ['select public.enqueue_parent_push_jobs()','select public.purge_parent_push()',
-      'select public.claim_parent_push_jobs(1,\'["hms"]\')',`select public.parent_push_device_view('${f.device}')`,
+      'select public.claim_parent_push_jobs(1,\'["gateway"]\')',`select public.parent_push_device_view('${f.device}')`,
       `select * from public.parent_notification_events_for_user('${f.family}','${f.owner}',now())`]) await denied(sql);
     await login(f.owner,'no-pin');await assert.rejects(f.prepare());
     await login(f.peer);await assert.rejects(f.prepare());
@@ -66,12 +66,12 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
   });
   await check('push endpoint uniqueness, validation, expiry and renewal preserve ownership',async()=>{
     const f=await fixture();await f.prepare();
-    for (const [token,transport] of [['bad token','gateway'],['short','hms'],['a'.repeat(63),'apns'],['z'.repeat(64),'apns'],['a'.repeat(4097),'gateway']])
+    for (const [token,transport] of [['bad token','gateway'],['arbitrary','retired'],['a'.repeat(63),'apns'],['z'.repeat(64),'apns'],['a'.repeat(4097),'gateway']])
       await assert.rejects(f.activate(1,token,transport),/INVALID_PUSH_TOKEN/);
     await f.activate();assert.equal((await f.activate()).state,'enabled');
     await assert.rejects(f.activate(1,`${f.token}-changed`),/INTENT_MISMATCH/);
     const second=randomUUID();await f.prepare(1,randomUUID(),second);
-    await assert.rejects(f.activate(1,f.token,'hms',second),/unique/);
+    await assert.rejects(f.activate(1,f.token,'gateway',second),/unique/);
     await login(f.peer);await assert.rejects(f.renew(),/ACCESS_DENIED/);
     await login(f.owner,'renew-without-pin');assert.equal((await f.renew(`${f.token}-rotated`)).state,'enabled');
     await assert.rejects(f.renew(f.token,1,'wrong'),/ACCESS_DENIED/);
@@ -79,8 +79,15 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
     await login(f.owner);await assert.rejects(f.renew(),/STALE/);
     await f.prepare(2);await admin();await client.query("update public.parent_push_devices set prepared_until=now()-interval '1 second' where device_id=$1",[f.device]);
     await login(f.owner);await assert.rejects(f.activate(2),/PREPARATION_EXPIRED/);
-    await f.prepare(3);await f.activate(3,'vendor-id','gateway');
-    assert.equal((await f.readDevice()).transport,'gateway');
+    await f.prepare(3);await f.activate(3,'a'.repeat(64),'apns');
+    assert.equal((await f.readDevice()).transport,'apns');
+    await login(f.owner);
+    await assert.rejects(f.renew('invalid',3),/INVALID_PUSH_TOKEN/);
+    await f.renew('b'.repeat(64),3);await f.enqueue();
+    assert.deepEqual(await f.claim(['gateway']),[]);
+    const [job]=await f.claim(['apns']);
+    assert.equal((await f.authorize(job)).registration_token,'b'.repeat(64));
+    assert.equal((await f.finish(job,'accepted')).status,'sent');
   });
   await check('same installation can transfer to another authorized parent without inheriting the old intent',async()=>{
     const f=await fixture();await f.prepare();await f.activate();
@@ -101,8 +108,8 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
     await client.query("update public.parent_notification_settings set quiet_end='00:00' where family_id=$1",[f.family]);
     assert.equal(await f.enqueue(),1);assert.equal(await f.enqueue(),0);
     assert.deepEqual(await f.claim(['apns']),[]);
-    for(const invalid of [[],['unknown'],['hms','apns','gateway','hms'],null]) await assert.rejects(f.claim(invalid));
-    await assert.rejects(f.claim(['hms'],21));assert.equal((await f.claim()).length,1);assert.deepEqual(await f.claim(),[]);
+    for(const invalid of [[],['unknown'],['apns','gateway','apns'],null]) await assert.rejects(f.claim(invalid));
+    await assert.rejects(f.claim(['gateway'],21));assert.equal((await f.claim()).length,1);assert.deepEqual(await f.claim(),[]);
   });
   await check('authorized push contains only short-lived opaque data and never child/reward/account contents',async()=>{
     const f=await fixture();await f.prepare();await f.activate();await f.enqueue();const [job]=await f.claim();
@@ -185,7 +192,7 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
     const workers=Array.from({length:2},()=>new pg.Client(client.connectionParameters));
     try {
       for(const worker of workers) {await worker.connect();await worker.query('set role service_role');await worker.query('begin');}
-      const results=await Promise.all(workers.map(worker=>worker.query('select public.claim_parent_push_jobs(6,\'["hms"]\') as claims')));
+      const results=await Promise.all(workers.map(worker=>worker.query('select public.claim_parent_push_jobs(6,\'["gateway"]\') as claims')));
       const claimed=results.flatMap(r=>r.rows[0].claims);assert.equal(claimed.length,12);
       assert.equal(new Set(claimed.map(c=>c.job_id)).size,12);assert.equal(new Set(claimed.map(c=>c.lease_token)).size,12);
       for(const worker of workers) await worker.query('commit');assert.deepEqual(await f.claim(),[]);

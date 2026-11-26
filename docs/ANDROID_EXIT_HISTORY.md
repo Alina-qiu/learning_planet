@@ -50,4 +50,4 @@ pwsh -File scripts/build_android.ps1 -NoPub -UseChinaMirror
 
 这是1条原生适配器场景，包含2次实际故障、4次进程运行，不能计为4条Flutter测试。模拟器为AOSP Android16/API36 x86_64，专用模拟器已关闭；此故障脚本尚未加入远程模拟器CI。
 
-本轮不证明API30以上ANR退出、Android10的C/C++信号、iOS MetricKit、华为鸿蒙4.2或iPhone实际行为，也未验证云端上传和监控告警。Flutter778项、90.94%核心覆盖率和SQL387项沿用此前结果。其余诊断范围见[运行诊断](RUNTIME_DIAGNOSTICS.md)。
+本轮不证明API30以上ANR退出、Android10的C/C++信号、iOS MetricKit、Android 和 iPhone 实际行为，也未验证云端上传和监控告警。Flutter778项、90.94%核心覆盖率和SQL387项沿用此前结果。其余诊断范围见[运行诊断](RUNTIME_DIAGNOSTICS.md)。

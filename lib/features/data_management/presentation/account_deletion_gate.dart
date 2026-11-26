@@ -72,6 +72,12 @@ class _AccountDeletionGateState extends ConsumerState<AccountDeletionGate>
   @override
   Widget build(BuildContext context) {
     ref.listen(accountDeletionStatusProvider, (previous, next) {
+      if (!next.isLoading && next is AsyncData && next.valueOrNull == null) {
+        // The account check is complete. Start the family query now, while
+        // Flutter prepares the frame that mounts FamilyGate.
+        ref.read(familiesProvider);
+        return;
+      }
       if (next.valueOrNull == null || previous?.valueOrNull != null) return;
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();

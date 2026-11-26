@@ -1,15 +1,23 @@
 # Android 调试构建
 
+## 2026-11-26 通用 Android 调试包
+
+Android 支持孩子的本地定时任务提醒和家长的应用内收件箱、前台提醒。首页冷启动从进程启动开始计时，到孩子、任务和余额均可见时结束，要求不超过 6 秒。
+
+| 安装包及用途 | 包名 | 字节数 | SHA-256 |
+|---|---|---:|---|
+| [本机联调包](../build/app/outputs/flutter-apk/app-local-debug.apk)，通过 ADB 连接电脑上的服务，可登录和建立家庭 | `com.learningplanet.learning_planet.local` | 215499695 | `bf68a465e96650e4bf48a52f7550f1946fe9bf5cc76c3ae271beb7cf14c815cd` |
+| [普通调试包](../build/app/outputs/flutter-apk/app-debug.apk)，可查看未配置后端提示 | `com.learningplanet.learning_planet` | 215499563 | `7c7f89c0677634edf90902f152bcd93c6880ca569fedfca3ca49be79c8a73efc` |
+
+安装包保存在本机工作区。每个版本的字节数、SHA-256、签名和实际运行环境列在相应交付记录中。[本轮安装包和验收](../build/acceptance-20261126/DELIVERY.md) · [本机试用步骤](LOCAL_DEBUG.md)
+
+同一源码通过 Windows 882 项 Flutter 测试，110 个核心文件行覆盖率为 6993/7697（90.85%）。x86_64 Release AOT 包为 60618679 字节，SHA-256 为 `bd519fb89df3b53d2736f3cea51bbf1861808e7a97fbf64d0f9df69679ab7fa3`。优化后的 DEX 保留中文识别器和 Flutter 插件，包内包含 9 项汉字模型、字表及中拉混排识别资源。[Windows 测试](../build/acceptance-20261126/windows-quality.json) · [Release 构建](../build/acceptance-20261126/release-final-package.json) · [中文识别包核对](../build/acceptance-20261126/release-final-ocr-package.json)
+
+在 Debug 与 Release 之间切换时，使用 `flutter build apk --release` 让 Flutter 按发布模式重新生成原生插件注册表，剔除开发依赖 `integration_test`。应用打包中文 OCR 模型。R8 保留对中文识别的常规检查，只为插件可选的日文、韩文和天城文选项配置了六条精确规则。当前 Release 使用本机调试证书，仅供本机性能测量。[R8 配置](../android/app/proguard-rules.pro) · [Android 构建配置](../android/app/build.gradle.kts)
+
 ## 2026-11-24 任务完成提示与首页读取
 
-本次更新修复了最低时长错误提示遮住下一次成功提示的问题，并减少启动时读取登录凭据、家庭目录和任务缓存的重复工作。
-
-| 安装包 | 包名 | 用途 |
-|---|---|---|
-| [本机联调包](../build/app/outputs/flutter-apk/app-local-debug.apk) | `com.learningplanet.learning_planet.local` | 通过 ADB 端口转发连接电脑上的测试服务，可用验证码登录、建立家庭并试用。 |
-| [普通调试包](../build/app/outputs/flutter-apk/app-debug.apk) | `com.learningplanet.learning_planet` | 未配置后端时，可核对安装和配置提示页。 |
-
-安装包保存在本机工作区。每个版本的字节数、SHA-256、签名和实际运行环境列在相应交付记录中。[本轮安装包和验收](../build/acceptance-20261124-startup/DELIVERY.md) · [本机试用步骤](LOCAL_DEBUG.md)
+该轮修复了最低时长错误提示遮住下一次成功提示的问题，并减少启动时读取登录凭据、家庭目录和任务缓存的重复工作。[当轮安装包和验收](../build/acceptance-20261124-startup/DELIVERY.md)
 
 ## 2026-11-24 后台同步时保留首页任务和余额（历史构建）
 
@@ -49,7 +57,7 @@
 | `build/app/outputs/flutter-apk/app-local-debug.apk` | `e7752407ebe610cb9b0f02d2e467378c267ab652a8779d2c29bb821073555501` |
 | `build/app/outputs/flutter-apk/app-debug.apk` | `4b4b9ee25a91b3a0c45119f4d8343c2c7a58b3b6f51df12c6f68dab5feda1832` |
 
-华为手机连接本机服务的步骤见[本机联调](LOCAL_DEBUG.md)。普通调试版使用未配置服务时的启动页。下文的校验值和设备记录属于相应历史版本。
+Android 手机连接本机服务的步骤见[本机联调](LOCAL_DEBUG.md)。普通调试版使用未配置服务时的启动页。下文的校验值和设备记录属于相应历史版本。
 
 ## 2026-11-23 冒险大厅与设备改时
 
@@ -62,7 +70,7 @@
 | `build/app/outputs/flutter-apk/app-local-debug.apk` | `com.learningplanet.learning_planet.local` | `f50d03f22ae0e69f2a5fac839f008238b83b5c91dd815af8d28801c39e92ffde` |
 | `build/app/outputs/flutter-apk/app-debug.apk` | `com.learningplanet.learning_planet` | `bf89ca188aa18f3572447cdd90ab1f2a2d643170dfdfdce928bd9ef9022ce9dd` |
 
-升级验证保留了原模拟器的数据库、回滚日志和账号会话。恢复后钱包仍为 35 金币、0 冻结和 5 XP。将系统日期拨快及拨慢两天，应用都能进入原家庭并成功同步，三天连续奖励仍只有一条。模拟器为 Android API 36，华为鸿蒙 4.2 真机待验收。
+升级验证保留了原模拟器的数据库、回滚日志和账号会话。恢复后钱包仍为 35 金币、0 冻结和 5 XP。将系统日期拨快及拨慢两天，应用都能进入原家庭并成功同步，三天连续奖励仍只有一条。模拟器为 Android API 36，Android 真机待验收。
 
 ## 2026-11-23 错题、任务日期与组卷调试包
 
@@ -114,7 +122,7 @@
 
 普通构建29.7秒、本机构建32.4秒。两个APK均通过生产入口、三ABI加密SQLite、字体/着色器、测试入口/故障类排除及v2签名检查；本机构建后已恢复普通包，两个文件与各自`.sha256`一致。日志`tmp/task-layout-ordinary-build.log`、`tmp/task-layout-local-build.log`、`tmp/task-layout-debug-signature.log`和`tmp/task-layout-local-debug-signature.log`。
 
-用于生成本机配置的临时后端已正常退出；没有进行新的后端业务联调。本轮ADB设备列表为空，没有安装手机或模拟器；普通包尚未配置云端，仅供启动验证，本机包依赖[电脑服务及端口转发](LOCAL_DEBUG.md)。云端、iOS、华为鸿蒙4.2/iPhone、真实读屏与性能仍待验收。下方为历史产物，摘要不对应当前文件。
+用于生成本机配置的临时后端已正常退出；没有进行新的后端业务联调。本轮ADB设备列表为空，没有安装手机或模拟器；普通包尚未配置云端，仅供启动验证，本机包依赖[电脑服务及端口转发](LOCAL_DEBUG.md)。云端、iOS、Android 和 iPhone、真实读屏与性能仍待验收。下方为历史产物，摘要不对应当前文件。
 
 ## 2026-11-06 组卷字号与图片隐私提示
 
@@ -129,7 +137,7 @@
 
 构建所用临时后端已正常退出，54321端口关闭；未将此次空库启动计作新的业务联调。
 
-本轮没有重新安装手机或模拟器，PDF及导出页面的新增验证使用测试仓库/系统导出替身，不作为真实打印或分享证据。普通包尚未配置云端，仅供启动验证；本机包依赖[电脑服务和端口转发](LOCAL_DEBUG.md)。SQL、原生和PDF生成器未改；云端、iOS、华为鸿蒙4.2/iPhone及完整性能仍待验收。下方为历史产物，摘要不对应当前文件。
+本轮没有重新安装手机或模拟器，PDF及导出页面的新增验证使用测试仓库/系统导出替身，不作为真实打印或分享证据。普通包尚未配置云端，仅供启动验证；本机包依赖[电脑服务和端口转发](LOCAL_DEBUG.md)。SQL、原生和PDF生成器未改；云端、iOS、Android 和 iPhone 及完整性能仍待验收。下方为历史产物，摘要不对应当前文件。
 
 ## 2026-11-06 图片导入中断与账号隔离
 
@@ -144,7 +152,7 @@
 
 构建所用临时后端已正常退出，54321端口关闭；该空库仅用于本机构建配置，没有增加新的业务联调证据。
 
-普通包尚未配置云端，仅用于启动验证；本机包须按[联调说明](LOCAL_DEBUG.md)启动电脑服务并转发端口。本轮未重新安装手机或模拟器，文件数据库重开测试不等同于设备进程重启。SQL与原生实现未改；华为鸿蒙4.2、iPhone、iOS构建、真实相册/拍照识别及完整性能仍待验收。下方记录为历史产物，摘要不对应当前文件。
+普通包尚未配置云端，仅用于启动验证；本机包须按[联调说明](LOCAL_DEBUG.md)启动电脑服务并转发端口。本轮未重新安装手机或模拟器，文件数据库重开测试不等同于设备进程重启。SQL与原生实现未改；Android 和 iPhone、iOS构建、真实相册/拍照识别及完整性能仍待验收。下方记录为历史产物，摘要不对应当前文件。
 
 ## 2026-11-06 图片变更后的重新校对
 
@@ -157,7 +165,7 @@
 
 普通构建28.8秒、本机构建30.9秒；两个APK的生产入口、三ABI加密SQLite、字体/着色器、测试入口/故障类排除和v2签名通过。日志`tmp/ocr-source-ordinary-build.log`、`tmp/ocr-source-local-build.log`、`tmp/ocr-source-debug-signature.log`及`tmp/ocr-source-local-debug-signature.log`。本机构建结束后普通APK已恢复，摘要与表中一致。
 
-本轮未改SQL或原生实现，未重新安装手机/模拟器；UI验证使用实际Widget与本机草稿仓库，OCR返回值为测试数据。普通包未配置云端，本机包需[电脑服务与端口转发](LOCAL_DEBUG.md)。华为鸿蒙4.2/iPhone、iOS、真实拍照识别及完整性能仍待验收。下方为历史产物，其摘要不对应当前文件。
+本轮未改SQL或原生实现，未重新安装手机/模拟器；UI验证使用实际Widget与本机草稿仓库，OCR返回值为测试数据。普通包未配置云端，本机包需[电脑服务与端口转发](LOCAL_DEBUG.md)。Android 和 iPhone、iOS、真实拍照识别及完整性能仍待验收。下方为历史产物，其摘要不对应当前文件。
 
 ## 2026-11-06 系统退出记录验证后重建
 
@@ -170,7 +178,7 @@
 
 普通构建29.4秒，三ABI加密库、完整资源、生产初始化和测试类排除检查通过，v2签名有效。本机包内容重新检查通过且摘要不变。日志`tmp/exit-history-ordinary-build.log`、`tmp/exit-history-ordinary-signature.log`。独立故障APK被交付检查拒绝，未作为用户安装包。
 
-普通包安装到API36后正常显示未连接服务页面，截图已查看；WARM 8124ms不能作为性能达标依据。普通包仍未配置云端，本机包需[电脑服务](LOCAL_DEBUG.md)。华为鸿蒙4.2/iPhone、iOS编译签名、云端与完整性能仍待验收；下方普通包历史摘要不对应当前文件。
+普通包安装到API36后正常显示未连接服务页面，截图已查看；WARM 8124ms不能作为性能达标依据。普通包仍未配置云端，本机包需[电脑服务](LOCAL_DEBUG.md)。Android 和 iPhone、iOS编译签名、云端与完整性能仍待验收；下方普通包历史摘要不对应当前文件。
 
 ## 2026-11-06 登录与家庭加载恢复
 
@@ -183,7 +191,7 @@
 
 普通构建30.5秒，本机构建29.5秒；原入口、三ABI加密库、字体/着色器、测试类排除及v2签名检查通过，同目录提供摘要。日志为 `tmp/entry-recovery-ordinary-build.log`、`tmp/entry-recovery-local-build.log`、`tmp/entry-recovery-debug-signature.log` 和 `tmp/entry-recovery-local-debug-signature.log`。迁移仍为001–066（68份），SQL/原生实现未改。
 
-最终本机包已安装到API36并核对安装摘要，实际完成家庭失败提示、普通/双倍字号、持续失败重试、安全退出、真实本机验证码重新登录及首页恢复；新测试家庭余额和两条账本ID不变。报告 `build/entry_recovery_results/walkthrough-20261106.json`。旧包冷启动11142ms、最终包暖启动7786ms，不可作为性能改善对照。临时服务和专用模拟器已关闭。普通包本轮未安装且未配置云端，本机包需要[电脑服务与端口转发](LOCAL_DEBUG.md)；华为鸿蒙4.2/iPhone、iOS编译、云端及完整性能待验收。下方为历史产物。
+最终本机包已安装到API36并核对安装摘要，实际完成家庭失败提示、普通/双倍字号、持续失败重试、安全退出、真实本机验证码重新登录及首页恢复；新测试家庭余额和两条账本ID不变。报告 `build/entry_recovery_results/walkthrough-20261106.json`。旧包冷启动11142ms、最终包暖启动7786ms，不可作为性能改善对照。临时服务和专用模拟器已关闭。普通包本轮未安装且未配置云端，本机包需要[电脑服务与端口转发](LOCAL_DEBUG.md)；Android 和 iPhone、iOS编译、云端及完整性能待验收。下方为历史产物。
 
 ## 2026-11-06 家长调账明细
 
@@ -209,7 +217,7 @@
 
 普通构建75.4秒，本机构建41.0秒。两个产物均通过内容、原入口、三ABI加密SQLite、字体/着色器、测试类排除和v2签名检查；本机构建结束后已核对普通包恢复摘要。同目录提供各自SHA256。日志为 `tmp/offline-economy-ordinary-build.log`、`tmp/offline-economy-local-build.log` 和对应 `*-signature.log`。
 
-普通包未配置Supabase云端，本机包需要电脑上的临时服务和USB端口转发，见[本机使用说明](LOCAL_DEBUG.md)。华为鸿蒙4.2、iPhone、iOS构建签名、云端和性能验收尚未完成。下方历史摘要不对应当前产物。
+普通包未配置Supabase云端，本机包需要电脑上的临时服务和USB端口转发，见[本机使用说明](LOCAL_DEBUG.md)。Android 和 iPhone、iOS构建签名、云端和性能验收尚未完成。下方历史摘要不对应当前产物。
 
 本机最终包已安装到API36，实际UI完成申请/审批/履约、服务断开后的进程重启和三个标签缓存查看，恢复连接自动更新价格120→140；原兑现价格120、余额180/冻结0以及4条账本ID不变。报告 `build/local_economy_results/walkthrough-20261106.json`，详见[场景与边界](OFFLINE_ECONOMY.md)。首次/断网启动仍有timeout，之后页面可用；普通包本轮未安装，不作性能或真机达标结论。
 
@@ -226,7 +234,7 @@
 
 连续构建发现并修复PowerShell恢复未设置环境变量时生成空字符串的问题，空`FLUTTER_STORAGE_BASE_URL`会使第二次构建错误使用相对Maven路径。现在显式移除原本不存在的进程变量；同一进程本机/普通两次构建成功，变量恢复值检查通过。最终本机构建10.6秒（增量，首次边距构建33.2秒）、普通32.5秒。失败日志保留，不改变系统PATH或用户配置。
 
-构建日志：`tmp/review-record-local-build-restored-env.log`、`tmp/review-record-ordinary-build-restored-env.log`；签名日志：`tmp/review-record-local-signature-final.log`、`tmp/review-record-ordinary-signature-final.log`。下方保留历史产物，摘要不对应当前文件。华为鸿蒙4.2/iPhone、iOS编译签名、云端及性能仍待验收。
+构建日志：`tmp/review-record-local-build-restored-env.log`、`tmp/review-record-ordinary-build-restored-env.log`；签名日志：`tmp/review-record-local-signature-final.log`、`tmp/review-record-ordinary-signature-final.log`。下方保留历史产物，摘要不对应当前文件。Android 和 iPhone、iOS编译签名、云端及性能仍待验收。
 
 ## 2026-11-05 离线复习联调修复
 
@@ -252,13 +260,13 @@
 
 两个产物均检查三ABI加密库、字体/着色器、原App入口及测试类排除，v2签名通过，同目录提供各自的 `.sha256`。普通构建60.7秒，本机最终构建49.8秒；本机构建脚本备份并恢复普通产物，恢复后的摘要已复核。编译后的网络配置只对debug的127.0.0.1允许HTTP；显式本机配置的profile和release构建都已实际拒绝。迁移当前为001–065（共67份），正式环境需要按序部署及配置Auth模板。
 
-本轮完整UI流程使用本机包摘要 `b1655cea3acaad1c4bb109e1f36b2cf97739330715537e482ff3767338892bda`，随后仅更新为稳定的本机匿名构建配置，生成表中最终包；最终包另行安装验证登录。联调工具运行时才可使用在线业务，服务重启后为新的空数据库；同一匿名配置可复用，不代表旧家庭数据被保留。真实华为鸿蒙4.2/iPhone、iOS构建与生产性能仍待验收。
+本轮完整UI流程使用本机包摘要 `b1655cea3acaad1c4bb109e1f36b2cf97739330715537e482ff3767338892bda`，随后仅更新为稳定的本机匿名构建配置，生成表中最终包；最终包另行安装验证登录。联调工具运行时才可使用在线业务，服务重启后为新的空数据库；同一匿名配置可复用，不代表旧家庭数据被保留。真实 Android 和 iPhone、iOS构建与生产性能仍待验收。
 
 以下保留此前构建记录，历史摘要不代表当前产物。
 
 ## 家庭时区版本历史
 
-2026-11-05最新重建：包含[家庭时区设置](FAMILY_TIMEZONE.md)，管理员修改、生成串行/去重、审计及本机缓存/提醒更新已接通。完整714项Flutter、375组数据库、静态分析及252个Dart文件格式通过，核心覆盖率90.47%。后端需迁移001–064；此前作答把握、计划奖励表单、自动完成、阶段奖励、家长确认、多图校对、离线同步和Android10诊断保留。目标为华为鸿蒙4.2和iPhone；iPhone仍需macOS构建、签名及真机验收。
+2026-11-05最新重建：包含[家庭时区设置](FAMILY_TIMEZONE.md)，管理员修改、生成串行/去重、审计及本机缓存/提醒更新已接通。完整714项Flutter、375组数据库、静态分析及252个Dart文件格式通过，核心覆盖率90.47%。后端需迁移001–064；此前作答把握、计划奖励表单、自动完成、阶段奖励、家长确认、多图校对、离线同步和Android10诊断保留。目标为 Android 和 iPhone；iPhone仍需macOS构建、签名及真机验收。
 
 ## 已验证产物（2026-11-05）
 
@@ -267,8 +275,8 @@
 - API：最低24，目标/编译36；ABI：arm64-v8a、armeabi-v7a、x86_64。
 - APK SHA-256：`8a228019a77890871f776af5f4564fdbb8c1ffbc14ea694f3418395b51099676`；同目录提供 `.sha256` 文件。
 - `apksigner verify --verbose --print-certs` 通过，使用 Android Debug 证书和 v2 签名。AAPT2 核对启动入口、权限和备份配置；ZIP 检查确认 Dart 调试内核、三个 ABI 的 `libsqlite3mc.so` 和两个着色器均已打包；前次构建还核对了相同原生库的 arm64 加密接口符号。
-- 合并清单包含联网、网络状态、通知、开机提醒、震动及应用内部/HMS广播权限；`allowBackup=false`，配置云备份和设备迁移排除规则。`TaskAlarmReceiver`、`TaskAlarmBootReceiver`和`ParentPushService`不导出，旧插件定时接收器已移除；HMS自动初始化关闭，App ID留空。实际厂商系统行为仍需设备验证。
-- 用户明确选择先完成本地调试包：本包未配置Supabase，启动入口仍为“调试版本尚未连接服务”，不能登录或执行在线业务。本轮完成构建、内容、签名与清单检查，新增页面由实际Widget测试和中文截图验证；本轮未重新安装模拟器，没有华为或iPhone真机结果。
+- 合并清单包含联网、网络状态、通知、开机提醒、震动及应用内部广播权限；`allowBackup=false`，配置云备份和设备迁移排除规则。`TaskAlarmReceiver`和`TaskAlarmBootReceiver`不导出，旧插件定时接收器已移除。实际厂商系统行为仍需设备验证。
+- 用户明确选择先完成本地调试包：本包未配置Supabase，启动入口仍为“调试版本尚未连接服务”，不能登录或执行在线业务。本轮完成构建、内容、签名与清单检查，新增页面由实际Widget测试和中文截图验证；本轮未重新安装模拟器，没有 Android 和 iPhone 真机结果。
 
 本轮构建耗时27.3秒；714项Flutter、375组数据库、核心覆盖率6300/6964（90.47%，105个文件）、完整分析、252个Dart文件格式及补丁检查通过。原生实现未改，34项JVM、6条Android应用场景/额外重启及1条ANR跨进程场景沿用历史记录。最终APK资源、三种ABI加密库、生产初始化和入口、备份限制、v2签名均核对；脚本排除测试Dart入口及LegacyAnrFixtureActivity等故障触发类。构建/签名/清单日志为tmp/android-build-latest.log、tmp/android-apk-signature-latest.log、tmp/android-apk-badging-latest.log与tmp/android-apk-manifest-latest.log。
 
@@ -330,7 +338,7 @@ pwsh -File .\scripts\build_android.ps1 -NoPub -DartDefinesFile D:\private\learni
 
 定义文件提供 `APP_ENV`、`SUPABASE_URL` 和客户端公开的 `SUPABASE_ANON_KEY`；不要放入 service_role、模型或其他服务端密钥。未提供后端配置的包会显示配置提示，不能完成登录或在线业务。
 
-准备远程推送联调时，另提供`PARENT_REMOTE_PUSH=true`、公开的`HUAWEI_APP_ID`与`HUAWEI_PROJECT_ID`；须先完成AppGallery Connect包名/签名和服务端配置。当前交付包没有这些配置，不请求Token。不放入HMS app secret或APNs私钥，配置范围见远程通知文档。
+家长远程通知使用 iPhone 的 APNs 通道，配置方式见[远程通知](PARENT_REMOTE_PUSH.md)。Android 任务提醒使用本地闹钟。
 
 默认产物为 `build/app/outputs/flutter-apk/app-debug.apk`。这是本机调试签名的安装包；正式发布签名、商店分发及云端部署均未完成。
 

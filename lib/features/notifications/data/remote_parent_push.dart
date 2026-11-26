@@ -52,10 +52,7 @@ Future<String> beginIosPushClockSample(
 class MethodChannelParentPush implements ParentPushNative {
   const MethodChannelParentPush();
   static const channel = MethodChannel('learning_planet/parent_push');
-  bool get _supported =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS);
+  bool get _supported => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
   @override
   Future<Map<String, dynamic>> availability() async => !_supported
       ? {}
@@ -125,7 +122,20 @@ class RemoteParentPush extends ChangeNotifier {
     required this.accountId,
     required this.privacyGeneration,
     this.configured = false,
-  }) : storageKey = 'parent-push-v1:${sha256.convert(utf8.encode(backendUrl))}';
+  }) : storageKey = _storageKey(backendUrl);
+
+  static String _storageKey(String backendUrl) =>
+      'parent-push-v1:${sha256.convert(utf8.encode(backendUrl))}';
+
+  /// Android upgrades no longer need their encrypted registration capability.
+  static Future<void> clearRetiredRegistration(
+    DeviceSecrets secrets,
+    String backendUrl,
+  ) async {
+    final key = _storageKey(backendUrl);
+    if (await secrets.read(key) != null) await secrets.delete(key);
+  }
+
   final ParentPushNative native;
   final ParentPushRemote remote;
   final DeviceSecrets secrets;
@@ -180,7 +190,7 @@ class RemoteParentPush extends ChangeNotifier {
               row['native_revision'] is! int ||
               row['nonce'] is! String ||
               !Uuid.isValidUUID(fromString: row['nonce'] as String) ||
-              !{'hms', 'apns'}.contains(row['transport']))) {
+              row['transport'] != 'apns')) {
         throw const FormatException();
       }
       return row;
@@ -368,7 +378,7 @@ class RemoteParentPush extends ChangeNotifier {
       final available = await native.availability();
       if (available['configured'] != true ||
           available['available'] != true ||
-          !{'hms', 'apns'}.contains(available['transport'])) {
+          available['transport'] != 'apns') {
         throw StateError('当前版本或设备尚不支持后台提醒。');
       }
       if (!current()) throw StateError('后台提醒授权已变化。');
@@ -401,9 +411,7 @@ class RemoteParentPush extends ChangeNotifier {
       final token = await native.token(revision);
       if (token == null || token.isEmpty) throw StateError('暂未取得后台提醒授权，请重试。');
       if (!current()) throw StateError('后台提醒授权已变化。');
-      final sample = row['transport'] == 'apns'
-          ? await native.beginClockSample(revision)
-          : null;
+      final sample = await native.beginClockSample(revision);
       if (!current()) throw StateError('后台提醒授权已变化。');
       final watch = Stopwatch()..start();
       final enabled = await remote.call('activate_parent_push_device', {
@@ -454,7 +462,7 @@ class RemoteParentPush extends ChangeNotifier {
     Map<String, dynamic> reply,
     ParentNotificationSettings settings,
     Stopwatch watch,
-    String? sample,
+    String sample,
   ) async {
     final now = DateTime.parse(reply['server_time'] as String).toUtc();
     final expires = DateTime.parse(reply['expires_at'] as String).toUtc();
@@ -468,10 +476,7 @@ class RemoteParentPush extends ChangeNotifier {
       'scope_nonce': reply['scope_nonce'],
       'server_ms': now.millisecondsSinceEpoch,
       'expires_ms': expires.millisecondsSinceEpoch,
-      if (sample == null)
-        'rtt_ms': watch.elapsedMilliseconds
-      else
-        'clock_sample': sample,
+      'clock_sample': sample,
       'settings_version': settings.version,
     });
   }
@@ -506,9 +511,7 @@ class RemoteParentPush extends ChangeNotifier {
       if (revision == null || !current()) return;
       final token = await native.token(revision);
       if (token == null || !current()) return;
-      final sample = row['transport'] == 'apns'
-          ? await native.beginClockSample(revision)
-          : null;
+      final sample = await native.beginClockSample(revision);
       if (!current()) return;
       final watch = Stopwatch()..start();
       final reply = await remote.call('renew_parent_push_device', {

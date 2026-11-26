@@ -50,6 +50,6 @@ $nodeBinary = 'C:/Users/qiuya/.cache/codex-runtimes/codex-primary-runtime/depend
 - 两个APK已重建并检查内容与v2签名，摘要见[Android构建](ANDROID_BUILD.md)。SQL和原生代码未改，本轮未重复执行382组SQL、34项JVM及独立Auth/Storage套件。
 - 早期输入脚本未等待焦点、清空失败，导致合成邮箱输入不正确；工具现核对焦点与实际文字。首轮夹具误用pending状态断言，已改为项目实际ready状态，未放宽业务断言。
 - debug模拟器有启动timeout样本；两次有效冷启动为10171ms和9475ms，不能作为真机性能达标证据。详细日志为 `tmp/local-review-offline-restart.log`、`tmp/local-review-final-startup.log` 和 `tmp/local-review-online-restart.log`。
-- 本轮断网方式是移除ADB端口转发，未替代飞行模式、弱网、真实网络切换或系统后台恢复。华为鸿蒙4.2/iPhone、iOS构建、双设备、真实相机/OCR、跨1/3/7/30天复测、云端服务和家庭试用仍待验收。
+- 本轮断网方式是移除ADB端口转发，未替代飞行模式、弱网、真实网络切换或系统后台恢复。Android 和 iPhone 真机、iOS构建、双设备、真实相机/OCR、跨1/3/7/30天复测、云端服务和家庭试用仍待验收。
 
 回归失败与修复后日志：`tmp/review-sync-refresh-before.log`、`tmp/review-sync-refresh-after.log`、`tmp/review-sync-center-before.log`、`tmp/review-sync-center-after.log`；最终完整测试和分析分别为 `tmp/local-review-full-tests-final.log`、`tmp/local-review-analyze-final.log`。

@@ -84,7 +84,7 @@ void main() {
         'completed': false,
         'qualifies_for_prd_acceptance': false,
         'scope':
-            'Native gallery multi-selection/cancel and encrypted drafts; excludes camera, process-death recovery, Huawei and iPhone acceptance.',
+            'Native gallery multi-selection/cancel and encrypted drafts; excludes camera, process-death recovery, physical-device acceptance.',
       };
       binding.reportData = report;
       try {

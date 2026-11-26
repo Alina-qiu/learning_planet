@@ -52,4 +52,4 @@ CI的storage-integration作业在原5项图片测试后缓存/检查Edge依赖�
 
 测试开发中的空档案参数、void RPC的204、注销预览scope层级及未先处理依赖清理任务问题已修正；相应失败日志位于 `tmp/privacy-fixture-*-failure.log`，不将它们归因于应用缺陷。真正的服务兼容性缺陷是前述HEAD400验证。
 
-本套件未覆盖真实云端网关/HTTPS、线上Cron及24小时期限、云备份、多设备离线缓存、系统临时文件、华为鸿蒙4.2/iPhone与iOS构建。PDF实际生成、过期及源题关联文件清理已由后续[PDF集成](PDF_INTEGRATION.md)补充；普通APK仍未配置Supabase。
+本套件未覆盖真实云端网关/HTTPS、线上Cron及24小时期限、云备份、多设备离线缓存、系统临时文件、Android 和 iPhone 与iOS构建。PDF实际生成、过期及源题关联文件清理已由后续[PDF集成](PDF_INTEGRATION.md)补充；普通APK仍未配置Supabase。

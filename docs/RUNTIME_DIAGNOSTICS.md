@@ -76,7 +76,7 @@ Android10前台ANR使用[ActivityManager.getProcessesInErrorState](https://devel
 
 新scope、重新进入前台（含两次轮询之间的短暂切换）、时钟回拨及调试边界后，先观察正常状态才能接收新的ANR。一次连续异常保留同一时间/PID身份，重复查询、读取和确认不会重复加入队列；查询失败不会把同一次异常重新计数。范围解绑、持久化失败或尚未观察健康状态时不归属新事件。只复用既有androidAnr类别、原子日志和确认协议，不需要新的数据库迁移。
 
-这条路径记录的是系统状态被观察到的日期，而不是精确发生时间、持续时间或退出时间。后台/无绑定/调试、进程先被结束、系统接口拒绝、工作线程被暂停或持久化失败均可能漏记；恢复读取可重新绑定，但不能恢复未落盘的观察。Android10的C/C++信号仍未覆盖。API30以上继续使用系统退出历史，华为鸿蒙4.2上的实际行为另需验收。
+这条路径记录的是系统状态被观察到的日期，而不是精确发生时间、持续时间或退出时间。后台/无绑定/调试、进程先被结束、系统接口拒绝、工作线程被暂停或持久化失败均可能漏记；恢复读取可重新绑定，但不能恢复未落盘的观察。Android10的C/C++信号仍未覆盖。API30以上继续使用系统退出历史，Android上的实际行为另需验收。
 
 `test/runtime_diagnostics_test.dart` 的13项测试覆盖固定字段、真实 Supabase 客户端HTTP传输、流错误/取消/暂停恢复、重复/缺失回执、退避、并发新增事件、账号与隐私边界、磁盘关闭重开、损坏缓存、容量/过期、业务同步接入及运行错误/生命周期处理。
 
@@ -102,7 +102,7 @@ pwsh -File scripts/test_android_legacy_crash.ps1 -UseChinaMirror
 
 2026-11-05全流程已在AOSP API29 x86_64、WHPX/SwiftShader通过，报告运行编号`2f29cef9-6fac-4e5c-a58f-4275c059401a`：两个实际退出进程为4137/4230，系统关闭对话框处理1次，三个阶段全部完成。首轮因等待系统关闭对话框而中断的日志保留为`tmp/android-native-crash-dialog-wait.log`，未将其记为完整通过。
 
-同次模拟器日志发现Impeller/GLES着色器链接报告`Fragment shader active uniforms exceed GL_MAX_FRAGMENT_UNIFORM_VECTORS (261)`；诊断数据断言通过不等于图形兼容性通过。该错误尚未定位到真实手机或应用绘制内容，保留原渲染配置继续调查，不以关闭功能让结果看似达标。Android10的完整界面、性能及华为鸿蒙4.2/iPhone验收仍未完成。
+同次模拟器日志发现Impeller/GLES着色器链接报告`Fragment shader active uniforms exceed GL_MAX_FRAGMENT_UNIFORM_VECTORS (261)`；诊断数据断言通过不等于图形兼容性通过。该错误尚未定位到真实手机或应用绘制内容，保留原渲染配置继续调查，不以关闭功能让结果看似达标。Android10的完整界面、性能及 Android 和 iPhone 验收仍未完成。
 
 ### Android10前台ANR的真实故障验证
 
@@ -116,7 +116,7 @@ pwsh -File scripts/test_android_legacy_anr.ps1 -UseChinaMirror
 
 2026-11-05在AOSP API29 x86_64、WHPX/SwiftShader通过，运行编号e98bf8e9-52a0-41ca-88e2-d497907a9f6c，两个进程3784/3953，系统确认1次ANR、两阶段完成。报告build/integration_results/native-anr-android29.json及同编号capture/verify.json仅为合成测试数据。此前注册Instrumentation的两次尝试没有完成全流程，失败日志保留且不计通过；最终脚本不注册测试runner。
 
-这是1条原生适配器跨进程场景，不是Flutter界面、图形性能、华为鸿蒙4.2或iPhone验收；既有6条Android应用场景及重启证据另计。当前无真实Supabase，普通包未登录时也不会绑定账号诊断范围。测试包结束后必须重建普通调试APK，不能交付故障测试安装。
+这是1条原生适配器跨进程场景，不是Flutter界面、图形性能、Android 和 iPhone 验收；既有6条Android应用场景及重启证据另计。当前无真实Supabase，普通包未登录时也不会绑定账号诊断范围。测试包结束后必须重建普通调试APK，不能交付故障测试安装。
 
 ## iOS诊断日志的原生策略检查
 

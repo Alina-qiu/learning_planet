@@ -7,7 +7,7 @@ const outcomes=new Set(['accepted','retry','rejected','invalid_token']);
 
 export function validParentPush(value,now=Date.now()) {
   const d=value?.data;
-  if(value?.status!=='authorized' || !['hms','apns','gateway'].includes(value.transport) ||
+  if(value?.status!=='authorized' || !['apns','gateway'].includes(value.transport) ||
     typeof value.registration_token!=='string' || !/^[!-~]{1,4096}$/.test(value.registration_token) ||
     (value.transport==='apns' && !/^[0-9a-f]{64}$/.test(value.registration_token)) ||
     !d || typeof d!=='object' || Array.isArray(d) || Object.keys(d).sort().join(',')!==fields.join(',') ||
@@ -45,48 +45,9 @@ export function createParentPushTransports(env,{fetcher=fetch,now=Date.now,crypt
       return await consume(response);
     } finally {clearTimeout(timer);}
   }
-  const post=(url,body,headers,consume)=>request(url,{method:'POST',headers,body},consume);
-  const jsonPost=(url,body,headers,consume)=>post(url,JSON.stringify(body),{'Content-Type':'application/json',...headers},consume);
-  const hmsId=env('PARENT_PUSH_HMS_APP_ID'),hmsSecret=env('PARENT_PUSH_HMS_APP_SECRET');
-  if(hmsId || hmsSecret) {
-    if(!/^[0-9]{5,30}$/.test(hmsId??'') || typeof hmsSecret!=='string' || hmsSecret.length<16 || hmsSecret.length>4096) throw new Error('PUSH_CONFIG_INVALID');
-    let cached=null,pending=null;
-    async function hmsToken() {
-      if(cached && now()>=cached.issued && now()<cached.until) return cached.token;
-      if(pending) return pending;
-      pending=post('https://oauth-login.cloud.huawei.com/oauth2/v3/token',new URLSearchParams({
-        grant_type:'client_credentials',client_id:hmsId,client_secret:hmsSecret,
-      }).toString(),{'Content-Type':'application/x-www-form-urlencoded'},async response=>{
-        if(!response.ok) {await response.body?.cancel();throw new Error('PUSH_AUTH_UNAVAILABLE');}
-        const value=await readJson(response);
-        if(typeof value.access_token!=='string' || !/^[!-~]{1,8192}$/.test(value.access_token) ||
-          !Number.isFinite(value.expires_in) || value.expires_in<60 || value.expires_in>86400) throw new Error('PUSH_AUTH_INVALID');
-        cached={token:value.access_token,issued:now(),until:now()+(value.expires_in-30)*1000};return cached.token;
-      });
-      try {return await pending;} finally {pending=null;}
-    }
-    transports.hms=async value=>{
-      try {
-        const access=await hmsToken();
-        if(!validParentPush(value,now())) return 'rejected';
-        return await jsonPost(`https://push-api.cloud.huawei.com/v1/${hmsId}/messages:send`,{
-          validate_only:false,message:{token:[value.registration_token],data:JSON.stringify(value.data),
-            android:{urgency:'HIGH',ttl:'0s',collapse_key:value.data.kind==='redemption'?1:2}},
-        },{Authorization:`Bearer ${access}`},async response=>{
-          if(response.status===401 || response.status===403) cached=null;
-          if(!response.ok) {await response.body?.cancel();return response.status===429 || response.status>=500 || response.status===401 || response.status===403?'retry':'rejected';}
-          const result=await readJson(response);
-          if(result.code==='80000000') return 'accepted';
-          if(result.code==='80300007') return 'invalid_token';
-          if(['80200001','80200003'].includes(result.code)) {cached=null;return 'retry';}
-          if(result.code==='81000001') return 'retry';
-          // Includes partial success: this worker sends exactly one endpoint and
-          // never treats an unknown or partial response as confirmed acceptance.
-          return 'rejected';
-        });
-      } catch {return 'retry';}
-    };
-  }
+  const jsonPost=(url,body,headers,consume)=>request(url,{
+    method:'POST',body:JSON.stringify(body),headers:{'Content-Type':'application/json',...headers},
+  },consume);
   const apns=createApnsPushTransport(env,{prefix:'PARENT_PUSH',validate:validParentPush,
     collapse:data=>`parent-${data.kind}`,fetcher,now,cryptoApi,timeoutMs});
   if(apns) transports.apns=apns;
@@ -108,7 +69,7 @@ export function createParentPushTransports(env,{fetcher=fetch,now=Date.now,crypt
 }
 
 export async function drainParentPush(rpc,transports,{now=Date.now}={}) {
-  const configured=Object.keys(transports).filter(key=>['hms','apns','gateway'].includes(key) && typeof transports[key]==='function');
+  const configured=Object.keys(transports).filter(key=>['apns','gateway'].includes(key) && typeof transports[key]==='function');
   if(configured.length===0) throw new Error('PUSH_NOT_CONFIGURED');
   const call=async(name,args={})=>{const result=await rpc(name,args);if(result.error) throw new Error('PUSH_RPC_FAILED');return result.data;};
   await call('enqueue_parent_push_jobs');

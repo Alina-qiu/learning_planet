@@ -100,4 +100,4 @@ flutter drive --no-pub --debug --driver=test_driver/task_flow_driver.dart --targ
 - 报告：`build/ios_preparation/source-checks.json`明确记录`ios_built: false`；日志为`tmp/ios-preparation-checks.log`、`tmp/ios-ci-source-check.log`。工作流YAML解析通过。
 - 本轮不修改Swift运行逻辑、Dart、SQL或Android资源，既有778项Flutter、387组SQL、34项JVM及90.94%覆盖率为历史结果，没有重复计为本轮执行。
 
-Xcode未签名编译已经通过；接下来仍需签名与iPhone上的相机/中文OCR、多图中断恢复、Keychain/加密库/锁屏、退出清理、推送与静默时段、MetricKit回调、离线同步、打印分享和性能验收。Android鸿蒙4.2、云端部署与真实家庭试用同样仍未完成，完整进度见[开发进度](PROGRESS.md)。
+Xcode未签名编译已经通过；接下来仍需签名与iPhone上的相机/中文OCR、多图中断恢复、Keychain/加密库/锁屏、退出清理、推送与静默时段、MetricKit回调、离线同步、打印分享和性能验收。Android真机、云端部署与真实家庭试用同样仍未完成，完整进度见[开发进度](PROGRESS.md)。

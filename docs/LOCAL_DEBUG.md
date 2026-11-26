@@ -1,12 +1,12 @@
 # Android 本机联调
 
-本机后端包含截至 073 的 75 份业务迁移。迁移 073 在创建当日复习任务前锁定入选题目和家长确认的答案，避免并发归档留下空任务。启动临时服务会加载全部迁移并创建空的测试数据库。[调试包与验证范围](ANDROID_BUILD.md) · [iPhone 提醒](TASK_REMOTE_PUSH.md)
+本机后端包含截至 074 的 76 份业务迁移。启动临时服务会加载全部迁移并创建空的测试数据库。074 会关闭已停用通道的注册，将尚待送达的家长消息交回队列。同一账号在该家庭仍有已启用的 iPhone 时，可以继续接收。2026-11-26 已通过 411 项数据库检查及覆盖 7 个历史节点的 18 项升级检查。[全库检查](../build/acceptance-20261126/database-checks.log) · [升级记录](../build/acceptance-20261126/database-upgrade.json) · [调试包与验证范围](ANDROID_BUILD.md)
 
 2026-11-06完成[实际App自动同步时限验证](AUTO_SYNC_DEVICE.md)：本机APK的前台断网恢复及离线强制结束/重开后恢复，均在30秒内自动发出同步请求，奖励和账本未重复。新增可选54322回环探针；普通联调仍将设备54321转发到电脑54321。探针、后端与模拟器已在验证结束后关闭。
 
 2026-11-06修复[登录与家庭加载恢复](ENTRY_RECOVERY.md)：临时服务重启导致旧账号不可用时，App显示中文恢复提示；可重试，或退出后收取新服务中的验证码。最终本机APK已在API36实际完成错误页、双倍字号、重试、退出和重新登录。服务每次启动仍是空数据库，不恢复上次临时家庭；最新包见[构建记录](ANDROID_BUILD.md)。
 
-2026-11-06最终本机APK完成[家长调账明细实际界面验证](WALLET_ADJUSTMENT_DETAILS.md)：孩子账本、真实PIN后原始说明、家庭时区、双倍字号及退出家长模式后的限制通过，余额与账本ID不变。当前后端包含迁移001–066（共68份），最新安装包摘要见[构建说明](ANDROID_BUILD.md)。验证后服务与模拟器已关闭；启动性能及华为鸿蒙4.2/iPhone仍待验收。
+2026-11-06最终本机APK完成[家长调账明细实际界面验证](WALLET_ADJUSTMENT_DETAILS.md)：孩子账本、真实PIN后原始说明、家庭时区、双倍字号及退出家长模式后的限制通过，余额与账本ID不变。当前后端包含迁移001–066（共68份），最新安装包摘要见[构建说明](ANDROID_BUILD.md)。验证后服务与模拟器已关闭；启动性能及 Android 和 iPhone 仍待验收。
 
 2026-11-06完成[离线奖励页实际APK联调](OFFLINE_ECONOMY.md)：API36申请、审批、履约、服务断开/进程重启、三个标签缓存及恢复连接自动刷新通过，账本ID不变。Edge冷启动也改用最多60秒的OPTIONS/204就绪检查并记录耗时；Storage首次超时及第二次Edge超时保留在验证记录中。更新安装包及启动性能限制见[构建说明](ANDROID_BUILD.md)。本轮临时服务与专用模拟器在验证后关闭，重新使用需按下文启动。
 
@@ -43,7 +43,7 @@ $env:ANDROID_AVD_HOME = 'D:/learning-planet-tools/avd'
 & D:/learning-planet-tools/android-sdk/emulator/emulator.exe -avd learning_planet_api36 -port 5580
 ```
 
-保持服务和模拟器运行，在项目目录另开终端，查看设备序号并安装。使用开启 USB 调试的华为手机时，把下面的模拟器序号换成手机的序号。
+保持服务和模拟器运行，在项目目录另开终端，查看设备序号并安装。使用开启 USB 调试的Android 手机时，把下面的模拟器序号换成手机的序号。
 
 ```powershell
 & D:/learning-planet-tools/android-sdk/platform-tools/adb.exe devices -l
@@ -74,7 +74,7 @@ $env:ANDROID_AVD_HOME = 'D:/learning-planet-tools/avd'
 
 AppConfig只在显式 `LOCAL_BACKEND=true`、development、debug时接受带端口的 `http://127.0.0.1` 源地址；其他环境继续要求HTTPS。本机模式拒绝外部/LAN地址、URL中的账号密码、路径、查询和片段。Gradle拒绝本机模式的profile/release构建。Android只在debug资源中为127.0.0.1配置HTTP例外，依据[Android网络安全配置](https://developer.android.com/privacy-and-security/security-config)，没有关闭其他主机的HTTPS要求。
 
-服务复用真实Auth、PostgREST、Storage、PG15.19及MinIO；原Deno入口提供PDF生成、永久清理和注销。每分钟运行任务、复习、奖励、导出维护及这三个worker的drain；它是本机调度，不是托管Cron。模型、外部邮件、HMS/APNs和Realtime服务未配置。
+服务复用真实Auth、PostgREST、Storage、PG15.19及MinIO；原Deno入口提供PDF生成、永久清理和注销。每分钟运行任务、复习、奖励、导出维护及这三个worker的drain；它是本机调度，不是托管Cron。模型、外部邮件、APNs和Realtime服务未配置。
 
 实际操作发现任务配置页的保存按钮进入系统导航区域：修复前按钮底边2348px，系统导航栏从2274px开始，点击中心会触发Home。ScheduleEditor增加SafeArea后，底边变为2222px，保存成功并创建了真实任务。新增测试在360×800逻辑尺寸、48px导航留白和键盘场景下核对按钮可见范围及保存结果；修复前无键盘场景实际失败（780超过752），修复后通过。
 
@@ -90,4 +90,4 @@ AppConfig只在显式 `LOCAL_BACKEND=true`、development、debug时接受带端�
 
 结构化记录位于 `build/local_debug_results/`：`ui-flow.json`保存完整任务流程，`backend-lifecycle.json`保存服务重启核对，`final-apk-smoke.json`保存最终安装包登录核对。日志为 `tmp/local-debug-full-tests.log`、`tmp/local-debug-analyze.log`、`tmp/auth-local-debug-regression.log`、`tmp/schedule-safe-area-before.log` 及构建日志。修复前后和完成任务后的截图为 `tmp/local-debug-task-form-bottom.png`、`tmp/local-debug-task-form-fixed.png`、`tmp/local-debug-completed-home.png`、`tmp/local-debug-restored-home.png`。最早的测试滚动夹具未找到按钮，已修正后复现真实边距失败；启动中的UI层级读取也改为拒绝使用旧文件。
 
-本轮仅在API36模拟器验证；华为鸿蒙4.2、iPhone、iOS构建/签名、两台真实设备同步、云端部署和连续家庭试用仍未完成。iPhone不能安装APK，需在Mac环境继续构建与验收。
+本轮仅在API36模拟器验证；Android 和 iPhone、iOS构建/签名、两台真实设备同步、云端部署和连续家庭试用仍未完成。iPhone不能安装APK，需在Mac环境继续构建与验收。

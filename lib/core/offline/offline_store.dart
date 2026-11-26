@@ -99,18 +99,90 @@ class OfflineStore extends GeneratedDatabase {
     String? familyId,
     String? childId,
   }) async {
-    final rows = await customSelect(
-      'SELECT family_id,child_ids FROM family_access WHERE owner=? AND active=0',
+    final row = await customSelect(
+      """
+      SELECT 1 FROM family_access a WHERE owner=?1 AND active=0 AND
+        (family_id=?2 OR EXISTS (SELECT 1 FROM json_each(a.child_ids) WHERE value=?3))
+      UNION ALL SELECT 1 FROM offline_cache WHERE owner=?1 AND
+        cache_key IN ('directory-hidden:family:' || ?2, 'directory-hidden:child:' || ?3)
+      LIMIT 1
+      """,
+      variables: [
+        Variable(owner),
+        Variable<String>(familyId),
+        Variable<String>(childId),
+      ],
+    ).getSingleOrNull();
+    return row != null;
+  }
+
+  /// Only a fully paginated directory may narrow a cached scope. Keep the
+  /// markers account-specific, since absence is not a global deletion notice.
+  Future<void> restrictDirectoryAccess(
+    String owner,
+    Map<String, Set<String>> visible,
+  ) => transaction(() async {
+    final cached = await read(owner, 'families');
+    if (cached == null) return;
+    final missing = <String, String>{};
+    for (final family in cached['items'] as List) {
+      final id = family['id'] as String;
+      final children = visible[id];
+      if (children == null) missing['directory-hidden:family:$id'] = id;
+      for (final child in family['children'] as List) {
+        final childId = child['id'] as String;
+        if (children?.contains(childId) != true) {
+          missing['directory-hidden:child:$childId'] = id;
+        }
+      }
+    }
+    if (missing.isEmpty) return;
+    await batch((batch) {
+      for (final entry in missing.entries) {
+        batch.customStatement(
+          'INSERT OR IGNORE INTO offline_cache(owner,cache_key,payload) VALUES(?,?,?)',
+          [
+            owner,
+            entry.key,
+            jsonEncode({'family_id': entry.value}),
+          ],
+        );
+      }
+    });
+    await write(owner, 'families', cached);
+    _directoryAccessChanged(owner);
+  });
+
+  /// Re-entry requires both membership and deletion checks to have succeeded.
+  Future<void> restoreDirectoryAccess(
+    String owner,
+    Map<String, Set<String>> visible,
+  ) => transaction(() async {
+    final hidden = await customSelect(
+      "SELECT cache_key FROM offline_cache WHERE owner=? AND cache_key GLOB 'directory-hidden:*'",
       variables: [Variable(owner)],
     ).get();
-    return rows.any(
-      (row) =>
-          row.read<String>('family_id') == familyId ||
-          childId != null &&
-              (jsonDecode(row.read<String>('child_ids')) as List).contains(
-                childId,
-              ),
-    );
+    if (hidden.isEmpty) return;
+    final allowed = <String>{
+      for (final entry in visible.entries) ...[
+        'directory-hidden:family:${entry.key}',
+        for (final child in entry.value) 'directory-hidden:child:$child',
+      ],
+    };
+    final restored = hidden
+        .map((row) => row.read<String>('cache_key'))
+        .where(allowed.contains);
+    if (restored.isEmpty) return;
+    for (final key in restored) {
+      await remove(owner, key);
+    }
+    _directoryAccessChanged(owner);
+  });
+
+  void _directoryAccessChanged(String owner) {
+    privacyGeneration++;
+    _familyAccessGenerations[owner] = familyAccessGeneration(owner) + 1;
+    _reviewGenerations[owner] = reviewGeneration(owner) + 1;
   }
 
   String? _cacheFamily(String key, Map<String, dynamic> data) {
@@ -157,6 +229,14 @@ class OfflineStore extends GeneratedDatabase {
       };
       final cached = await read(owner, 'families');
       if (revoked) {
+        // The visible directory may already have dropped this family before
+        // its authoritative, versioned revocation reached this device.
+        final prior = await customSelect(
+          "SELECT substr(cache_key,length('directory-hidden:child:')+1) id FROM offline_cache "
+          "WHERE owner=? AND cache_key GLOB 'directory-hidden:child:*' AND json_extract(payload,'\$.family_id')=?",
+          variables: [Variable(owner), Variable(state.familyId)],
+        ).get();
+        children.addAll(prior.map((row) => row.read<String>('id')));
         for (final family in cached?['items'] as List? ?? []) {
           if (family['id'] == state.familyId) {
             children.addAll(
@@ -382,25 +462,13 @@ class OfflineStore extends GeneratedDatabase {
     ]);
   });
 
-  Future<Map<String, dynamic>?> read(String owner, String key) =>
-      _readCache(owner, key, includeTasks: true);
-
-  /// The wallet, family time and cache checks only need snapshot metadata.
-  /// Strip the task array inside SQLite, before it crosses the isolate boundary.
-  Future<Map<String, dynamic>?> readTaskSummary(String owner, String childId) =>
-      _readCache(owner, 'tasks:$childId', includeTasks: false);
-
-  Future<Map<String, dynamic>?> _readCache(
-    String owner,
-    String key, {
-    required bool includeTasks,
-  }) async {
+  Future<Map<String, dynamic>?> read(String owner, String key) async {
+    if (key.startsWith('tasks:')) {
+      return _readTaskSnapshot(owner, key.substring(6), includeTasks: true);
+    }
     if (await accountDeletionJob(owner) != null) return null;
-    final projection = includeTasks
-        ? 'payload'
-        : "json_remove(payload, '\$.tasks') AS payload";
     final row = await customSelect(
-      'SELECT $projection FROM offline_cache WHERE owner=? AND cache_key=?',
+      'SELECT payload FROM offline_cache WHERE owner=? AND cache_key=?',
       variables: [Variable(owner), Variable(key)],
     ).getSingleOrNull();
     if (row == null) return null;
@@ -414,6 +482,42 @@ class OfflineStore extends GeneratedDatabase {
       return null;
     }
     return data;
+  }
+
+  Future<Map<String, dynamic>?> readTaskSummary(String owner, String childId) =>
+      _readTaskSnapshot(owner, childId, includeTasks: false);
+
+  // Read the cache and its access markers in the same SQLite snapshot. Home
+  // asks for the wallet, date and task list together on a process cold start.
+  Future<Map<String, dynamic>?> _readTaskSnapshot(
+    String owner,
+    String childId, {
+    required bool includeTasks,
+  }) async {
+    final projection = includeTasks
+        ? 'payload'
+        : r"json_remove(payload, '$.tasks')";
+    final row = await customSelect(
+      '''
+      SELECT $projection AS payload FROM offline_cache c
+      WHERE c.owner = ?1 AND c.cache_key = 'tasks:' || ?2
+        AND NOT EXISTS (SELECT 1 FROM deleted_accounts WHERE owner = ?1)
+        AND NOT EXISTS (SELECT 1 FROM deleted_children WHERE child_id = ?2)
+        AND NOT EXISTS (SELECT 1 FROM offline_cache h WHERE h.owner = ?1 AND h.cache_key IN
+          ('directory-hidden:child:' || ?2, 'directory-hidden:family:' ||
+            coalesce(json_extract(c.payload, '\$.family_id'), json_extract(c.payload, '\$.command.family_id'))))
+        AND NOT EXISTS (
+          SELECT 1 FROM family_access a WHERE a.owner = ?1 AND a.active = 0
+            AND (a.family_id = coalesce(json_extract(c.payload, '\$.family_id'),
+                                        json_extract(c.payload, '\$.command.family_id'))
+                 OR EXISTS (SELECT 1 FROM json_each(a.child_ids) WHERE value = ?2))
+        )
+      ''',
+      variables: [Variable(owner), Variable(childId)],
+    ).getSingleOrNull();
+    return row == null
+        ? null
+        : jsonDecode(row.read<String>('payload')) as Map<String, dynamic>;
   }
 
   /// A price/stock change can affect siblings too. Retire this account's
@@ -446,11 +550,20 @@ class OfflineStore extends GeneratedDatabase {
         }
         if (key == 'families') {
           final revoked = (await customSelect(
-            'SELECT family_id FROM family_access WHERE owner=? AND active=0',
+            """
+            SELECT family_id FROM family_access WHERE owner=?1 AND active=0
+            UNION ALL SELECT substr(cache_key,length('directory-hidden:family:')+1)
+              FROM offline_cache WHERE owner=?1 AND cache_key GLOB 'directory-hidden:family:*'
+            """,
             variables: [Variable(owner)],
           ).get()).map((row) => row.read<String>('family_id')).toSet();
           final deleted = (await customSelect(
-            'SELECT child_id FROM deleted_children',
+            """
+            SELECT child_id FROM deleted_children UNION ALL
+            SELECT substr(cache_key,length('directory-hidden:child:')+1)
+              FROM offline_cache WHERE owner=? AND cache_key GLOB 'directory-hidden:child:*'
+            """,
+            variables: [Variable(owner)],
           ).get()).map((row) => row.read<String>('child_id')).toSet();
           data = {
             ...data,
@@ -565,7 +678,10 @@ class OfflineStore extends GeneratedDatabase {
     String? childId,
   }) async {
     final rows = await customSelect(
-      'SELECT * FROM task_outbox WHERE owner=?${childId == null ? '' : ' AND child_id=?'} ORDER BY sequence',
+      """SELECT * FROM task_outbox q WHERE q.owner=?
+          AND NOT EXISTS (SELECT 1 FROM offline_cache h WHERE h.owner=q.owner
+            AND h.cache_key='directory-hidden:child:' || q.child_id)
+          ${childId == null ? '' : ' AND q.child_id=?'} ORDER BY sequence""",
       variables: [Variable(owner), if (childId != null) Variable(childId)],
     ).get();
     return [

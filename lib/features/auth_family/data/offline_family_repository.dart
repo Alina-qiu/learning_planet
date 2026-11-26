@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../../core/offline/network_failure.dart';
 import '../../../core/offline/offline_store.dart';
 import '../domain/family.dart';
@@ -28,7 +30,7 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
   final OfflineStore store;
   final String? Function() accountId;
   final FamilyAccessRepository? access;
-  int _configurationRevision = 0;
+  int _configurationRevision = 0, _readNumber = 0, _latestDirectory = 0;
   final _changingConfiguration = <String>{};
 
   Future<T> changeConfiguration<T>(
@@ -67,9 +69,11 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
     final owner = accountId();
     if (owner == null) throw StateError('请先登录');
     final configurationRevision = _configurationRevision;
+    final read = ++_readNumber;
     var generation = store.privacyGeneration;
     void check() {
       if (accountId() != owner) throw StateError('登录账号已变化');
+      if (read < _latestDirectory) throw StateError('家庭目录已刷新');
       if (configurationRevision != _configurationRevision ||
           _changingConfiguration.any((key) => key.startsWith('$owner:'))) {
         throw StateError('家庭设置已变化，请刷新');
@@ -88,18 +92,64 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
         const Duration(seconds: 10),
       );
       check();
-      await access?.refresh();
-      if (accountId() != owner) throw StateError('登录账号已变化');
-      generation = store.privacyGeneration;
-      final deleted = await loadDeletedChildIds().timeout(
-        const Duration(seconds: 10),
-      );
-      check();
-      for (final childId in deleted) {
-        await store.removeChildData(childId);
+      _latestDirectory = read;
+      final visible = {
+        for (final family in loaded)
+          family.id: family.children.map((child) => child.id).toSet(),
+      };
+      await store.transaction(() async {
+        check();
+        await store.restrictDirectoryAccess(owner, visible);
+        generation = store.privacyGeneration;
+        check();
+      });
+      // Both reads use the memberships after accepting invitations. Local
+      // revocations still take effect even if the tombstone request fails.
+      final membership = (access?.refresh() ?? Future<void>.value()).then((_) {
+        if (accountId() != owner) throw StateError('登录账号已变化');
+        generation = store.privacyGeneration;
+      });
+      Future<void> applyDeletions(List<String> ids) async {
+        check();
+        for (final childId in ids) {
+          await store.removeChildData(childId);
+        }
+        generation = store.privacyGeneration;
+        check();
       }
-      generation = store.privacyGeneration;
-      check();
+
+      late final List<String> deleted;
+      try {
+        final checks = await (
+          membership,
+          loadDeletedChildIds().timeout(const Duration(seconds: 10)),
+        ).wait;
+        deleted = checks.$2;
+      } on ParallelWaitError<
+        (void, List<String>?),
+        (AsyncError?, AsyncError?)
+      > catch (failure) {
+        if (failure.values.$2 case final observed?) {
+          // Even a partly offline launch must honor known deletions before
+          // considering a cached family.
+          await applyDeletions(observed);
+        }
+        final errors = [failure.errors.$1, failure.errors.$2].nonNulls;
+        // A server denial must never turn into offline access just because the
+        // other request happened to time out in the same interval.
+        final cause = errors.firstWhere(
+          (e) => !isNetworkFailure(e.error),
+          orElse: () => errors.first,
+        );
+        Error.throwWithStackTrace(cause.error, cause.stackTrace);
+      }
+      await applyDeletions(deleted);
+      await store.transaction(() async {
+        check();
+        await store.restoreDirectoryAccess(owner, visible);
+        generation = store.privacyGeneration;
+        check();
+      });
       final families = [
         for (final family in loaded)
           if (!await store.familyAccessRevoked(owner, familyId: family.id))

@@ -1,8 +1,32 @@
 # 启动、任务列表与本机完成反馈验证
 
-PRD第9节要求冷启动首页小于3秒、主列表首屏小于1.5秒、任务完成反馈小于500毫秒，以及适应系统字号、儿童正文不小于14sp。此前已改善首页和任务管理两个列表；本轮增加生产入口启动测量，其他列表仍需分别评估。
+根据 2026-11-26 更新的 PRD 第 9 节，首页需在冷启动后 6 秒内显示孩子、任务和余额。主要列表首屏 <1.5 秒，任务完成反馈 <500 毫秒。页面应适应系统字号，儿童正文不小于 14sp。
+
+## 2026-11-26 已登录家庭的完整首页
+
+**最终 Release 在 Android 10 模拟器上三次均达到 6 秒目标。** 三次强制停止并确认进程消失后，完整可操作首页分别在 2.334、2.409、2.111 秒时已经可见。该 APK 采用 x86_64 AOT 和本机测试签名，包含最终的家庭权限与注销回执修复。Android 和 iPhone 实机仍待测量。[本机验收索引](../build/acceptance-20261126/DELIVERY.md) · [最终包指纹](../build/acceptance-20261126/release-final-package.json)
+
+| 最终 Release | 系统首帧 | 同轮任务快照 HTTP 200 | 最后一张尚未完整的截图开始 | 第一张完整截图结束 |
+|---|---:|---:|---:|---:|
+| [第 1 次](../build/acceptance-20261126/release-F1.json) | 807 ms | 2,233.84 ms | 1,897.07 ms | 2,334.12 ms |
+| [第 2 次](../build/acceptance-20261126/release-F2.json) | 876 ms | 2,205.47 ms | 1,965.90 ms | 2,408.87 ms |
+| [第 3 次](../build/acceptance-20261126/release-F3.json) | 928 ms | 2,003.60 ms | 1,671.25 ms | 2,110.77 ms |
+
+同包另做了首页操作验证。点按“开始”后，界面显示“暂停”。服务端两项待开始任务中，被点按的一项进入进行中，另一项仍待开始。钱包余额与奖励流水保持原值。[首页操作回执](../build/acceptance-20261126/release-home-action.json)
+
+在 Android 10（API 29、x86_64、SwiftShader）模拟器上，从主机发出启动命令开始计时。每个样本先用同一测试账号在线打开家庭并确认任务快照，再强制停止应用，确认进程消失。普通入口恢复凭据并检查账号、家庭和孩子的访问范围。连续两张截图同时显示大厅标题、孩子昵称、已确认余额、当日任务及其操作按钮时，取第一张匹配截图的结束时间作为上界。昵称匹配允许头像加载后发生的位置变化。应用优先展示暖机时服务端已确认、仍可访问的加密快照，并在后台同步。[Profile C 首次观测](../build/acceptance-20261126/profile-C1.json) · [Release 连续采样](../build/acceptance-20261126/release-RC1.json)
+
+| 构建与环境 | 系统首帧 | 完整首页观测 |
+|---|---:|---|
+| Profile C，启动、家庭权限和任务缓存读取并行优化 | 4.895、4.120、3.944 秒 | 8.816–9.352、6.672–7.211、7.182–7.717 秒。首轮期间主机同时在编译。[第 1 次](../build/acceptance-20261126/profile-C1.json) · [第 2 次](../build/acceptance-20261126/profile-C2.json) · [第 3 次](../build/acceptance-20261126/profile-C3.json) |
+| Profile E，绑定就绪后即开始初始化，加入家庭目录收窄检查 | 6.205、10.500 秒 | 10.863–11.396、14.925–15.458 秒。两轮均与主机大型 Release 编译重叠。[第 1 次](../build/acceptance-20261126/profile-E1.json) · [第 2 次](../build/acceptance-20261126/profile-E2.json) |
+| Release C，相同 Flutter 代码、x86_64 AOT、开启 R8、本机测试签名 | 2.064、2.125 秒 | 连续采样在 4.587–5.126 秒间出现完整首页。第二次在 5.939 秒前首次截图即匹配。六秒定点采样只能给出上界。[构建指纹](../build/acceptance-20261126/release-c-package.json) · [连续采样](../build/acceptance-20261126/release-RC1.json) · [定点采样](../build/acceptance-20261126/release-RC2.json) |
+
+三组对照用于定位构建模式和主机负载对结果的影响。最终三次验收使用同一 Release APK，校验的 220 个构建输入涵盖 Flutter 源码、Android 配置及依赖清单。[Flutter 文件指纹](../build/acceptance-20261126/flutter-inputs.json) · [最终构建记录](../build/acceptance-20261126/release-final-package.json)
 
 ## 2026-11-24 已登录家庭的首页读取
+
+提交 `c861fbb` 在 Android 10 模拟器上冷启动一个在线家庭，孩子与钱包出现的中位观测区间为 11.565–12.246 秒，系统首帧为 4.945 秒。该轮未单独标记任务卡的出现时间。[六次交错冷启动记录](../build/acceptance-20261124-startup/online-profile-ab.json)
 
 | 测量对象 | 条件 | 结果 |
 |---|---|---|
@@ -54,7 +78,7 @@ pwsh -File scripts/measure_android_startup.ps1 -TraceStartup -UseChinaMirror
 - 本次`FlutterLocalNotificationsPlugin.initialize`区间约5.262ms墙钟/3.004ms线程CPU；`FlutterJNI.nativeSurfaceCreated`约1172.158ms墙钟/0.463ms线程CPU。前者不支持“通知插件初始化消耗1.5秒CPU”的判断，后者指向原生绘图表面创建期间的等待，尚未归因到指定硬件或具体引擎缺陷。本次系统首帧5732ms、Dart通知调用158.065ms；变化说明跟踪影响时序，不表示实现优化。
 - `flutter run --profile --no-pub --no-dds --trace-startup --use-application-binary=build/app/outputs/flutter-apk/app-profile.apk -d emulator-5580`保存另一轮引擎时间线：从引擎进入到首帧构建839.958ms、首帧光栅化2760.136ms。时间线包含程序快照读取435.245ms和首帧提交502.615ms等嵌套区间，不能相加或等同进程冷启动TTID。原始时间线可在Flutter/Perfetto工具中继续检查。
 
-本机证据位于`build/startup_results/method-trace-20261105/`和`build/startup_results/flutter-trace-20261105/`。该轮仍只验证无后端配置页；保留默认通知初始化与账号恢复前清理，后续应在华为鸿蒙4.2/iPhone及真实首页上继续定位。方法采样解释参照[Android方法跟踪说明](https://developer.android.com/studio/profile/traceview)和[ART记录格式实现](https://android.googlesource.com/platform/art/+/002aca7141e7baf488b02f330b307f059c47a84d/tools/dmtracedump/tracedump.cc)。
+本机证据位于`build/startup_results/method-trace-20261105/`和`build/startup_results/flutter-trace-20261105/`。该轮仍只验证无后端配置页；保留默认通知初始化与账号恢复前清理，后续应在 Android 和 iPhone 及真实首页上继续定位。方法采样解释参照[Android方法跟踪说明](https://developer.android.com/studio/profile/traceview)和[ART记录格式实现](https://android.googlesource.com/platform/art/+/002aca7141e7baf488b02f330b307f059c47a84d/tools/dmtracedump/tracedump.cc)。
 
 ## 实现
 
@@ -100,7 +124,7 @@ API29预置首页就绪1322.807ms、任务页244.973ms、本机完成反馈217.2
 
 ## 验收边界
 
-本机环境为Windows/WHPX、AOSP API36 x86_64、Emulator37.2.13、SwiftShader、4核/2GB模拟器；它不是华为鸿蒙4.2或iPhone。测试绕过生产初始化、真实登录和后端，所以JSON始终标记`qualifies_for_prd_acceptance=false`。
+本机环境为Windows/WHPX、AOSP API36 x86_64、Emulator37.2.13、SwiftShader、4核/2GB模拟器；它不是 Android 和 iPhone。测试绕过生产初始化、真实登录和后端，所以JSON始终标记`qualifies_for_prd_acceptance=false`。
 
 尚需在指定两类手机上，以profile模式分别测量正常冷启动、真实数据主列表、完成反馈、断网/恢复、后台/重启和大字号。iOS还需macOS/Xcode编译签名；模拟器上的KeyStore和加密库验证不能代替真机安全存储及备份验收。
 

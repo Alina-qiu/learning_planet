@@ -62,7 +62,7 @@ void main() {
       ),
       'qualifies_for_prd_acceptance': false,
       'scope':
-          'Real bundled ML Kit recognition; excludes camera/gallery permissions, real textbooks, Huawei and iPhone acceptance.',
+          'Real bundled ML Kit recognition; excludes camera/gallery permissions, real textbooks, physical-device acceptance.',
       'cases': <Map<String, dynamic>>[],
     };
     binding.reportData = report;

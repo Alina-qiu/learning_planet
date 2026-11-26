@@ -1,10 +1,17 @@
 # 当前需求覆盖与验收状态
 
-核对日期为 2026-11-24。本文汇总当前交付范围及验收进度。[历次开发记录](PROGRESS.md)
+核对日期为 2026-11-26。本文汇总当前交付范围及验收进度。[历次开发记录](PROGRESS.md)
 
-**Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。华为鸿蒙 4.2 和 iPhone 的安装、真实推送、生产性能、云端部署及连续家庭使用仍待验证。
+**Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，SHA256 `4add57b35086b4281ab9651d43203e0dae27e7df2cc61614aefc8796e1324320`；本轮重新核对文件摘要，前一轮已重提正文并确认与读取内容一致。
+本轮 Windows 通过 882 项 Flutter 测试，核心行覆盖率为 90.85%（6993/7697）。静态分析通过，291 个 Dart 文件通过格式检查。Android 双 Debug 和测速用 x86_64 Release 使用相同的 220 个构建输入，均通过签名检查。完整首页计时和构建模式分别记录在交付页。[Windows 结果](../build/acceptance-20261126/windows-quality.json) · [本轮交付](../build/acceptance-20261126/DELIVERY.md) · [分支最新 CI](https://github.com/Alina-qiu/learning_planet/pull/1/checks)
+
+| 11 月 26 日调试包 | SHA-256 |
+|---|---|
+| 本机联调 | `bf68a465e96650e4bf48a52f7550f1946fe9bf5cc76c3ae271beb7cf14c815cd` |
+| 普通 | `7c7f89c0677634edf90902f152bcd93c6880ca569fedfca3ca49be79c8a73efc` |
+
+需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，当前 SHA-256 为 `5e633b99b9bac2f29578312bbf07fcefc3051c2f712d382de8871bc2e8c09794`。2026-11-26 更新了第 9 节的冷启动首页目标。
 
 ## 当前开发进度
 
@@ -18,7 +25,7 @@
 
 断网冷启动时，如果已恢复的过期会话刷新失败，首次家庭查询可复用同一次失败结果。恢复连接或手动刷新会重新访问服务端。账号注销、权限拒绝、切换账号仍会阻止读取原家庭。[登录回归](../test/family_entry_refresh_test.dart) · [Android 调试包](ANDROID_BUILD.md)
 
-iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核时间，如果可能跨入安静时段则抑制提醒。基线提交 `56169a7` 已通过 10 项常规检查，包括 862 项 Flutter 测试、411 项数据库检查、16 项迁移升级、9 项恢复检查、iOS SDK 27.2 未签名 Debug 和 Release 编译，以及三组 iOS 模拟器。相同提交的 Android 和 iPhone 原生模拟器另行通过同家庭同步验收。[基线 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45360264753) · [双端验收](https://github.com/Alina-qiu/learning_planet/actions/runs/45360264772) · [本分支最新检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
+iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核时间，如果可能跨入安静时段则抑制提醒。基线提交 `c861fbb` 已通过 10 项常规检查，包括 869 项 Flutter 测试、411 项数据库检查、16 项迁移升级、9 项恢复检查、iOS SDK 27.2 未签名 Debug 和 Release 编译，以及三组 iOS 模拟器。相同提交的 Android 和 iPhone 原生模拟器另行通过同家庭同步验收。[基线 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45368480456/attempts/2) · [双端验收](https://github.com/Alina-qiu/learning_planet/actions/runs/45368480402) · [本分支最新检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) · [iPhone 提醒规则](TASK_REMOTE_PUSH.md)
 
 账号注销状态检查较慢时，首页的定时轮询会等待当前检查返回。之前每 30 秒新发起的检查可能使初次结果失效，导致离线首页持续转圈。应用回到前台仍会立即核查注销状态，服务端确认已受理注销后，应用立即遮住家庭数据。[入口回归用例](../test/entry_recovery_test.dart)
 
@@ -69,11 +76,11 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 |---|---|---|
 | 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS Debug/Release](IOS_BUILD.md)已通过CI未签名编译及资源检查，尚未签名或真机运行 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
-| 后端 | Supabase PostgreSQL/Auth/Storage，75 份业务迁移至 073 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
+| 后端 | Supabase PostgreSQL/Auth/Storage，76 份业务迁移至 074 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
-| 通知 | Android自有任务闹钟、HMS；iOS收到后校验的APNs任务/家长消息 | [iPhone优先安静方案](TASK_REMOTE_PUSH.md)已接入；Swift通知策略已通过；真实供应商和目标手机待验证 |
+| 通知 | Android 本地任务闹钟与家长前台提醒；iOS收到后校验的APNs任务/家长消息 | [iPhone优先安静方案](TASK_REMOTE_PUSH.md)已接入；Swift通知策略已通过；真实供应商和目标手机待验证 |
 | AI | 可替换服务端网关、结构化输出、审核与预算/隐私控制 | 测试使用可控响应；没有真实模型质量、费用与保留策略验收 |
 
 依赖声明见[pubspec.yaml](../pubspec.yaml)、[package.json](../package.json)，架构细节见[ARCHITECTURE.md](ARCHITECTURE.md)。本机工具安装在`D:\learning-planet-tools`，未修改系统PATH。
@@ -84,7 +91,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 
 | 项目 | 当前采用规则 |
 |---|---|
-| 目标设备 | 华为鸿蒙4.2与iPhone |
+| 支持平台 | Android 10 及以上，iOS 当前及前两个主版本，平板保持可用 |
 | 后端准备 | 用户暂未准备Supabase项目，先交付本地调试包 |
 | 多图导入 | 一次选择多张错题，每张独立校对保存，最多10张 |
 | 孩子录入 | 家长确认标准答案后，才进入可获得奖励的复习 |
@@ -116,7 +123,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 | ERR-05 相似题检索/生成 | [相似题](SIMILAR_QUESTIONS.md)，AI标识、隐藏答案、审核采纳 | 真实模型、复杂题意、答案质量和费用评测 |
 | ERR-06 掌握/复测/稍后提醒 | [提醒](REVIEW_REMINDERS.md)、[把握程度](REVIEW_ANSWER_CONFIDENCE.md)、[阶段奖励](REVIEW_MILESTONE_REWARDS.md) | 真实1/3/7/30天周期、两设备与后台提醒 |
 | ERR-07 混合组卷/排序/开关 | [PDF集成](PDF_INTEGRATION.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，冻结顺序与同请求重试 | 两端实际操作、打印与分享 |
-| ERR-08 A4预览导出 | [真实PDF集成](PDF_INTEGRATION.md)、`scripts/fixtures/worksheet_client_test.dart` | iPhone/华为系统导出与真实教材字体质量 |
+| ERR-08 A4预览导出 | [真实PDF集成](PDF_INTEGRATION.md)、`scripts/fixtures/worksheet_client_test.dart` | Android 和 iPhone 系统导出与真实教材字体质量 |
 
 ## 其余明确范围
 
@@ -131,8 +138,8 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
 | 7.1–7.3 AI契约/审核/隐私 | [AI分析](AI_ANALYSIS.md)、[相似题](SIMILAR_QUESTIONS.md)、[上传提示](WORKSHEET_ACCESSIBILITY.md) | 实际供应商配置、预算和保留策略、教材质量评测；端侧自动模糊未实现，PRD将其列为可选 |
-| 8 数据模型/状态机 | 75 份[迁移](../supabase/migrations)、[有数据升级报告](../build/database_upgrade/results.json)、[真实本机Auth/Storage恢复](BACKUP_RESTORE.md) | 云端迁移、真实Auth/Storage版本升级、目标环境备份恢复及回滚 |
-| 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实HMS/APNs送达与系统限制 |
+| 8 数据模型/状态机 | 76 份[迁移](../supabase/migrations)、[411 项全库检查](../build/acceptance-20261126/database-checks.log)、[18 项有数据升级检查](../build/acceptance-20261126/database-upgrade.json)、[本机 Auth/Storage 恢复](BACKUP_RESTORE.md) | 云端迁移、真实 Auth/Storage 版本升级、目标环境备份恢复及回滚 |
+| 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
 | 12 / 15 迭代与原型 | MVP及多项V1.1/V1.2能力已有实现；当前验收基于真实App与服务测试 | V2学习伙伴、家庭协作、成熟动画按PRD验证后决定，不用加入新模块替代当前验收 |
 
@@ -140,7 +147,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动<3秒、列表<1.5秒、反馈<500ms | 基线应用 `7f95a1b` 的 API 29 在线 Profile 版连续截图测量 5 次，大厅、孩子和余额同时稳定可见的观测区间中位数为 11.57–13.50 秒。另 3 次关闭截图的冷启动，系统首帧中位为 5.32 秒。[基线逐次测量](../build/acceptance-20261124/online-profile-home.json) · [本轮分项测量与历史口径](APP_PERFORMANCE.md) | 在线基线超过 3 秒。API 36 调试版在会话过期且服务不可达时，旧版与此前优化版各 3 次冷启，首页观测中位数由 31.38 秒降至 20.14 秒。华为与 iPhone 真机待测。[离线逐次测量](../build/acceptance-20261124/offline-startup-comparison.json) |
+| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | 在同一测试家庭的 Android 10 模拟器上交替安装新旧 Profile 版各 3 次。提交 `c861fbb` 中大厅、孩子和钱包可见的中位观测区间为 11.565–12.246 秒，旧版为 11.008–11.682 秒。[六次冷启动](../build/acceptance-20261124-startup/online-profile-ab.json) · [测量方法](APP_PERFORMANCE.md) | 这组观测超过 6 秒。验收从进程冷启动计至孩子、任务和余额同时可见。列表和任务反馈分别计时。 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | API 29 模拟器恢复本机服务连接后，前台 9.34 秒发出首个快照请求。会话过期、离线重开后再次恢复连接，1.48 秒发出首个快照请求，1.56 秒开始补传操作。[同步时间及账本](../build/acceptance-20261124/android-reconnect.json) | 目标手机的无线网络切换、系统后台限制仍待验证 |
@@ -155,7 +162,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 
 | 编号 | 当前证据 | PRD 场景状态 |
 |---|---|---|
-| AC-01 Android/iOS同步且只奖励一次 | iPhone 缓存待办和零余额并离线重开，Android 完成同一任务。iPhone 重连后 11.113 秒发起首个新快照请求，双方最终显示 7 金币、5 XP。数据库中开始和完成各一个回执，金币与 XP 各一条账本。[双端完整运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45360264772) | 提交 `56169a7` 已在 Android 10、iOS 18.5 两个原生模拟器和同一数据库上通过，目标手机待验收。[后续检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) |
+| AC-01 Android/iOS同步且只奖励一次 | iPhone 缓存待办和零余额并离线重开，Android 完成同一任务。iPhone 重连后 11.624 秒发起首个新快照请求，双方最终显示 7 金币、5 XP。数据库中开始和完成各一个回执，金币与 XP 各一条账本。[双端完整运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45368480402) | 提交 `c861fbb` 已在 Android 10、iOS 18.5 两个原生模拟器和同一数据库上通过，目标手机待验收。[后续检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) |
 | AC-02 重复提交只有一条奖励 | [并发报告](../build/concurrency_integration/results.json)记录 80 条命令重放、4 次丢回执及每个孩子的账本行数 | 本机服务重放场景通过 |
 | AC-03 改时不重复生成或领奖 | API 36 模拟器产生三天连续奖励，系统日期分别拨快、拨慢 48 小时，冷启动并重新从本机服务读取，核对原任务、奖励与账本 ID | 系统改时场景在 Android 模拟器与本机服务通过 |
 | AC-04 离线打卡、上线余额一致 | API 29 实际应用在服务已记账而手机丢失回执时重发同一命令。第二次断网打卡后重开，联网自动补传，两项任务合计 50 金币、40 XP。后续同步的四条账本 ID 及金额均一致。[API 29 记录](../build/acceptance-20261124/android-reconnect.json) · [API 36 记录](../build/auto_sync_device_results/walkthrough.json) | 两个 Android 模拟器版本分别连接本机服务通过 |
@@ -179,11 +186,11 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复核�
 
 较早的机器盘点记录见[状态核对结果](../build/acceptance_audit/current.json)，明确记录目标未完成；它只索引该轮文件与历史运行证据，不包含后续恢复测试和此次界面适配，也不是新的端到端测试报告。README的旧阶段说明已原文归档到[历史状态](README_STATUS_HISTORY.md)。
 
-本机使用 Windows 和 Android 模拟器。用户暂时没有可连接的华为测试手机，也未准备开发用 Supabase 项目。iOS 编译和模拟器检查在远程 macOS 上执行；签名安装仍需专用测试条件。
+本机使用 Windows 和 Android 模拟器。用户暂时没有可连接的 Android 测试手机，也未准备开发用 Supabase 项目。iOS 编译和模拟器检查在远程 macOS 上执行；签名安装仍需专用测试条件。
 
 下一阶段需保留完整目标，按以下依赖推进：
 
 1. 配置iOS签名并准备专用测试设备，在已完成CI未签名编译的基础上验证安装与运行；验证收到后校验的iOS通知方案，并执行AC-01/AC-09两端场景。
-2. 用户准备开发Supabase项目后，部署迁移、Storage策略、Edge和调度，再验证外部邮箱、HMS/APNs、保留期限、备份恢复与监控；密钥通过部署环境配置，不放入客户端或聊天记录。
-3. 在华为鸿蒙4.2/iPhone上测量真实首页/列表/反馈，验证相机/OCR、离线、系统导出、后台和安全存储；替换目前仅本机或模拟器的证据。
+2. 用户准备开发Supabase项目后，部署迁移、Storage策略、Edge和调度，再验证外部邮箱、APNs、保留期限、备份恢复与监控；密钥通过部署环境配置，不放入客户端或聊天记录。
+3. 在 Android 和 iPhone 上测量真实首页/列表/反馈，验证相机/OCR、离线、系统导出、后台和安全存储；替换目前仅本机或模拟器的证据。
 4. 接入实际模型后进行教材、答案、引用与费用评测，开展四周家庭试用并核对指标。

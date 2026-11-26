@@ -73,6 +73,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   Stream<String> get remoteDeletions => _remoteDeletions.stream;
   final _lastAttempt = <String, DateTime>{};
   final _displayClocks = <String, _TaskClockAnchor>{};
+  final _preparing = <(String, String, int), Future<String>>{};
   Future<void> _tail = Future.value();
   Future<void>? _inFlight;
   String? _syncOwner, _syncChild;
@@ -309,23 +310,38 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     return _displayClocks[childId]?.at(clock());
   }
 
-  Future<String> _prepare(String childId) async {
+  Future<String> _prepare(String childId) {
     final owner = _account();
-    if (await store.accountDeletionJob(owner) != null) {
-      throw StateError('账号已申请注销');
-    }
-    if (await store.isChildDeleted(childId)) throw StateError('孩子已删除，请选择其他孩子');
-    if (await store.familyAccessRevoked(owner, childId: childId)) {
-      throw StateError('家庭访问权限已撤销');
-    }
-    _activeChild = childId;
+    final key = (owner, childId, store.privacyGeneration);
+    return _preparing.putIfAbsent(key, () {
+      return _prepareChild(owner, childId).whenComplete(() {
+        _preparing.remove(key);
+      });
+    });
+  }
+
+  Future<String> _prepareChild(String owner, String childId) async {
     final cached = await store.readTaskSummary(owner, childId);
     _check(owner);
     if (cached == null) {
+      if (await store.accountDeletionJob(owner) != null) {
+        throw StateError('账号已申请注销');
+      }
+      if (await store.isChildDeleted(childId)) {
+        throw StateError('孩子已删除，请选择其他孩子');
+      }
+      if (await store.familyAccessRevoked(owner, childId: childId)) {
+        throw StateError('家庭访问权限已撤销');
+      }
+      _check(owner);
+      _activeChild = childId;
       await synchronize(childId);
       return owner;
     }
-    if (_state.revision == 0) await _publish(owner, _state.phase);
+    _activeChild = childId;
+    if (_state.revision == 0) {
+      await _publish(owner, _state.phase, dataChanged: false);
+    }
     final last = _lastAttempt[childId];
     if (_foreground &&
         (last == null || clock().difference(last).inSeconds >= 10)) {
@@ -380,12 +396,13 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   /// Already confirmed timezone only; observing it never starts another sync.
   Future<String?> cachedFamilyTimezone(String childId) => _locked(() async {
     final owner = _account(), privacy = store.privacyGeneration;
-    if (await store.accountDeletionJob(owner) != null ||
-        await store.isChildDeleted(childId) ||
-        await store.familyAccessRevoked(owner, childId: childId)) {
+    final cache = await store.readTaskSummary(owner, childId);
+    if (cache == null &&
+        (await store.accountDeletionJob(owner) != null ||
+            await store.isChildDeleted(childId) ||
+            await store.familyAccessRevoked(owner, childId: childId))) {
       throw StateError('家庭数据已不可访问');
     }
-    final cache = await store.readTaskSummary(owner, childId);
     _check(owner);
     if (privacy != store.privacyGeneration) throw StateError('家庭数据已变化');
     return cache?['timezone'] as String?;

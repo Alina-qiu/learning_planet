@@ -34,10 +34,20 @@ final growthRepositoryProvider = Provider<GrowthRepository>((ref) {
   return repository;
 });
 final growthProvider = FutureProvider.autoDispose
-    .family<Map<String, dynamic>, String>((ref, childId) {
-      // Task completion, offline synchronization and parent awards invalidate wallet.
-      ref.watch(walletProvider(childId));
-      return ref.watch(growthRepositoryProvider).load(childId);
+    .family<Map<String, dynamic>, String>((ref, childId) async {
+      final repository = ref.watch(growthRepositoryProvider);
+      final wallet = ref.watch(walletProvider(childId).future);
+      var active = true;
+      ref.onDispose(() => active = false);
+      // A settled wallet read covers any task or award updates made while it
+      // was in flight. Its loading and data states need only one growth read.
+      try {
+        await wallet;
+      } catch (_) {
+        // Growth has its own access checks and offline snapshot.
+      }
+      if (!active) throw StateError('成长记录的读取范围已变化');
+      return repository.load(childId);
     });
 final learningEventsProvider = FutureProvider.autoDispose
     .family<List<Map<String, dynamic>>, String>((ref, childId) {

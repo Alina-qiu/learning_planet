@@ -3,6 +3,10 @@ import 'package:drift/drift.dart';
 import 'offline_store.dart';
 
 extension OfflineMediaStore on OfflineStore {
+  static const _directoryVisible = """NOT EXISTS (SELECT 1 FROM offline_cache h
+    WHERE h.owner=d.owner AND h.cache_key IN
+      ('directory-hidden:child:' || d.child_id, 'directory-hidden:family:' || d.family_id))""";
+
   Future<void> updateImageDraftMetadata(
     String owner,
     String child,
@@ -45,7 +49,7 @@ extension OfflineMediaStore on OfflineStore {
   }) async {
     if (await accountDeletionJob(owner) != null) return [];
     final rows = await customSelect(
-      "SELECT owner,draft_id,child_id,family_id,stage,attempts,next_attempt,error,updated_at,json_extract(metadata,'\$.requires_parent_review') requires_parent_review,json_extract(metadata,'\$.import_index') import_index,json_extract(metadata,'\$.import_count') import_count FROM image_drafts WHERE owner=?${childId == null ? '' : ' AND child_id=?'} ORDER BY coalesce(json_extract(metadata,'\$.import_created_at'),updated_at),json_extract(metadata,'\$.import_batch'),import_index,draft_id",
+      "SELECT owner,draft_id,child_id,family_id,stage,attempts,next_attempt,error,updated_at,json_extract(metadata,'\$.requires_parent_review') requires_parent_review,json_extract(metadata,'\$.import_index') import_index,json_extract(metadata,'\$.import_count') import_count FROM image_drafts d WHERE owner=? AND $_directoryVisible${childId == null ? '' : ' AND child_id=?'} ORDER BY coalesce(json_extract(metadata,'\$.import_created_at'),updated_at),json_extract(metadata,'\$.import_batch'),import_index,draft_id",
       variables: [Variable(owner), if (childId != null) Variable(childId)],
     ).get();
     return [for (final row in rows) row.data];
@@ -58,10 +62,17 @@ extension OfflineMediaStore on OfflineStore {
       ).getSingleOrNull() !=
       null;
 
-  Future<Map<String, dynamic>?> imageDraft(String owner, String id) async {
+  Future<Map<String, dynamic>?> imageDraft(String owner, String id) =>
+      _findImageDraft(owner, id, includeHidden: false);
+
+  Future<Map<String, dynamic>?> _findImageDraft(
+    String owner,
+    String id, {
+    required bool includeHidden,
+  }) async {
     if (await accountDeletionJob(owner) != null) return null;
     final row = await customSelect(
-      'SELECT * FROM image_drafts WHERE owner=? AND draft_id=?',
+      "SELECT * FROM image_drafts d WHERE owner=? AND draft_id=?${includeHidden ? '' : ' AND $_directoryVisible'}",
       variables: [Variable(owner), Variable(id)],
     ).getSingleOrNull();
     return row == null
@@ -91,7 +102,7 @@ extension OfflineMediaStore on OfflineStore {
         null) {
       throw StateError('本机草稿已删除');
     }
-    final old = await imageDraft(owner, id);
+    final old = await _findImageDraft(owner, id, includeHidden: true);
     if (old != null &&
         (old['child_id'] != child || old['family_id'] != family)) {
       throw StateError('草稿不属于当前孩子');

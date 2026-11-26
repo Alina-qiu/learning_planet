@@ -146,6 +146,22 @@ void main() {
         'job',
       ]);
       expect(await store.readTaskSummary('second-owner', 'child'), isNull);
+      await store.write('third-owner', 'tasks:child', snapshot);
+      await store.write('third-owner', 'tasks:sibling', snapshot);
+      await store.customStatement('INSERT INTO deleted_children VALUES(?)', [
+        'child',
+      ]);
+      expect(await store.readTaskSummary('third-owner', 'child'), isNull);
+      expect(await store.read('third-owner', 'tasks:child'), isNull);
+      expect(await store.readTaskSummary('third-owner', 'sibling'), metadata);
+      // Older revocation markers may list a child separately from the family
+      // recorded in its remaining snapshot.
+      await store.customStatement(
+        'INSERT INTO family_access VALUES(?,?,2,0,2,?,0)',
+        ['third-owner', 'previous-family', '["sibling"]'],
+      );
+      expect(await store.readTaskSummary('third-owner', 'sibling'), isNull);
+      expect(await store.read('third-owner', 'tasks:sibling'), isNull);
     },
   );
 
@@ -721,4 +737,28 @@ void main() {
       expect(find.text('资料已恢复'), findsOneWidget);
     },
   );
+
+  testWidgets('startup consumes the already running load and retries it once', (
+    tester,
+  ) async {
+    final initial = Completer<Widget>();
+    var retries = 0;
+    await tester.pumpWidget(
+      StartupGate(
+        initialLoad: initial.future,
+        load: () async {
+          retries++;
+          return const MaterialApp(home: Text('资料已恢复'));
+        },
+      ),
+    );
+    expect(retries, 0);
+    initial.completeError(const LocalDataException('设备已锁定'));
+    await tester.pumpAndSettle();
+    expect(find.text('设备已锁定'), findsOneWidget);
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+    expect(retries, 1);
+    expect(find.text('资料已恢复'), findsOneWidget);
+  });
 }

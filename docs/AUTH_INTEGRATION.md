@@ -64,4 +64,4 @@ CI 的16.2分支下载并校验[官方 Linux 发布包](https://github.com/supab
 
 共用引导/HTTP帮助函数调整后，原375组数据库和7项/88次业务HTTP检查再次通过。5项真实Auth检查单独计数，714项Flutter单元/Widget、90.47%核心覆盖率为此前记录；本轮业务代码和普通APK未改变。
 
-尚未覆盖真实邮件投递到外部收件箱、托管SMTP限额、云端网关API key验证/HTTPS、外部SMTP的TLS、Storage、原生凭据持久化、华为鸿蒙4.2/iPhone或iOS编译。普通APK仍未配置Supabase，只显示服务配置提示；上述服务和合成用户不会打入APK。这是本地登录服务的实证，不能视为完整云端或两端手机验收。
+尚未覆盖真实邮件投递到外部收件箱、托管SMTP限额、云端网关API key验证/HTTPS、外部SMTP的TLS、Storage、原生凭据持久化、Android 和 iPhone 或iOS编译。普通APK仍未配置Supabase，只显示服务配置提示；上述服务和合成用户不会打入APK。这是本地登录服务的实证，不能视为完整云端或两端手机验收。

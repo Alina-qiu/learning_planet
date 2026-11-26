@@ -30,4 +30,4 @@
 - 截图：`tmp/economy-pages-rewards-{1,2}x.png`、`tmp/economy-pages-ledger-{1,2}x.png`，已人工查看。它们使用合成数据和本地字体，不代表真机或后端联调。
 - 首次测试夹具的SQL参数类型歧义和缺失导入已修正；失败日志保留在 `tmp/economy-pages-database-fixture-failure.log` 和 `tmp/economy-pages-import-failure.log`。
 
-客户端依赖迁移056，已有环境须按序部署001–056后更新客户端。本机没有真实Supabase项目，未部署数据库；普通调试APK仍显示服务配置提示，不能登录或运行在线业务。华为鸿蒙4.2/iPhone、跨设备更新、真实首屏性能、iOS构建与签名仍待验收。产物见[Android构建记录](ANDROID_BUILD.md)。
+客户端依赖迁移056，已有环境须按序部署001–056后更新客户端。本机没有真实Supabase项目，未部署数据库；普通调试APK仍显示服务配置提示，不能登录或运行在线业务。Android 和 iPhone、跨设备更新、真实首屏性能、iOS构建与签名仍待验收。产物见[Android构建记录](ANDROID_BUILD.md)。
