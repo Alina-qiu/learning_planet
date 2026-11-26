@@ -182,7 +182,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | AC-06 调账明细可追溯 | [实际界面报告](../build/wallet_details_results/walkthrough-20261106.json)记录 300 金币调账、操作者、时间和原因，重查时两条账本 ID 相同 | API 36 模拟器连接本机服务的场景通过 |
 | AC-07 PDF顺序/答案开关/预览一致 | [实际 PDF 联调](PDF_INTEGRATION.md)核对题目顺序和答案页，客户端比较预览与导出的文件字节 | Android API 36 已完成应用预览、系统打印和另存 PDF。[文件与逐页核对](../build/demo-20261127/android-print/verification.json) |
 | AC-08 多孩子隔离 | 两名孩子使用独立任务、余额和错题。Android 重连时停留在第二个孩子的首页，第一个孩子的离线操作仍只为本人结算一次。[界面回归](../test/child_switch_isolation_test.dart) · [设备与服务记录](../build/child-isolation-20261127/DELIVERY.md) | Android 和 iPhone 模拟器均通过。iOS 18.5 在线和断网时从小星切到小月再切回，六次界面核对通过。Android 完成任务后，iPhone 重连取得小星的 7 金币、5 XP，小月保有原来的 23 金币、11 XP。目标真机待验收。[配对作业](https://github.com/Alina-qiu/learning_planet/actions/runs/45886513966) |
-| AC-09 安静时段不推送、不扣分 | Android实际闹钟过滤、静默与奖励回归 | **未完成验收**：已按用户选择改为收到后校验，Swift策略与构建已通过，仍待真实供应商/目标手机 |
+| AC-09 安静时段不推送、不扣分 | Android 闹钟过滤、静默与奖励回归已通过。iPhone 收到数据后复查安静时段。[远程提醒与原生检查](TASK_REMOTE_PUSH.md) | iOS 18.5 首次成功注入安静时段载荷后，35 秒内未取得处理回执。原生委托处理与系统注入分别核验。真实 APNs 与目标手机待验收。[该次运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45892450246) |
 | AC-10 清楚说明并在承诺期限内注销 | [真实删除联调](PRIVACY_INTEGRATION.md)核对 74 个 S3 对象、两个过期租约、分页续办和其他成员的文件摘要 | 本机注销与中断恢复通过。目标环境的调度和 24 小时清理时限仍待验收 |
 | AC-11 三题唯一复习、全部作答自动结算 | API 36 与 API 29 对同一家庭独立登录。生成器重跑、零题孩子、系统拨快和拨慢 48 小时、离线冷启与逐题账本均有[同一家庭的验收记录](../build/ac11-device-acceptance/summary.json) | 两台 Android 模拟器连接本机服务通过。新版覆盖安装后保留三道答案和五项待同步操作，重放后任务及账本 ID 均相同 |
 

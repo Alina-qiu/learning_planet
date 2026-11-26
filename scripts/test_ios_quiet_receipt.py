@@ -12,20 +12,50 @@ from run_ios_quiet_receipt import payload, verify, wait_for_ready
 
 class QuietReceiptEvidenceTests(unittest.TestCase):
     def setUp(self):
-        self.ready = {"run": str(uuid4()), "scope": str(uuid4()), "state": 0,
+        self.ready = {"run": str(uuid4()), "scope": str(uuid4()), "state": 0, "source": "system", "registrationRequested": True,
                       "anchor": 1773057600000, "scheduled": 1773057510000,
                       "ids": {k: str(uuid4()) for k in ("quiet", "scope", "expired", "allowed")}}
         self.sent = {k: payload(self.ready, k, 1000) for k in self.ready["ids"]}
-        self.callbacks = {k: {"run": self.ready["run"], "message": p["message_id"],
+        self.callbacks = {k: {"run": self.ready["run"], "source": "system", "message": p["message_id"],
                           "payload": {f: v for f, v in p.items() if f != "aps"},
                           "aps": p["aps"], "state": 2, "result": 0 if k == "allowed" else 1}
                           for k, p in self.sent.items()}
         allowed = [self.ready["ids"]["allowed"]]
-        self.complete = {"run": self.ready["run"], "delivered": allowed, "seen": allowed,
+        self.complete = {"run": self.ready["run"], "source": "system", "delivered": allowed, "seen": allowed,
                          "quietSuppressed": True, "scopeRejected": True, "expiredRejected": True}
+        self.entries = {case: {k: r[k] for k in ("state", "source", "message", "run")} for case, r in self.callbacks.items()}
+        self.claims = {case: {**row, "handled": True} for case, row in self.entries.items()}
+        self.invocations = {}
 
-    def validate(self):
-        verify(self.ready, self.sent, self.callbacks, self.complete)
+    def validate(self, source="system"):
+        verify(self.ready, self.sent, self.callbacks, self.complete, source=source,
+               entries=self.entries, claims=self.claims, invocations=self.invocations)
+
+    def test_native_result_requires_its_own_delegate_completion(self):
+        self.ready["registrationRequested"] = False
+        for row in (self.ready, self.complete, *self.entries.values(), *self.callbacks.values(), *self.claims.values()):
+            row["source"] = "native"
+        self.invocations = {k: {**entry, "result": self.callbacks[k]["result"]} for k, entry in self.entries.items()}
+        self.validate("native")
+        with self.assertRaises(ValueError):
+            self.validate("system")
+        del self.invocations["quiet"]
+        with self.assertRaises(ValueError):
+            self.validate("native")
+
+    def test_system_result_rejects_test_invocation_and_missing_entry(self):
+        self.invocations["allowed"] = self.callbacks["allowed"]
+        with self.assertRaises(ValueError):
+            self.validate()
+        self.invocations.clear()
+        del self.entries["quiet"]
+        with self.assertRaises(KeyError):
+            self.validate()
+
+    def test_visiting_parent_listener_is_insufficient_without_task_claim(self):
+        self.claims["quiet"]["handled"] = False
+        with self.assertRaises(ValueError):
+            self.validate()
 
     def test_valid_background_contrast(self):
         self.validate()

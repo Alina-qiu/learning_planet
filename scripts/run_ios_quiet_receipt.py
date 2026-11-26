@@ -1,7 +1,8 @@
-"""Prove delivery decisions for simulated data-only pushes on a disposable iPhone.
+"""Exercise either native receipt handling or simulated system delivery on a disposable iPhone.
 
 Prepare Flutter's iOS Debug simulator build for scripts/fixtures/quiet_simulator_host.dart
-and boot the same UDID. No tokens, APNs credentials or external push service are used.
+and boot the same UDID. The system scenario requests registration without recording device tokens.
+Both scenarios generate their messages locally.
 """
 import argparse
 import hashlib
@@ -33,18 +34,30 @@ def payload(ready, case, elapsed_ms):
     }
 
 
-def verify(ready, sent, callbacks, complete):
+def verify(ready, sent, callbacks, complete, *, source, entries, claims, invocations):
     ids = ready["ids"]
+    if (source not in ("native", "system") or ready["source"] != source or complete["source"] != source
+            or ready["registrationRequested"] != (source == "system")):
+        raise ValueError("Wrong receipt source or registration setup")
     if len(set(ids.values())) != 4 or set(ids) != {"quiet", "scope", "expired", "allowed"}:
         raise ValueError("Expected four distinct task message IDs")
     if ready["state"] != 0:
         raise ValueError("Fixture was not initially active")
     for case in ("quiet", "scope", "expired", "allowed"):
         original, receipt = sent[case], callbacks[case]
+        expected_entry = {"message": ids[case], "run": ready["run"], "source": source, "state": 2}
+        if entries[case] != expected_entry or receipt["source"] != source:
+            raise ValueError("Wrong native callback entry for " + case)
+        if claims[case] != {**expected_entry, "handled": True}:
+            raise ValueError("The task delegate did not claim " + case)
         native = {**receipt["payload"], "aps": receipt["aps"]}
         if (original != native or receipt["message"] != ids[case] or receipt["run"] != ready["run"]
                 or receipt["state"] != 2 or receipt["result"] != (0 if case == "allowed" else 1)):
             raise ValueError("Wrong payload, lifecycle state or fetch result for " + case)
+        if source == "native" and invocations.get(case) != {**expected_entry, "result": receipt["result"]}:
+            raise ValueError("Original UIApplicationDelegate completion was not observed for " + case)
+    if source == "system" and invocations:
+        raise ValueError("Test-invoked delegate evidence cannot represent a system push")
     if (complete["run"] != ready["run"] or complete["seen"] != [ids["allowed"]]
             or complete["delivered"] != [ids["allowed"]] or not complete["quietSuppressed"]
             or not complete["scopeRejected"] or not complete["expiredRejected"]):
@@ -72,7 +85,7 @@ def wait_for_ready(process, device, bundle, started, timeout=1200):
     raise TimeoutError("Timed out waiting for native settings/clock/plan; see xctest.log")
 
 
-def run(device, report):
+def run(device, report, source):
     device = checked_id(device)
     if not Path("ios/Runner.xcworkspace").is_dir():
         raise ValueError("Run from the Flutter project root")
@@ -91,12 +104,16 @@ def run(device, report):
     started = time.time()
     def write(name, item):
         (report / (name + ".json")).write_text(json.dumps(item, indent=2) + "\n", encoding="utf8")
+    transport = "XCTest calls UIApplicationDelegate" if source == "native" else "local simctl push"
+    coverage = "native receipt policy and Notification Center" if source == "native" else "simulated system delivery to background app"
+    write("scenario", {"source": source, "transport": transport, "coverage": coverage, "externalAPNs": False})
+    method = "testNativeDelegateReceipt" if source == "native" else "testBackgroundQuietReceipt"
     with tempfile.TemporaryDirectory(prefix="ac09-xcode-") as derived, log.open("wb") as output:
         proc = subprocess.Popen([
             "xcodebuild", "test", "-workspace", "ios/Runner.xcworkspace", "-scheme", "Runner",
             "-configuration", "Debug", "-destination", "platform=iOS Simulator,id=" + device,
             "-parallel-testing-enabled", "NO",
-            "-only-testing:RunnerTests/RunnerTests/testBackgroundQuietReceipt",
+            "-only-testing:RunnerTests/RunnerTests/" + method,
             "-derivedDataPath", derived,
             "-resultBundlePath", str(report.absolute() / "native.xcresult"),
             "FLUTTER_TARGET=scripts/fixtures/quiet_simulator_host.dart",
@@ -115,6 +132,8 @@ def run(device, report):
         try:
             directory, ready = wait_for_ready(proc, device, bundle, started)
             write("ready", ready)
+            if ready["source"] != source:
+                raise ValueError("XCTest started a different receipt scenario")
             zero = time.monotonic()
             def event(name):
                 path = directory / (name + ".json")
@@ -128,29 +147,50 @@ def run(device, report):
             if bg["state"] != 2:
                 raise ValueError("Runner did not enter the background")
             write("background", bg)
-            # Each push must finish through the real UIApplication selector before
-            # the next. An absent notification alone never proves suppression.
-            sent, callbacks = {}, {}
+            # Wait for the actual delegate completion before submitting the next case.
+            sent, callbacks, entries, claims, invocations = {}, {}, {}, {}, {}
             for case in ("quiet", "scope", "expired", "allowed"):
                 data = payload(ready, case, round((time.monotonic() - zero) * 1000))
-                command = subprocess.run(simulator + ["push", device, bundle, "-"],
-                                         input=json.dumps(data), text=True, capture_output=True, timeout=30)
-                command.check_returncode()
+                if source == "system":
+                    command = subprocess.run(simulator + ["push", device, bundle, "-"],
+                                             input=json.dumps(data), text=True, capture_output=True, timeout=30)
+                    command.check_returncode()
+                else:
+                    path = directory / ("invoke-" + checked_id(ready["run"]) + "-" + case + ".json")
+                    temporary = path.with_suffix(".tmp")
+                    temporary.write_text(json.dumps(data), encoding="utf8")
+                    temporary.replace(path)
                 sent[case] = data
                 write("sent-" + case, data)
-                callbacks[case] = await_result(lambda: event(case), 35, "UIKit callback for " + case)
+                try:
+                    callbacks[case] = await_result(lambda: event(case), 35, "UIKit callback for " + case)
+                finally:
+                    entry = event("entered-" + case)
+                    if entry is not None:
+                        entries[case] = entry
+                        write("entered-" + case, entry)
+                    claim = event("claimed-" + case)
+                    if claim is not None:
+                        claims[case] = claim
+                        write("claimed-" + case, claim)
+                    registration = event("registration")
+                    if registration is not None:
+                        write("registration", registration)
                 write("receipt-" + case, callbacks[case])
+                if source == "native":
+                    invocations[case] = await_result(lambda: event("invoked-" + case), 10, "test delegate completion for " + case)
+                    write("invoked-" + case, invocations[case])
             (directory / ("resume-" + checked_id(ready["run"]))).touch(exist_ok=False)
             resumed = subprocess.check_output(simulator + ["launch", device, bundle], text=True, timeout=30)
             if resumed.strip().split(":")[-1].strip() != str(ready["pid"]):
                 raise RuntimeError("Returning to Runner started another process")
             complete = await_result(lambda: event("complete"), 28, "delivered notification query")
             write("complete", complete)
-            verify(ready, sent, callbacks, complete)
+            verify(ready, sent, callbacks, complete, source=source, entries=entries, claims=claims, invocations=invocations)
             if proc.wait(timeout=80) != 0:
                 raise RuntimeError("XCTest failed; see xctest.log")
             write("result", {"passed": True, "runtime": matches[0][0], "device": matches[0][1]["name"],
-                 "transport": "local simctl push; no APNs", "receiveState": "background",
+                 "source": source, "transport": transport, "coverage": coverage, "externalAPNs": False, "receiveState": "background",
                  "observationAfterResume": "Notification Center delivered task IDs",
                  "callbackCases": ["quiet", "scope", "expired", "allowed"], "run": ready["run"],
                  "xctestLogSha256": hashlib.sha256(log.read_bytes()).hexdigest()})
@@ -168,5 +208,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--source", choices=("system", "native"), default="system")
     args = parser.parse_args()
-    run(args.device, args.report)
+    run(args.device, args.report, args.source)

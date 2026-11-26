@@ -11,16 +11,28 @@ on:
       - 'scripts/select_cross_device_iphone.py'
       - 'pubspec.*'
   workflow_dispatch:
+    inputs:
+      source:
+        description: Receipt source to exercise
+        type: choice
+        options: [native, system]
+        default: native
 
 permissions:
   contents: read
 
 jobs:
   background-receipt:
+    name: background-receipt (${{ matrix.source }})
     runs-on: macos-15-intel
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJSON(github.event_name == 'pull_request' && '["native","system"]' || (inputs.source == 'system' && '["system"]' || '["native"]')) }}
     timeout-minutes: 65
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      RECEIPT_SOURCE: ${{ matrix.source }}
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -45,7 +57,7 @@ jobs:
           records = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))['devices'][runtime]
           template, = (item for item in records if item['udid'] == os.environ['SIMULATOR_ID'])
           kind = template['deviceTypeIdentifier']
-          name = 'iPhone AC09 ' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+          name = 'iPhone AC09 ' + os.environ['RECEIPT_SOURCE'] + '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
           udid = subprocess.check_output(['xcrun','simctl','create',name,kind,runtime],text=True,timeout=100).strip()
           with open(os.environ['GITHUB_ENV'],'a') as output:
               print('SIMULATOR_ID=' + udid, file=output)
@@ -67,12 +79,14 @@ jobs:
         run: |
           xcrun simctl boot "$SIMULATOR_ID"
           xcrun simctl bootstatus "$SIMULATOR_ID" -b > "$RUNNER_TEMP/quiet-boot.log"
-      - name: Check quiet, wrong-scope, expired and accepted background receipts
+      - name: Check ${{ matrix.source }} quiet, wrong-scope, expired and accepted receipts
+        id: receipts
         timeout-minutes: 28
-        run: python3 scripts/run_ios_quiet_receipt.py --device "$SIMULATOR_ID" --report build/ios-quiet-receipt
+        run: python3 scripts/run_ios_quiet_receipt.py --source "$RECEIPT_SOURCE" --device "$SIMULATOR_ID" --report build/ios-quiet-receipt
       - name: Keep bounded XCTest diagnostics
         if: always()
         run: |
+          echo "iOS receipt source **$RECEIPT_SOURCE** — ${{ steps.receipts.outcome }}" >> "$GITHUB_STEP_SUMMARY"
           python3 - <<'PY'
           import hashlib
           from pathlib import Path
@@ -88,7 +102,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: iphone18-background-receipt
+          name: iphone18-background-receipt-${{ matrix.source }}
           path: |
             build/quiet-build/*.txt
             build/quiet-build/*.json

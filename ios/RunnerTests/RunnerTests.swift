@@ -10,6 +10,7 @@ private enum Probe {
   static let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     .appendingPathComponent("ac09-receipt", isDirectory: true)
   static let run = UUID().uuidString.lowercased()
+  static var source = ""
   static let scope = UUID().uuidString.lowercased()
   static let ids = ["quiet": UUID().uuidString.lowercased(), "scope": UUID().uuidString.lowercased(),
                     "expired": UUID().uuidString.lowercased(),
@@ -19,8 +20,35 @@ private enum Probe {
 
   static func write(_ name: String, _ evidence: [String: Any]) throws {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    let data = try JSONSerialization.data(withJSONObject: evidence.merging(["run": run]) { _, new in new })
+    let data = try JSONSerialization.data(withJSONObject: evidence.merging(["run": run, "source": source]) { _, new in new })
     try data.write(to: root.appendingPathComponent(name + ".json"), options: .atomic)
+  }
+}
+
+private final class RegistrationProbe: NSObject, FlutterApplicationLifeCycleDelegate {
+  var status = "pending"
+  func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    status = "registered"
+    try? Probe.write("registration", ["callback": status, "registered": application.isRegisteredForRemoteNotifications])
+  }
+  func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+    status = "failed"
+    try? Probe.write("registration", ["callback": status, "registered": application.isRegisteredForRemoteNotifications])
+  }
+}
+
+@MainActor private final class FixtureBackgroundTask {
+  var identifier = UIBackgroundTaskIdentifier.invalid
+  func start() {
+    identifier = UIApplication.shared.beginBackgroundTask(withName: "XCTest native receipt") { [weak self] in
+      Task { @MainActor in self?.end() }
+    }
+  }
+  func end() {
+    if identifier != .invalid {
+      UIApplication.shared.endBackgroundTask(identifier)
+      identifier = .invalid
+    }
   }
 }
 
@@ -37,7 +65,9 @@ extension ParentPush {
     // This selector executes on the application main thread. Capture state at
     // entry, not after the asynchronous authorization or notification callbacks.
     let state = app.applicationState.rawValue
-    return ac09Observe(app, payload: payload) { outcome in
+    do { try Probe.write("entered-" + item.key, ["message": id, "state": state]) }
+    catch { XCTFail("Could not record native callback entry: \(error)") }
+    let handled = ac09Observe(app, payload: payload) { outcome in
       let parameters = ["scope_nonce", "issued_ms", "scheduled_ms", "expires_ms", "version",
                         "message_id", "timezone", "quiet_start", "quiet_end", "kind", "settings_version"]
       let data = Dictionary(uniqueKeysWithValues: parameters.compactMap { key in
@@ -49,12 +79,29 @@ extension ParentPush {
       } catch { XCTFail("Could not record callback outcome: \(error)") }
       completion(outcome)
     }
+    if handled {
+      // Only the delegate that claims this task version can write this record.
+      do { try Probe.write("claimed-" + item.key, ["message": id, "state": state, "handled": true]) }
+      catch { XCTFail("Could not record the task delegate claim: \(error)") }
+    }
+    return handled
   }
 }
 
 final class RunnerTests: XCTestCase {
   @MainActor
   func testBackgroundQuietReceipt() async throws {
+    try await checkReceipts(source: "system")
+  }
+
+  @MainActor
+  func testNativeDelegateReceipt() async throws {
+    try await checkReceipts(source: "native")
+  }
+
+  @MainActor
+  private func checkReceipts(source: String) async throws {
+    Probe.source = source
     let center = UNUserNotificationCenter.current()
     let granted = try await center.requestAuthorization(options: [.alert, .sound, .provisional])
     XCTAssertTrue(granted)
@@ -73,6 +120,15 @@ final class RunnerTests: XCTestCase {
     }
     let appDelegate = try XCTUnwrap(UIApplication.shared.delegate as? AppDelegate)
     XCTAssertTrue(appDelegate.responds(to: selector))
+    let app = UIApplication.shared
+    let registration = RegistrationProbe()
+    if source == "system" {
+      appDelegate.add(registration)
+      app.registerForRemoteNotifications()
+      for _ in 0..<50 where registration.status == "pending" {
+        try await Task.sleep(nanoseconds: 100_000_000)
+      }
+    }
     method_exchangeImplementations(original, observer)
     defer { method_exchangeImplementations(original, observer) }
 
@@ -111,20 +167,50 @@ final class RunnerTests: XCTestCase {
     let empty = await center.deliveredNotifications()
     XCTAssertFalse(empty.contains { $0.request.identifier == "task-remote-v1" })
     let wall = Date().timeIntervalSince1970
+    let lease = FixtureBackgroundTask()
+    if source == "native" {
+      lease.start()
+      XCTAssertNotEqual(lease.identifier, .invalid)
+    }
+    defer { lease.end() }
     try Probe.write("ready", ["ids": Probe.ids, "scope": Probe.scope, "anchor": Probe.anchor,
       "scheduled": at, "state": UIApplication.shared.applicationState.rawValue, "started": wall,
+      "registrationRequested": source == "system", "registered": app.isRegisteredForRemoteNotifications,
+      "registrationCallback": source == "system" ? registration.status : "notRequested",
       "pid": ProcessInfo.processInfo.processIdentifier, "authorization": settings.authorizationStatus.rawValue,
       "selector": NSStringFromSelector(selector), "encoding": originalTypes])
 
-    // The host backgrounds Runner, triggers each simulated push and returns
-    // Runner to the foreground once all completion files exist.
+    // The host backgrounds Runner, sends each case using its selected source,
+    // and returns the same process to the foreground after all completions.
     var resumed = false
+    let cases = ["quiet", "scope", "expired", "allowed"]
+    var next = 0
     for _ in 0..<2000 {
+      if source == "native", app.applicationState == .background, next < cases.count {
+        let name = cases[next]
+        let file = Probe.root.appendingPathComponent("invoke-" + Probe.run + "-" + name + ".json")
+        if FileManager.default.fileExists(atPath: file.path) {
+          let data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+          XCTAssertEqual(data["message_id"] as? String, Probe.ids[name])
+          // Invoke the real UIApplicationDelegate selector. Flutter forwards it to the same registered task delegate.
+          let delegate = try XCTUnwrap(app.delegate)
+          let state = app.applicationState.rawValue
+          let outcome: UIBackgroundFetchResult = try await withCheckedThrowingContinuation { continuation in
+            let called: Void? = delegate.application?(app, didReceiveRemoteNotification: data,
+              fetchCompletionHandler: { continuation.resume(returning: $0) })
+            if called == nil { continuation.resume(throwing: NSError(domain: "MissingUIApplicationDelegateSelector", code: 1)) }
+          }
+          try Probe.write("invoked-" + name, ["message": Probe.ids[name]!, "state": state, "result": outcome.rawValue])
+          next += 1
+          if next == cases.count { lease.end() }
+        }
+      }
       if FileManager.default.fileExists(atPath: Probe.root.appendingPathComponent("resume-" + Probe.run).path),
         UIApplication.shared.applicationState == .active { resumed = true; break }
       try await Task.sleep(nanoseconds: 100_000_000)
     }
     XCTAssertTrue(resumed)
+    if source == "native" { XCTAssertEqual(next, cases.count) }
     var delivered: [String] = []
     for _ in 0..<40 {
       let notifications = await center.deliveredNotifications()
