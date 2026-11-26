@@ -44,7 +44,7 @@ $adb = 'D:/learning-planet-tools/android-sdk/platform-tools/adb.exe'
 & ./scripts/local_backend.ps1 -Command mail -Email parent@example.test
 ```
 
-把 8 位验证码输入 App，点“验证并登录”。在“创建家庭”页填写家庭名称和孩子昵称，核对年级及教材后提交。首次进入家长功能时设置自己的 4 至 6 位数字 PIN。可用其他 `@example.test` 地址试用不同账号，测试邮件由电脑本机接收。
+把 8 位验证码输入 App，点“验证并登录”。在“创建家庭”页填写家庭名称和孩子昵称，核对年级，按需填写教材，点“创建并开始”。看到创建成功回执后，点“查看已创建的档案”进入冒险大厅。首次设置家长 PIN 时，在“更多”中选“进入家长模式”，输入自己的 4 至 6 位数字 PIN，点“验证”，再点“确认设置”。可用其他 `@example.test` 地址试用不同账号，测试邮件由电脑本机接收。
 
 ## 4. 结束本次试用
 
