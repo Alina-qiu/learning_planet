@@ -69,7 +69,7 @@ export async function androidSessionMatches(authorization,session,ownerId,client
 
 // Only the standalone test APK uses these loopback endpoints. Report fields
 // must match the fixture, and the device must prove ownership of its session.
-export function androidEvidence({scenario, file, phase, authorize, verify, log = console.log}) {
+export function androidEvidence({scenario, file, phase, authorize, verify, saveFailure, log = console.log}) {
   const expected = {device:'android',test:'AC-01',stage:'confirmed',task_id:scenario.task_id,
     child_id:scenario.child_id,family_id:scenario.family_id,ready_with_zero_wallet:true,
     completed:true,coins:scenario.coins,xp:scenario.xp};
@@ -89,7 +89,15 @@ export function androidEvidence({scenario, file, phase, authorize, verify, log =
       if (Object.keys(body).length !== 1 || !Object.hasOwn(body,'stage') ||
           (!androidStages.includes(body.stage) && body.stage !== 'failed')) return 400;
       if (saved || stage === 'failed' || body.stage === 'confirmed') return 200;
-      if (body.stage === 'failed' || androidStages.indexOf(body.stage) > androidStages.indexOf(stage)) record(body.stage);
+      if (body.stage === 'failed') {
+        try {
+          await saveFailure(checkpoint);
+        } finally {
+          record('failed');
+        }
+      } else if (androidStages.indexOf(body.stage) > androidStages.indexOf(stage)) {
+        record(body.stage);
+      }
       return 200;
     }
     if (phase() !== 'writer-complete' || stage === 'failed') return 409;
@@ -189,6 +197,17 @@ async function run(config, {database}) {
   const android = androidEvidence({scenario, file:androidReportPath, phase:()=>phase,
     authorize:authorization=>androidSessionMatches(authorization,sessions.android,owner.id,client),
     verify:async ()=>assert.deepEqual(await verifiedWriterLedger(),committedLedger),
+    saveFailure:async checkpoint=>{
+      // Diagnose the stopped fixture from one committed database snapshot.
+      const [taskState] = await select(`select i.status,
+        (select count(*)::int from public.task_command_receipts r where r.task_id=i.id
+          and r.request->>'kind'='start' and r.outcome='applied') as applied_starts,
+        (select count(*)::int from public.task_command_receipts r where r.task_id=i.id
+          and r.request->>'kind'='complete' and r.outcome='applied') as applied_completions,
+        (select count(*)::int from public.ledger_entries l where l.child_id=i.child_id and l.source_id=i.id) as ledger_rows
+        from public.task_instances i where i.id=$1`,[task.id]);
+      await writeFile(directory+'/server.json',JSON.stringify({passed:false,status:'android_failed',checkpoint,taskState},null,2)+'\n');
+    },
   });
   try {
     for (const device of ['ios','android']) {

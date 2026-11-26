@@ -327,15 +327,42 @@ class CachedReviewRepository
 
   Future<void> _start(String taskId, {TaskStartOrigin? origin}) async {
     final owner = accountId();
-    final current = await task(taskId);
-    if (accountId() != owner) throw StateError('登录账号已变化');
-    if ((current['task'] as Map)['review_waiting_for_due'] == true ||
-        (current['items'] as List).isEmpty) {
-      throw StateError('今天暂时没有到期的复习题');
+    if (owner == null) throw StateError('请先登录');
+    final generation = store.reviewGeneration(owner);
+    void checkScope() {
+      if (accountId() != owner || store.reviewGeneration(owner) != generation) {
+        throw StateError('登录或复习缓存已变化');
+      }
     }
-    await tasks!.queueReview(taskId, 'start', startOrigin: origin);
-    if (current['offline_cache'] != true && accountId() == owner) {
-      await tasks!.synchronize((current['task'] as Map)['child_id'] as String);
+
+    var current = await task(taskId);
+    final childId = (current['task'] as Map)['child_id'] as String;
+    Future<void> enqueue() {
+      checkScope();
+      if ((current['task'] as Map)['review_waiting_for_due'] == true ||
+          (current['items'] as List).isEmpty) {
+        throw StateError('今天暂时没有到期的复习题');
+      }
+      return tasks!.queueReview(taskId, 'start', startOrigin: origin);
+    }
+
+    try {
+      await enqueue();
+    } on TaskSnapshotMissing {
+      checkScope();
+      if (current['offline_cache'] == true || current['local_pending'] == true) {
+        rethrow;
+      }
+      // The hub can see a newly restored review before the home list does.
+      // Get a fresh authorized list and recheck the questions before queuing.
+      await tasks!.synchronize(childId, freshSnapshot: true);
+      checkScope();
+      current = await task(taskId);
+      await enqueue();
+    }
+    if (current['offline_cache'] != true) {
+      checkScope();
+      await tasks!.synchronize(childId);
     }
   }
 

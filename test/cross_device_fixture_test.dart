@@ -212,4 +212,29 @@ void main() {
       );
     },
   );
+
+  test('only known task waits add a label to a failure report', () {
+    const waits = {
+      'enabled start action': 'start_button',
+      'in-progress task': 'in_progress',
+      'enabled completion action': 'complete_button',
+    };
+    for (final entry in waits.entries) {
+      final failure = TestFailure('Timed out waiting for ${entry.key}');
+      expect(
+        fixtureFailureMark(FlutterErrorDetails(exception: failure)),
+        'AC01_UI_FAILURE kind=assertion line=unknown wait=${entry.value}',
+      );
+    }
+    expect(
+      fixtureFailureMark(
+        FlutterErrorDetails(
+          exception: TestFailure(
+            'Timed out waiting for in-progress task private',
+          ),
+        ),
+      ),
+      'AC01_UI_FAILURE kind=assertion line=unknown',
+    );
+  });
 }

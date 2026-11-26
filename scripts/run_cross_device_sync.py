@@ -39,7 +39,8 @@ ANDROID_APP_STAGES = {"fixture", *LOGIN_STAGES, "load_family_task_and_wallet", "
 STARTUP_MARK = (r"^(LP_STARTUP )?source=(android|dart) stage=(activity_create|activity_first_frame|plugins|channels|"
                 r"binding|notifications|timezone|notificationPlugin|taskAlarmClear|notificationClear|database|"
                 r"credentials|supabase|push|initialization|first_frame) elapsed_us=[0-9]{1,18} outcome=(ok|error)$")
-FAILURE_MARK = r"^AC01_UI_FAILURE kind=(assertion|state|type|framework|other) line=([1-9][0-9]{0,3}|unknown)$"
+FAILURE_MARK = (r"^AC01_UI_FAILURE kind=(assertion|state|type|framework|other) line=([1-9][0-9]{0,3}|unknown)"
+                r"(?: wait=(start_button|in_progress|complete_button))?$")
 PROGRESS_MARK = r"^AC01_PROGRESS_UNACKNOWLEDGED reason=(timeout|transport)$"
 ANDROID_LOG_FILTER = "|".join((STARTUP_MARK, FAILURE_MARK, PROGRESS_MARK))
 
@@ -93,6 +94,8 @@ def startup_summary(path):
                 marks.append(mark)
         elif not failure and (match := re.fullmatch(FAILURE_MARK, line)):
             failure = f" failure_kind={match[1]} fixture_line={match[2]}"
+            if match[3]:
+                failure += f" wait={match[3]}"
         elif match := re.fullmatch(PROGRESS_MARK, line):
             unacknowledged.add(match[1])
     progress = " progress_unacknowledged=" + ",".join(sorted(unacknowledged)) if unacknowledged else ""

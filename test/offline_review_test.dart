@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import 'package:learning_planet/core/offline/offline_store.dart';
 import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'package:learning_planet/features/tasks/data/offline_task_repository.dart';
@@ -32,8 +33,10 @@ class ReviewRemote extends FakeTaskRemote implements ReviewTaskSyncRemote {
   Completer<Map<String, dynamic>>? nextReview;
   Completer<void>? reviewEntered;
   Completer<void>? snapshotEntered;
+  int snapshotReads = 0;
   @override
   Future<Map<String, dynamic>> snapshot(String childId) {
+    snapshotReads++;
     if (snapshotEntered != null && !snapshotEntered!.isCompleted) {
       snapshotEntered!.complete();
     }
@@ -163,6 +166,131 @@ void main() {
     await reviews.transition('task-child', 'start');
     await reviews.answer('task-child', 'question', '4', 'answer-command');
   }
+
+  Future<void> restoreAfterHiddenSnapshot() async {
+    remote.online = true;
+    final original = remote.tasks.remove('task-child')!;
+    await tasks.synchronize('child');
+    expect(await tasks.loadTasks('child'), isEmpty);
+    remote.tasks['task-child'] = {...original, 'sync_version': 2};
+  }
+
+  test(
+    'revived review starts directly from the hub with the withdrawn task list still cached',
+    () async {
+      await restoreAfterHiddenSnapshot();
+      final preview = await reviews.task('task-child');
+      expect(preview['items'], hasLength(1));
+      await startReviewWithOrigin(
+        reviews,
+        'task-child',
+        TaskStartOrigin.childMode,
+      );
+      expect(remote.requests.single['kind'], 'review_start');
+      expect(remote.requests.single['expected_version'], 2);
+      expect(
+        (await reviews.task('task-child'))['task']['status'],
+        'in_progress',
+      );
+      expect(await store.commands('parent'), isEmpty);
+    },
+  );
+
+  test(
+    'a revived review cannot borrow a missing task lease or start under a different account',
+    () async {
+      await restoreAfterHiddenSnapshot();
+      await reviews.task('task-child');
+      remote.online = false;
+      final before = remote.snapshotReads;
+      await expectLater(
+        reviews.transition('task-child', 'start'),
+        throwsStateError,
+      );
+      expect(remote.snapshotReads, before);
+      expect(await store.commands('parent'), isEmpty);
+
+      remote.online = true;
+      remote.snapshotEntered = Completer();
+      remote.snapshotBarrier = Completer();
+      final starting = expectLater(
+        reviews.transition('task-child', 'start'),
+        throwsStateError,
+      );
+      await remote.snapshotEntered!.future;
+      owner = 'other';
+      tasks.scopeChanged();
+      remote.snapshotBarrier!.complete();
+      await starting;
+      expect(remote.requests, isEmpty);
+      expect(await store.commands('parent'), isEmpty);
+      expect(await store.commands('other'), isEmpty);
+      expect(await store.read('other', 'tasks:child'), isNull);
+    },
+  );
+
+  test(
+    'losing connectivity during a refresh leaves the withdrawn task list empty',
+    () async {
+      await restoreAfterHiddenSnapshot();
+      remote.snapshotEntered = Completer();
+      remote.snapshotBarrier = Completer();
+      final starting = expectLater(
+        reviews.transition('task-child', 'start'),
+        throwsStateError,
+      );
+      await remote.snapshotEntered!.future;
+      remote.online = false;
+      remote.snapshotBarrier!.completeError(const SocketException('offline'));
+      await starting;
+      expect((await store.read('parent', 'tasks:child'))!['tasks'], isEmpty);
+      expect(remote.requests, isEmpty);
+      expect(await store.commands('parent'), isEmpty);
+    },
+  );
+
+  test(
+    'a permission denial during the new list read removes the review and propagates',
+    () async {
+      await restoreAfterHiddenSnapshot();
+      remote.snapshotEntered = Completer();
+      remote.snapshotBarrier = Completer();
+      final starting = expectLater(
+        reviews.transition('task-child', 'start'),
+        throwsA(
+          isA<PostgrestException>().having((e) => e.code, 'code', '42501'),
+        ),
+      );
+      await remote.snapshotEntered!.future;
+      remote.snapshotBarrier!.completeError(
+        const PostgrestException(
+          message: 'Child access required',
+          code: '42501',
+        ),
+      );
+      await starting;
+      expect(await store.read('parent', 'tasks:child'), isNull);
+      expect(await store.read('parent', 'review-task:task-child'), isNull);
+      expect(remote.requests, isEmpty);
+      expect(await store.commands('parent'), isEmpty);
+    },
+  );
+
+  test(
+    'a fresh review task-list read waits for a request begun earlier and fetches again',
+    () async {
+      remote.online = true;
+      remote.snapshotEntered = Completer();
+      remote.snapshotBarrier = Completer();
+      final inFlight = tasks.synchronize('child');
+      await remote.snapshotEntered!.future;
+      final before = remote.snapshotReads;
+      final fresh = tasks.synchronize('child', freshSnapshot: true);
+      remote.snapshotBarrier!.complete();
+      await Future.wait([inFlight, fresh]);
+      expect(remote.snapshotReads, before + 1);
+    },
+  );
 
   test(
     'online start refreshes a previously cached preview and confirms it',

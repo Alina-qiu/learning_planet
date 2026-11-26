@@ -245,6 +245,10 @@ class StartupTests(unittest.TestCase):
             self.assertEqual(runner.startup_summary(logfile),
                              "android.activity_create=ok,dart.first_frame=ok,dart.credentials=error failure_kind=state fixture_line=235 "
                              "progress_unacknowledged=transport")
+            for wait in ("start_button", "in_progress", "complete_button"):
+                logfile.write_text("AC01_UI_FAILURE kind=assertion line=25 wait=private_marker\n"
+                                   f"AC01_UI_FAILURE kind=assertion line=25 wait={wait}\n", encoding="utf8")
+                self.assertEqual(runner.startup_summary(logfile).strip(), f"none failure_kind=assertion fixture_line=25 wait={wait}")
 
     def test_occupied_serial_or_port_stops_before_boot(self):
         for occupied in ("port", "serial"):

@@ -42,10 +42,11 @@ test('native auth URL queries share the same fixture cooldown and counters', () 
 async function fixture(t) {
   const dir=await mkdtemp(join(tmpdir(),'android-report-'));
   const file=join(dir,'report.json');
-  const state={phase:'reader-ready',dbValid:true,checks:0,logs:[]};
+  const state={phase:'reader-ready',dbValid:true,checks:0,logs:[],failedCheckpoints:[]};
   const receiver=androidEvidence({scenario,file,phase:()=>state.phase,
     authorize:async bearer=>bearer==='Bearer fixture-session',
     verify:async ()=>{state.checks++;assert.ok(state.dbValid);},
+    saveFailure:async checkpoint=>{state.failedCheckpoints.push(checkpoint);},
     log:line=>state.logs.push(line)});
   const server=createServer((req,res)=>{
     const url=new URL(req.url,'http://localhost');
@@ -112,6 +113,7 @@ test('Android progress is bounded, monotonic, and a terminal test failure cannot
   }
   assert.deepEqual(state.logs,[...checkpoints,'failed'].map(s=>'CROSS_DEVICE_ANDROID_STAGE '+s));
   assert.equal(receiver.checkpoint,'otp_verify_tapped');
+  assert.deepEqual(state.failedCheckpoints,['otp_verify_tapped']);
   assert.equal(receiver.stage,'failed');
   state.phase='writer-complete';
   assert.equal(await post('/report',report),409);

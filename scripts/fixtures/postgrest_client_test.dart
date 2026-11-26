@@ -370,6 +370,63 @@ void main() {
   );
 
   test(
+    'a restored review opens directly from the wrong-question book',
+    () async {
+      final id = await child('从错题本开始');
+      final editor = SupabaseReviewRepository(parent);
+      final store = OfflineStore(NativeDatabase.memory());
+      final tasks = OfflineTaskRepository(
+        store: store,
+        remote: SupabaseTaskSyncRemote(peer),
+        live: SupabaseTaskRepository(peer),
+        accountId: () => peer.auth.currentUser?.id,
+        autoSync: false,
+      )..setForeground(false);
+      final reviews = CachedReviewRepository(
+        SupabaseReviewRepository(peer),
+        store,
+        tasks.accountId,
+        tasks: tasks,
+      );
+      try {
+        await editor.save(id, {
+          'kind': 'question',
+          'subject': 'math',
+          'prompt': '5 + 5',
+          'answers': ['10'],
+        });
+        final taskId = (await editor.overview(id))['task_id'] as String;
+        final questionId = (await editor.questions(id)).single['id'] as String;
+        await editor.archive(questionId, true);
+        expect(await tasks.loadTasks(id), isEmpty);
+        await editor.archive(questionId, false);
+        expect((await reviews.overview(id))['task_id'], taskId);
+        expect((await reviews.task(taskId))['task']['status'], 'ready');
+        await startReviewWithOrigin(reviews, taskId, TaskStartOrigin.childMode);
+        expect((await editor.task(taskId))['task']['status'], 'in_progress');
+        await reviews.answer(taskId, questionId, '10', uuid.v4());
+        await tasks.synchronize(id);
+        await tasks.synchronize(id);
+        final paid = await parent
+            .from('ledger_entries')
+            .select('asset_type,amount')
+            .eq('source_id', taskId);
+        expect(
+          paid,
+          unorderedEquals([
+            {'asset_type': 'coin', 'amount': 15},
+            {'asset_type': 'xp', 'amount': 15},
+          ]),
+        );
+        expect((await editor.task(taskId))['task']['status'], 'completed');
+      } finally {
+        await tasks.dispose();
+        await store.close();
+      }
+    },
+  );
+
+  test(
     'four/five-argument review overloads preserve confidence and automatically settle final answer',
     () async {
       final id = await child('复习 HTTP');

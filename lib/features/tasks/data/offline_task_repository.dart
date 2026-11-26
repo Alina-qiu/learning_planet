@@ -19,6 +19,10 @@ import '../../wrong_questions/domain/review_confidence.dart';
 import 'task_repository.dart';
 import 'task_sync_remote.dart';
 
+class TaskSnapshotMissing extends StateError {
+  TaskSnapshotMissing(super.message);
+}
+
 class _TaskClockAnchor {
   const _TaskClockAnchor(this.received, this.server);
   final DateTime received, server;
@@ -310,7 +314,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
         ? await store.read(owner, 'tasks:$childId')
         : await store.readTaskSummary(owner, childId);
     _check(owner);
-    if (data == null) throw StateError('此孩子尚未缓存，请先联网打开一次任务');
+    if (data == null) throw TaskSnapshotMissing('此孩子尚未缓存，请先联网打开一次任务');
     return data;
   }
 
@@ -524,6 +528,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   }) => _queue(
     taskId,
     'review_$operation',
+    reviewOwner: accountId(),
     questionId: questionId,
     questionVersion: questionVersion,
     answer: answer,
@@ -535,6 +540,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   Future<void> _queue(
     String taskId,
     String kind, {
+    String? reviewOwner,
     String? questionId,
     int? questionVersion,
     String? answer,
@@ -549,6 +555,9 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
       throw ArgumentError('开始来源只能记录在首次开始命令中');
     }
     final owner = _account();
+    if (kind.startsWith('review_') && owner != reviewOwner) {
+      throw StateError('登录账号已变化，请重新打开任务');
+    }
     final generation = store.reviewGeneration(owner);
     final privacy = store.privacyGeneration;
     final appended = await store.transaction(() async {
@@ -579,7 +588,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
           .cast<Map<String, dynamic>>()
           .where((row) => row['id'] == taskId)
           .firstOrNull;
-      if (source == null) throw StateError('任务不在当前孩子的缓存中');
+      if (source == null) throw TaskSnapshotMissing('任务不在当前孩子的缓存中');
       var task = TaskItem.fromJson(
         review == null ? source : review['task'] as Map<String, dynamic>,
       );
@@ -815,15 +824,26 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     await synchronize(childId);
   }
 
-  Future<void> synchronize(String childId) {
+  Future<void> synchronize(String childId, {bool freshSnapshot = false}) {
     final owner = _account();
     _activeChild = childId;
     final existing = _inFlight;
     if (existing != null) {
-      if (_syncOwner == owner && _syncChild == childId) return existing;
+      if (_syncOwner == owner && _syncChild == childId) {
+        if (!freshSnapshot) return existing;
+        return existing.then((_) {
+          _check(owner);
+          return synchronize(childId);
+        });
+      }
+      Future<void> next() {
+        _check(owner);
+        return synchronize(childId);
+      }
+
       return existing.then(
-        (_) => synchronize(childId),
-        onError: (Object _, StackTrace __) => synchronize(childId),
+        (_) => next(),
+        onError: (Object _, StackTrace __) => next(),
       );
     }
     _syncOwner = owner;

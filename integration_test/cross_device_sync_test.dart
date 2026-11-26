@@ -348,14 +348,24 @@ String fixtureFailureMark(FlutterErrorDetails details) {
   final line = RegExp(
     r'\bcross_device_sync_test\.dart:([1-9]\d{0,3}):\d+',
   ).firstMatch(details.stack?.toString() ?? '')?.group(1);
-  return 'AC01_UI_FAILURE kind=$kind line=${line ?? 'unknown'}';
+  final wait = switch (details.exception) {
+    TestFailure(message: 'Timed out waiting for enabled start action') =>
+      'start_button',
+    TestFailure(message: 'Timed out waiting for in-progress task') =>
+      'in_progress',
+    TestFailure(message: 'Timed out waiting for enabled completion action') =>
+      'complete_button',
+    _ => null,
+  };
+  final marker = 'AC01_UI_FAILURE kind=$kind line=${line ?? 'unknown'}';
+  return wait == null ? marker : '$marker wait=$wait';
 }
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   if (Platform.isAndroid) {
-    // Keep the binding's normal failure reporting. Send only a category and
-    // fixture source line through the existing restricted logcat stream.
+    // The restricted stream includes only the category, fixture line and,
+    // for a recognized task timeout, the fixed name of the failed wait.
     final original = reportTestException;
     var recorded = false;
     reportTestException = (details, description) {
