@@ -1,0 +1,117 @@
+name: iPhone background reminder receipt
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-quiet-receipt.yml'
+      - 'ios/**'
+      - 'scripts/run_ios_quiet_receipt.py'
+      - 'scripts/test_ios_quiet_receipt.py'
+      - 'scripts/fixtures/quiet_simulator_host.dart'
+      - 'scripts/select_cross_device_iphone.py'
+      - 'pubspec.*'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Receipt source to exercise
+        type: choice
+        options: [native, system]
+        default: native
+
+permissions:
+  contents: read
+
+jobs:
+  background-receipt:
+    name: background-receipt (${{ matrix.source }})
+    runs-on: macos-15-intel
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJSON(github.event_name == 'pull_request' && '["native","system"]' || (inputs.source == 'system' && '["system"]' || '["native"]')) }}
+    timeout-minutes: 65
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      RECEIPT_SOURCE: ${{ matrix.source }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - name: Verify evidence checks
+        run: python3 scripts/test_ios_quiet_receipt.py -v
+      - name: Select iOS 18.5 device type
+        run: python3 scripts/select_cross_device_iphone.py
+      - name: Create an independent simulator
+        id: device
+        timeout-minutes: 3
+        run: |
+          mkdir -p build/quiet-build
+          xcodebuild -version | tee build/quiet-build/xcode.txt
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          runtime = 'com.apple.CoreSimulator.SimRuntime.iOS-18-5'
+          records = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))['devices'][runtime]
+          template, = (item for item in records if item['udid'] == os.environ['SIMULATOR_ID'])
+          kind = template['deviceTypeIdentifier']
+          name = 'iPhone AC09 ' + os.environ['RECEIPT_SOURCE'] + '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+          udid = subprocess.check_output(['xcrun','simctl','create',name,kind,runtime],text=True,timeout=100).strip()
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              print('SIMULATOR_ID=' + udid, file=output)
+          Path('build/quiet-build/device.json').write_text(json.dumps({'udid':udid,'runtime':runtime,'type':kind,'name':name}))
+          PY
+      - run: flutter pub get
+      - name: Prepare the Flutter test host and native dependencies
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          flutter build ios --simulator --debug --no-pub -d "$SIMULATOR_ID" \
+            --target=scripts/fixtures/quiet_simulator_host.dart > "$RUNNER_TEMP/quiet-build.log" 2>&1 || {
+            tail -120 "$RUNNER_TEMP/quiet-build.log" | tee build/quiet-build/summary.log
+            exit 1
+          }
+          tail -20 "$RUNNER_TEMP/quiet-build.log" > build/quiet-build/summary.log
+      - name: Boot the test iPhone
+        timeout-minutes: 6
+        run: |
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b > "$RUNNER_TEMP/quiet-boot.log"
+      - name: Check ${{ matrix.source }} quiet, wrong-scope, expired and accepted receipts
+        id: receipts
+        timeout-minutes: 28
+        run: python3 scripts/run_ios_quiet_receipt.py --source "$RECEIPT_SOURCE" --device "$SIMULATOR_ID" --report build/ios-quiet-receipt
+      - name: Keep bounded XCTest diagnostics
+        if: always()
+        run: |
+          echo "iOS receipt source **$RECEIPT_SOURCE** — ${{ steps.receipts.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          log = Path('build/ios-quiet-receipt/xctest.log')
+          if log.exists() and log.stat().st_size > 2_000_000:
+              contents = log.read_bytes()
+              lines = contents.splitlines()
+              findings = [l for l in lines if b'error:' in l or b'failed' in l.lower() or b'XCTAssert' in l]
+              log.write_bytes(b'complete log sha256: ' + hashlib.sha256(contents).hexdigest().encode() +
+                  b'\n' + contents[:4000] + b'\n...\n' + b'\n'.join(findings[-50:])[-45000:] +
+                  b'\n...\n' + contents[-350000:])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone18-background-receipt-${{ matrix.source }}
+          path: |
+            build/quiet-build/*.txt
+            build/quiet-build/*.json
+            build/quiet-build/*.log
+            build/ios-quiet-receipt/*.json
+            build/ios-quiet-receipt/xctest.log
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Shut down the dedicated simulator
+        if: always() && steps.device.outcome == 'success'
+        timeout-minutes: 3
+        run: python3 scripts/shutdown_ios_simulator.py

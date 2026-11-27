@@ -13,6 +13,46 @@ major_version = 15
 enabled = true
 site_url = "io.learningplanet.app://login-callback"
 
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+max_frequency = "1m"
+otp_length = 8
+otp_expiry = 600
+
+[auth.email.template.magic_link]
+subject = "学习星球登录验证码"
+content_path = "./supabase/templates/email_otp.html"
+
+[auth.email.template.confirmation]
+subject = "学习星球邮箱验证码"
+content_path = "./supabase/templates/email_otp.html"
+
 [storage]
 enabled = true
 
+[edge_runtime]
+policy = "per_worker"
+
+[functions.permanent-cleanup]
+# Auth is checked with getUser in the handler; also supports a trusted scheduled worker.
+verify_jwt = false
+
+[functions.account-deletion]
+verify_jwt = false
+
+[functions.ai-analysis]
+verify_jwt = false
+
+[functions.parent-push]
+# Server-only dispatch: exact service-role bearer check inside the handler.
+verify_jwt = false
+
+[functions.task-push]
+# Server-only dispatch: exact service-role bearer check inside the handler.
+verify_jwt = false
+
+[functions.worksheet-render]
+verify_jwt = false
+import_map = "./functions/worksheet-render/deno.json"
+static_files = ["./functions/worksheet-render/fonts/*.ttf", "./functions/worksheet-render/fonts/OFL.txt", "./functions/worksheet-render/fonts/README.md"]

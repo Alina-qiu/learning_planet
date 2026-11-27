@@ -1,0 +1,3 @@
+# Unified diff context contains intentional leading spaces/tabs; keep the patch applicable to upstream LF sources.
+scripts/fixtures/gotrue-windows.patch text eol=lf -whitespace
+scripts/fixtures/storage-windows.patch text eol=lf -whitespace

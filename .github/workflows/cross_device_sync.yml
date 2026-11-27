@@ -1,0 +1,191 @@
+name: Android and iPhone sync
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: flutter pub get
+      - name: Build Android driver app for the x86_64 emulator
+        run: |
+          flutter build apk --debug --no-pub --target-platform android-x64 \
+            --target=integration_test/cross_device_sync_test.dart \
+            --dart-define=MEASURE_STARTUP=true \
+            --dart-define=LOCAL_BACKEND=true \
+            --dart-define=SUPABASE_URL=http://127.0.0.1:54326 \
+            --dart-define=SUPABASE_ANON_KEY=sb_publishable_cross_device_loopback_fixture
+          mkdir -p build/cross-device
+          cp build/app/outputs/flutter-apk/app-debug.apk build/cross-device/android-fixture.apk
+      - uses: actions/checkout@v4
+        with:
+          repository: supabase/auth
+          # Upstream v2.196.0 publishes a Darwin arm64 binary only.
+          ref: 0204331ca41a5b49f076b6fa3dc6c0d20b996590
+          path: .auth-src
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: .auth-src/go.sum
+      - name: Compile the matching GoTrue server for the Intel Mac
+        working-directory: .auth-src
+        env:
+          CGO_ENABLED: '0'
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -mod=readonly -buildvcs=false -trimpath \
+            -ldflags='-s -w -X github.com/supabase/auth/internal/utilities.Version=v2.196.0' \
+            -o ../build/cross-device/auth .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-device-test-tools
+          path: |
+            build/cross-device/android-fixture.apk
+            build/cross-device/auth
+          if-no-files-found: error
+          retention-days: 1
+
+  ios-fixture:
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - name: Select a build target on iOS 18.5
+        run: python3 scripts/select_cross_device_iphone.py
+      - run: flutter pub get
+      - name: Build standalone iOS simulator driver app
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          for attempt in 1 2; do
+            if flutter build ios --simulator --debug --no-pub --publish-port -d "$SIMULATOR_ID" \
+                --target=integration_test/cross_device_sync_test.dart \
+                --dart-define=LOCAL_BACKEND=true \
+                --dart-define=SUPABASE_URL=http://127.0.0.1:54325 \
+                --dart-define=SUPABASE_ANON_KEY=sb_publishable_cross_device_loopback_fixture \
+                2>&1 | tee "$RUNNER_TEMP/cross-device-build.log"; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" = 2 ] || ! grep -Fq 'Could not resolve host: dl.google.com' "$RUNNER_TEMP/cross-device-build.log"; then
+              exit "$status"
+            fi
+            echo 'Retrying the Google CocoaPods download after a DNS failure'
+          done
+      - name: Archive the simulator app with its executable modes and symlinks
+        run: |
+          test -x build/ios/iphonesimulator/Runner.app/Runner
+          tar -czf "$RUNNER_TEMP/ios-fixture.tar.gz" -C build/ios/iphonesimulator Runner.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-device-ios-fixture
+          path: ${{ runner.temp }}/ios-fixture.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  sync:
+    needs: [fixtures, ios-fixture]
+    runs-on: macos-15-intel
+    timeout-minutes: 100
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-device-test-tools
+          path: build/cross-device
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-device-ios-fixture
+          path: ${{ runner.temp }}
+      - name: Restore the prebuilt simulator app
+        run: |
+          mkdir -p build/ios/iphonesimulator
+          tar -xzpf "$RUNNER_TEMP/ios-fixture.tar.gz" -C build/ios/iphonesimulator
+          test -x build/ios/iphonesimulator/Runner.app/Runner
+          plutil -lint build/ios/iphonesimulator/Runner.app/Info.plist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Prepare Android 10 x86_64 emulator
+        run: |
+          sdkmanager --install 'emulator' 'platform-tools' 'build-tools;36.0.0' 'system-images;android-29;default;x86_64'
+          echo no | avdmanager create avd --name cross-device-android \
+            --package 'system-images;android-29;default;x86_64' --device 'pixel_2'
+      - run: npm ci
+      - name: Check simulator and backend startup handling
+        run: |
+          python3 scripts/test_cross_device_startup.py
+          python3 scripts/test_android_simulator_flow.py
+          node --test scripts/test_cross_device_android_report.mjs
+      - name: Install and verify disposable backend binaries before boot
+        run: |
+          install -m 755 build/cross-device/auth "$RUNNER_TEMP/cross-device-auth"
+          "$RUNNER_TEMP/cross-device-auth" version
+          curl -fsSL --retry 3 https://github.com/PostgREST/postgrest/releases/download/v16.2/postgrest-v16.2-macos-x86-64.tar.xz -o "$RUNNER_TEMP/postgrest.tar.xz"
+          echo "b69938d92a6a73a56732038bbc37383eeb26d6e554dba66d6a0410a96a493cda  $RUNNER_TEMP/postgrest.tar.xz" | shasum -a 256 -c -
+          tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP"
+          if [ ! -e /usr/local/opt/libpq/lib/libpq.5.dylib ]; then
+            brew install libpq
+          fi
+          "$RUNNER_TEMP/postgrest" --version
+          echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest" >> "$GITHUB_ENV"
+          echo "GOTRUE_BIN=$RUNNER_TEMP/cross-device-auth" >> "$GITHUB_ENV"
+      - name: Select a local iPhone on iOS 18.5 for the paired run
+        run: python3 scripts/select_cross_device_iphone.py
+      - name: Exercise the two apps against one database
+        timeout-minutes: 75
+        run: python3 scripts/run_cross_device_sync.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cross-device-sync-evidence
+          path: |
+            build/integration_results/cross_device_sync_ios_initial.json
+            build/integration_results/cross_device_sync_ios.json
+            build/integration_results/cross_device_sync_android.json
+            build/cross-device/server.json
+          if-no-files-found: warn

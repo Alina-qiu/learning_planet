@@ -5,11 +5,74 @@ import 'package:learning_planet/app/theme.dart';
 import 'package:learning_planet/features/tasks/presentation/task_management_screen.dart';
 import 'package:learning_planet/features/tasks/presentation/schedule_management_screen.dart';
 import 'package:learning_planet/features/tasks/domain/schedule_config.dart';
+import 'package:learning_planet/features/tasks/domain/schedule_snapshot.dart';
+import 'package:learning_planet/features/tasks/domain/task_priority.dart';
 import 'package:learning_planet/features/tasks/data/schedule_repository.dart';
 import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'widget_test.dart' show FakeTaskRepository;
 
 void main() {
+  testWidgets('编辑未来模板可选择完整周期，也可将开始日改回', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScheduleEditor(
+          today: DateTime(2026, 1, 1),
+          initial: const {
+            'title': '阅读',
+            'starts_on': '2026-12-15',
+            'ends_on': '2027-12-16',
+          },
+        ),
+      ),
+    );
+    await tester.tap(find.text('结束：2027-12-16'));
+    await tester.pumpAndSettle();
+    final endPicker = tester.widget<DatePickerDialog>(
+      find.byType(DatePickerDialog),
+    );
+    expect(endPicker.firstDate, DateTime(2026, 12, 15));
+    expect(endPicker.lastDate, DateTime(2027, 12, 16));
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    Future<DatePickerDialog> openStart() async {
+      await tester.tap(find.textContaining('开始：'));
+      await tester.pumpAndSettle();
+      return tester.widget<DatePickerDialog>(find.byType(DatePickerDialog));
+    }
+
+    await openStart();
+    await tester.tap(find.text('18'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('开始：2026-12-18'), findsOneWidget);
+    await openStart();
+    await tester.tap(find.text('14'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('开始：2026-12-14'), findsOneWidget);
+    expect(find.text('结束：2027-12-15'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('计划范围与自定义日期使用日历日，与输入时刻无关', () {
+    ScheduleConfig config(DateTime end) => ScheduleConfig(
+      title: '自选阅读',
+      startsOn: DateTime.utc(2026, 1, 1, 23),
+      endsOn: end,
+      recurrence: ScheduleRecurrence.custom,
+      startTime: '16:00',
+      dueTime: '17:00',
+      customDates: [DateTime.utc(2026, 1, 1)],
+    );
+    expect(config(DateTime.utc(2026, 1, 1)).toJson()['ends_on'], '2026-01-01');
+    expect(config(DateTime.utc(2027, 1, 2)).toJson()['ends_on'], '2027-01-02');
+    expect(
+      () => config(DateTime.utc(2027, 1, 3)).toJson(),
+      throwsFormatException,
+    );
+  });
+
   testWidgets('伪造客户端模式开关不能显示创建或补签入口', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -58,6 +121,26 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, '任务名称'), '每日阅读');
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<TaskPriority>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('挑战').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.widgetWithText(TextFormField, '目标时长（分钟）'),
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, '目标时长（分钟）'),
+      '30',
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('保存配置'),
       250,
@@ -73,6 +156,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(saved?.title, '每日阅读');
     expect(saved?.recurrence, ScheduleRecurrence.daily);
+    expect(saved?.priority, TaskPriority.challenge);
+    expect(saved?.expectedMinutes, 30);
     expect(tester.takeException(), isNull);
   });
   testWidgets('只读计划显示完成率和已批准请假，隐藏修改入口', (tester) async {
@@ -80,32 +165,38 @@ void main() {
       ProviderScope(
         overrides: [
           schedulesProvider.overrideWith(
-            (ref, id) async => [
-              {
-                'id': 'template-1',
-                'title': '阅读计划',
-                'recurrence': 'daily',
-                'starts_on': '2026-09-16',
-                'ends_on': '2026-09-30',
-                'start_time': '16:00',
-                'due_time': '20:00',
-                'coin_reward': 20,
-                'xp_reward': 30,
-                'long_plans': {
-                  'id': 'plan-1',
-                  'minimum_rate': .8,
-                  'bonus_coins': 100,
-                  'bonus_xp': 100,
-                  'settled_at': null,
-                  'plan_leaves': [
-                    {'leave_date': '2026-09-18'},
-                  ],
-                  'progress': {'expected': 14, 'completed': 7, 'rate': .5},
-                  'plan_stage_rewards': [],
-                  'plan_bonus_tiers': [],
+            (ref, id) async => ScheduleSnapshot(
+              childId: id,
+              familyId: 'family-1',
+              fetchedAt: DateTime.utc(2026, 9, 16),
+              familyToday: '2026-09-16',
+              items: [
+                {
+                  'id': 'template-1',
+                  'title': '阅读计划',
+                  'recurrence': 'daily',
+                  'starts_on': '2026-09-16',
+                  'ends_on': '2026-09-30',
+                  'start_time': '16:00',
+                  'due_time': '20:00',
+                  'coin_reward': 20,
+                  'xp_reward': 30,
+                  'long_plans': {
+                    'id': 'plan-1',
+                    'minimum_rate': .8,
+                    'bonus_coins': 100,
+                    'bonus_xp': 100,
+                    'settled_at': null,
+                    'plan_leaves': [
+                      {'leave_date': '2026-09-18'},
+                    ],
+                    'progress': {'expected': 14, 'completed': 7, 'rate': .5},
+                    'plan_stage_rewards': [],
+                    'plan_bonus_tiers': [],
+                  },
                 },
-              },
-            ],
+              ],
+            ),
           ),
           remindersProvider.overrideWith((ref, id) async => []),
         ],

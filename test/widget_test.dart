@@ -11,8 +11,93 @@ import 'package:learning_planet/features/tasks/data/task_repository.dart';
 import 'package:learning_planet/features/tasks/domain/task_item.dart';
 import 'package:learning_planet/features/tasks/domain/task.dart';
 import 'package:learning_planet/features/tasks/domain/wallet_summary.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/review_question_editor.dart';
 
 void main() {
+  testWidgets('未配置服务的调试包直接说明限制，不提供无效登录入口', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpWidget(
+      const LearningPlanetApp(
+        authRepository: UnconfiguredAuthRepository(),
+        familyRepository: UnconfiguredFamilyRepository(),
+        taskRepository: UnconfiguredTaskRepository(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('调试版本尚未连接服务'), findsOneWidget);
+    expect(find.text('发送验证码'), findsNothing);
+    expect(find.byType(TextField), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('删除最后一个孩子后仍可验证 PIN 管理原家庭', (tester) async {
+    final family = FakeFamilyRepository();
+    family.families.add(
+      const Family(
+        id: 'family-1',
+        name: '空家庭',
+        timezone: 'Asia/Shanghai',
+        children: [],
+      ),
+    );
+    await tester.pumpWidget(
+      LearningPlanetApp(
+        authRepository: FakeAuthRepository(
+          const AuthSession(userId: 'parent-1'),
+        ),
+        familyRepository: family,
+        taskRepository: FakeTaskRepository(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('管理家庭'), findsOneWidget);
+    await tester.tap(find.text('管理家庭'));
+    await tester.pumpAndSettle();
+    expect(find.text('输入家长 PIN'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '1234');
+    await tester.tap(find.text('验证'));
+    await tester.pumpAndSettle();
+    expect(find.text('添加孩子'), findsOneWidget);
+    expect(find.byTooltip('孩子删除记录'), findsOneWidget);
+    expect(family.createdFamilyName, isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('退出登录关闭持有上一账号数据的错题编辑路由', (tester) async {
+    final repository = SwitchingAuthRepository();
+    await tester.pumpWidget(
+      LearningPlanetApp(
+        authRepository: repository,
+        familyRepository: FakeFamilyRepository.withChild(),
+        taskRepository: FakeTaskRepository(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.text('今日任务'))).push<void>(
+      MaterialPageRoute(
+        builder: (_) => const ReviewQuestionEditor(
+          pinyin: false,
+          initial: {
+            'final_text': '上一账号的私有题目',
+            'answers': ['private'],
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('上一账号的私有题目'), findsOneWidget);
+    await repository.signOut();
+    await tester.pumpAndSettle();
+    expect(find.byType(ReviewQuestionEditor), findsNothing);
+    expect(find.text('上一账号的私有题目'), findsNothing);
+    expect(find.text('登录学习星球'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await repository.changes.close();
+  });
   testWidgets('未登录时展示邮箱登录并发送验证码', (tester) async {
     final repository = FakeAuthRepository();
     await tester.pumpWidget(
@@ -26,11 +111,12 @@ void main() {
 
     expect(find.text('登录学习星球'), findsOneWidget);
     await tester.enterText(find.byType(EditableText), 'parent@example.com');
-    await tester.tap(find.text('发送登录链接'));
+    await tester.tap(find.text('发送验证码'));
     await tester.pump();
 
     expect(repository.lastOtpEmail, 'parent@example.com');
-    expect(find.text('登录链接已发送，请检查邮箱'), findsOneWidget);
+    expect(find.text('请检查邮箱并输入验证码，也可以查看垃圾邮件文件夹。'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('登录后展示今日任务和自动错题复习入口', (tester) async {
@@ -100,6 +186,9 @@ void main() {
     expect(find.text('创建家庭'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextFormField, '家庭名称'), '星星家');
     await tester.enterText(find.widgetWithText(TextFormField, '孩子昵称'), '星宝');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('创建并开始'));
     await tester.tap(find.text('创建并开始'));
     await tester.pumpAndSettle();
 
@@ -119,10 +208,30 @@ class FakeAuthRepository implements AuthRepository {
   Future<void> sendEmailOtp(String email) async => lastOtpEmail = email;
 
   @override
+  Future<void> verifyEmailOtp(
+    String email,
+    String code, {
+    required bool Function() isCurrent,
+  }) async {}
+
+  @override
   Future<void> signOut() async {}
 
   @override
   Stream<AuthSession?> watchSession() => Stream.value(currentSession);
+}
+
+class SwitchingAuthRepository extends FakeAuthRepository {
+  SwitchingAuthRepository() : super(const AuthSession(userId: 'parent-1'));
+  final changes = StreamController<AuthSession?>.broadcast();
+  @override
+  Stream<AuthSession?> watchSession() async* {
+    yield currentSession;
+    yield* changes.stream;
+  }
+
+  @override
+  Future<void> signOut() async => changes.add(null);
 }
 
 class FakeFamilyRepository implements FamilyRepository {
@@ -160,6 +269,8 @@ class FakeFamilyRepository implements FamilyRepository {
     required String timezone,
     required String childNickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   }) async {
     createdFamilyName = familyName;
     createdChildNickname = childNickname;
@@ -170,6 +281,8 @@ class FakeFamilyRepository implements FamilyRepository {
     required String familyId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
   }) async {}
 
   @override
@@ -202,6 +315,9 @@ class FakeFamilyRepository implements FamilyRepository {
     required String childId,
     required String nickname,
     required int grade,
+    Map<String, String> textbookLabels = const {},
+    String avatarKey = 'star',
+    int expectedVersion = 0,
   }) async {}
 }
 
@@ -243,6 +359,8 @@ class FakeTaskRepository implements TaskRepository {
 
   @override
   Future<void> complete(String taskId) async {}
+  @override
+  Future<void> abandon(String taskId) async {}
 
   @override
   Future<void> manualComplete(String taskId, String reason) async {}

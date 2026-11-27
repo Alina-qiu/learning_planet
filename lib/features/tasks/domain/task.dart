@@ -1,6 +1,14 @@
 enum TaskSource { parentTemplate, longPlan, automaticWrongQuestionReview }
 
-enum TaskStatus { scheduled, ready, inProgress, paused, completed, skipped }
+enum TaskStatus {
+  scheduled,
+  ready,
+  inProgress,
+  paused,
+  completed,
+  skipped,
+  abandoned,
+}
 
 class LearningTask {
   const LearningTask({

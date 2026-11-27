@@ -1,41 +1,311 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 
 import 'app/app.dart';
+import 'app/startup_gate.dart';
 import 'core/config/app_config.dart';
+import 'core/diagnostics/diagnostic_http_client.dart';
+import 'core/diagnostics/runtime_diagnostics.dart';
+import 'core/diagnostics/native_diagnostics.dart';
+import 'core/diagnostics/runtime_error_handlers.dart';
+import 'core/diagnostics/startup_timings.dart';
+import 'core/offline/offline_store.dart';
+import 'core/security/device_secrets.dart';
+import 'core/security/secure_auth_storage.dart';
+import 'features/auth_family/data/offline_family_repository.dart';
+import 'features/auth_family/data/family_access_repository.dart';
+import 'features/tasks/data/offline_task_repository.dart';
+import 'features/tasks/data/task_sync_remote.dart';
 import 'features/auth_family/data/auth_repository.dart';
+import 'features/auth_family/data/email_otp.dart';
 import 'features/auth_family/data/family_repository.dart';
+import 'features/data_management/data/account_deletion_repository.dart';
 import 'features/tasks/data/task_repository.dart';
 import 'features/tasks/data/notification_scheduler.dart';
+import 'features/notifications/data/remote_parent_push.dart';
+import 'features/tasks/data/remote_task_push.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  startStartupMeasurement();
+  measureStartupSync(
+    StartupPhase.binding,
+    WidgetsFlutterBinding.ensureInitialized,
+  );
+  if (startupMeasurementEnabled) {
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => recordStartupFirstFrame(),
+    );
+  }
+  installRuntimeErrorHandlers(runtimeDiagnostics);
+  Future<Widget> load() =>
+      measureStartup(StartupPhase.initialization, initializeApp);
+  final initialLoad = load();
+  // runApp mounts the gate on a scheduled frame. Keep an immediate failure
+  // handled until that frame attaches its recovery UI to this same Future.
+  initialLoad.ignore();
+  runApp(
+    RuntimeDiagnosticsLifecycle(
+      diagnostics: runtimeDiagnostics,
+      child: StartupGate(
+        load: load,
+        initialLoad: initialLoad,
+        onFailure: (error) => runtimeDiagnostics.record(
+          DiagnosticOperation.startup,
+          error: error,
+        ),
+      ),
+    ),
+  );
+}
+
+NativeDiagnostics? _nativeDiagnostics;
+
+Future<Widget> initializeApp() async {
+  await _nativeDiagnostics?.dispose();
+  _nativeDiagnostics = null;
+  runtimeDiagnostics.detach();
   final config = AppConfig.fromEnvironment();
   final AuthRepository authRepository;
   final FamilyRepository familyRepository;
   final TaskRepository taskRepository;
+  SupabaseAccountDeletionRepository? accountDeletion;
+  const nativePush = MethodChannelParentPush();
+  RemoteParentPush? remotePush;
+  RemoteTaskPush? remoteTasks;
+  const nativeTasks = MethodChannelTaskPush();
+  final notifications = LocalNotificationScheduler(
+    remoteTaskPush: () => remoteTasks,
+    onScopeChanged: (scope) async {
+      await Future.wait([
+        remotePush?.setScope(scope) ?? Future<void>.value(),
+        remoteTasks?.setScope(scope) ?? Future<void>.value(),
+      ]);
+    },
+  );
+  // Clear the previous process's local alerts before restoring credentials or
+  // opening a family. This also applies to an unconfigured debug installation.
+  Future<void> clearNotifications() => measureStartup(
+    StartupPhase.notifications,
+    () => notifications.setScope(null),
+  );
 
   if (config.hasAnyBackendConfig) {
-    config.validate();
-    await Supabase.initialize(
-      url: config.supabaseUrl,
-      publishableKey: config.supabaseAnonKey,
+    try {
+      config.validate();
+    } catch (_) {
+      await clearNotifications();
+      rethrow;
+    }
+    final authValues = SecureAuthValues(
+      secrets: const NativeDeviceSecrets(),
+      backendUrl: config.supabaseUrl,
     );
-    authRepository = SupabaseAuthRepository(Supabase.instance.client);
-    familyRepository = SupabaseFamilyRepository(Supabase.instance.client);
-    taskRepository = SupabaseTaskRepository(Supabase.instance.client);
+    final sessionStorage = SecureSessionStorage(
+      authValues,
+      isCurrentSession: (encoded) =>
+          (jsonDecode(encoded) as Map)['access_token'] ==
+          Supabase.instance.client.auth.currentSession?.accessToken,
+    );
+    // Migrate the keychain entries, open the encrypted DB and fence old native
+    // notifications. Auth restoration starts only after all three succeed.
+    OfflineStore? openedStore;
+    try {
+      await Future.wait<void>([
+        measureStartup(StartupPhase.database, OfflineStore.open).then((value) {
+          openedStore = value;
+        }),
+        clearNotifications(),
+        measureStartup(StartupPhase.credentials, sessionStorage.initialize),
+      ]);
+    } catch (_) {
+      await openedStore?.close();
+      rethrow;
+    }
+    final store = openedStore!;
+    final transport = DiagnosticHttpClient(
+      http.Client(),
+      Uri.parse(config.supabaseUrl),
+      runtimeDiagnostics,
+    );
+    try {
+      await measureStartup(
+        StartupPhase.supabase,
+        () => Supabase.initialize(
+          url: config.supabaseUrl,
+          publishableKey: config.supabaseAnonKey,
+          debug: false,
+          httpClient: transport,
+          authOptions: FlutterAuthClientOptions(
+            localStorage: sessionStorage,
+            pkceAsyncStorage: SecurePkceStorage(authValues),
+          ),
+        ),
+      );
+    } catch (_) {
+      // The SDK sets its singleton before awaiting auth storage. Dispose a
+      // partially initialized client so Retry performs a complete initialization.
+      try {
+        await Supabase.instance.dispose();
+      } catch (_) {}
+      transport.close();
+      await store.close();
+      rethrow;
+    }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // The backend retires these registrations during migration. Retry local
+      // cleanup on later launches if the device keystore is temporarily locked.
+      unawaited(
+        RemoteParentPush.clearRetiredRegistration(
+          const NativeDeviceSecrets(),
+          config.supabaseUrl,
+        ).catchError((Object _) {}),
+      );
+    }
+    final client = Supabase.instance.client;
+    String? accountId() => client.auth.currentUser?.id;
+    try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        remotePush = RemoteParentPush(
+          native: nativePush,
+          remote: SupabaseParentPushRemote(
+            client,
+            SupabaseClient(
+              config.supabaseUrl,
+              config.supabaseAnonKey,
+              authOptions: const AuthClientOptions(autoRefreshToken: false),
+            ),
+          ),
+          secrets: const NativeDeviceSecrets(),
+          backendUrl: config.supabaseUrl,
+          accountId: accountId,
+          privacyGeneration: () => store.privacyGeneration,
+          configured: config.parentRemotePush,
+        );
+        await measureStartup(StartupPhase.push, remotePush.initialize);
+        remoteTasks = RemoteTaskPush(
+          native: nativeTasks,
+          remote: SupabaseTaskPushRemote(
+            client,
+            SupabaseClient(
+              config.supabaseUrl,
+              config.supabaseAnonKey,
+              authOptions: const AuthClientOptions(autoRefreshToken: false),
+            ),
+          ),
+          secrets: const NativeDeviceSecrets(),
+          backendUrl: config.supabaseUrl,
+          accountId: accountId,
+          privacyGeneration: () => store.privacyGeneration,
+          configured: config.taskRemotePush,
+        );
+        await remoteTasks.initialize();
+      }
+    } catch (_) {
+      await Supabase.instance.dispose();
+      transport.close();
+      await store.close();
+      rethrow;
+    }
+    authRepository = SupabaseAuthRepository(
+      client,
+      sessionStorage: sessionStorage,
+      beforeSignOut: () async {
+        await Future.wait([
+          remoteTasks?.disable() ?? Future<void>.value(),
+          remotePush?.disable() ?? Future<void>.value(),
+        ]);
+      },
+      emailOtp: EmailOtpTransport(
+        () => GoTrueClient(
+          url: '${config.supabaseUrl}/auth/v1',
+          headers: {'apikey': config.supabaseAnonKey},
+          httpClient: transport,
+          autoRefreshToken: false,
+          flowType: AuthFlowType.implicit,
+        ),
+      ),
+    );
+    final nativeDiagnostics = _nativeDiagnostics = NativeDiagnostics(
+      store: store,
+      owner: accountId,
+      diagnostics: runtimeDiagnostics,
+    );
+    runtimeDiagnostics.attach(
+      store: store,
+      owner: accountId,
+      collectNative: nativeDiagnostics.synchronize,
+      send: (events) async => Map<String, dynamic>.from(
+        await client.rpc(
+              'record_runtime_diagnostics',
+              params: {'events': events},
+            )
+            as Map,
+      ),
+    );
+    final access = FamilyAccessRepository(
+      store: store,
+      accountId: accountId,
+      load: () => FamilyAccessRepository.fetch(client),
+      cancelNotifications: (change) async {
+        if (accountId() != change.owner) return;
+        await notifications.cancelFamilyAccess(
+          change.owner,
+          change.familyId,
+          change.childIds,
+        );
+        if (accountId() != change.owner) return;
+        await remotePush?.disableFamilyAccess(change.owner, change.familyId);
+      },
+    );
+    familyRepository = OfflineFamilyRepository(
+      client,
+      store,
+      accountId,
+      access: access,
+    );
+    final offline = OfflineTaskRepository(
+      store: store,
+      remote: SupabaseTaskSyncRemote(client),
+      live: SupabaseTaskRepository(client),
+      accountId: accountId,
+      refreshFamilyAccess: access.refresh,
+    );
+    accountDeletion = SupabaseAccountDeletionRepository(
+      client,
+      offline: offline,
+    )..prepareEntryCheck();
+    client.auth.onAuthStateChange.listen((_) {
+      offline.scopeChanged();
+      runtimeDiagnostics.scopeChanged();
+      unawaited(nativeDiagnostics.synchronize());
+    });
+    unawaited(nativeDiagnostics.synchronize());
+    taskRepository = offline;
   } else {
+    await clearNotifications();
+    unawaited(
+      const MethodChannelNativeDiagnostics()
+          .read(null)
+          .then<void>((_) {}, onError: (Object _) {}),
+    );
+    await measureStartup(StartupPhase.push, nativePush.disable);
+    await nativeTasks.disable();
     authRepository = const UnconfiguredAuthRepository();
     familyRepository = const UnconfiguredFamilyRepository();
     taskRepository = const UnconfiguredTaskRepository();
   }
 
-  runApp(
-    LearningPlanetApp(
-      authRepository: authRepository,
-      familyRepository: familyRepository,
-      taskRepository: taskRepository,
-      notificationScheduler: LocalNotificationScheduler(),
-    ),
+  return LearningPlanetApp(
+    authRepository: authRepository,
+    familyRepository: familyRepository,
+    taskRepository: taskRepository,
+    notificationScheduler: notifications,
+    remotePush: remotePush,
+    accountDeletion: accountDeletion,
   );
 }

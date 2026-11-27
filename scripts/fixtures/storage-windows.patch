@@ -1,0 +1,29 @@
+diff --git a/src/storage/backend/file.ts b/src/storage/backend/file.ts
+index cc253de..b320b5e 100644
+--- a/src/storage/backend/file.ts
++++ b/src/storage/backend/file.ts
+@@ -4,7 +4,6 @@ import * as fsp from 'node:fs/promises'
+ import { ERRORS, StorageBackendError } from '@internal/errors'
+ import { ensureDir, ensureFile, pathExists, removePath } from '@internal/fs'
+ import { createHash, randomUUID } from 'crypto'
+-import * as xattr from 'fs-xattr'
+ import path from 'path'
+ import stream from 'stream'
+ import { promisify } from 'util'
+@@ -22,6 +21,7 @@ import {
+ import { resolveSecureFilesystemPath } from './secure-path'
+ 
+ const pipeline = promisify(stream.pipeline)
++let xattr: typeof import('fs-xattr')
+ 
+ interface FileMetadata {
+   cacheControl?: string
+@@ -57,6 +57,8 @@ export class FileBackend implements StorageBackendAdapter {
+   etagAlgorithm: 'mtime' | 'md5'
+ 
+   constructor() {
++    // Load the platform-specific native addon only when using the file backend.
++    xattr ??= require('fs-xattr')
+     const { storageFilePath, storageFileEtagAlgorithm } = getConfig()
+     if (!storageFilePath) {
+       throw new Error('FILE_STORAGE_BACKEND_PATH env variable not set')

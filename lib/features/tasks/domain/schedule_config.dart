@@ -1,4 +1,9 @@
+import 'task_priority.dart';
+import 'task_growth_category.dart';
+
 enum ScheduleRecurrence { once, daily, weekly, custom }
+
+const maxScheduleSpanDays = 366;
 
 DateTime parseScheduleDate(String value) {
   final date = DateTime.parse(value);
@@ -26,6 +31,9 @@ class ScheduleConfig {
     this.coins = 20,
     this.xp = 20,
     this.minimumMinutes = 0,
+    this.expectedMinutes = 20,
+    this.priority = TaskPriority.recommended,
+    this.growthCategory = TaskGrowthCategory.general,
     this.longPlan = false,
     this.minimumRate = .8,
     this.bonusCoins = 100,
@@ -40,16 +48,29 @@ class ScheduleConfig {
   final List<int> weekdays;
   final List<DateTime> customDates;
   final int coins, xp, minimumMinutes, bonusCoins, bonusXp;
+  final int expectedMinutes;
+  final TaskPriority priority;
+  final TaskGrowthCategory growthCategory;
   final bool longPlan;
   final double minimumRate;
   final List<Map<String, int>> stages;
   final List<Map<String, num>> tiers;
 
   Map<String, dynamic> toJson() {
+    // SQL compares calendar dates. A local day can have 23 or 25 hours.
+    DateTime calendarDay(DateTime date) =>
+        DateTime.utc(date.year, date.month, date.day);
+    final firstDay = calendarDay(startsOn);
+    final lastDay = calendarDay(endsOn);
     final timePattern = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
+    if (expectedMinutes < 1 ||
+        expectedMinutes > 1440 ||
+        expectedMinutes < minimumMinutes) {
+      throw const FormatException('目标时长需为1至1440分钟，且不少于最低有效时长');
+    }
     if (title.trim().isEmpty ||
-        endsOn.isBefore(startsOn) ||
-        endsOn.difference(startsOn).inDays > 366 ||
+        lastDay.isBefore(firstDay) ||
+        lastDay.difference(firstDay).inDays > maxScheduleSpanDays ||
         !timePattern.hasMatch(startTime) ||
         !timePattern.hasMatch(dueTime) ||
         dueTime.compareTo(startTime) <= 0 ||
@@ -63,7 +84,9 @@ class ScheduleConfig {
     if (recurrence == ScheduleRecurrence.custom &&
         (customDates.isEmpty ||
             customDates.any(
-              (d) => d.isBefore(startsOn) || d.isAfter(endsOn),
+              (d) =>
+                  calendarDay(d).isBefore(firstDay) ||
+                  calendarDay(d).isAfter(lastDay),
             ))) {
       throw const FormatException('自定义日期必须在计划范围内');
     }
@@ -102,6 +125,9 @@ class ScheduleConfig {
       'coins': coins,
       'xp': xp,
       'minimum_seconds': minimumMinutes * 60,
+      'expected_minutes': expectedMinutes,
+      'priority': priority.value,
+      'growth_category': growthCategory.name,
       'rule': {
         'date': scheduleDate(startsOn),
         'weekdays': weekdays.toSet().toList()..sort(),

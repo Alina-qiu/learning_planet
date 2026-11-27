@@ -1,0 +1,927 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:learning_planet/core/offline/offline_store.dart';
+import 'package:learning_planet/core/offline/offline_media_store.dart';
+import 'package:learning_planet/features/auth_family/application/family_providers.dart';
+import 'package:learning_planet/features/wrong_questions/data/question_media_repository.dart';
+import 'package:learning_planet/features/wrong_questions/data/offline_question_media_repository.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/image_drafts_screen.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/question_ocr_screen.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/review_question_editor.dart';
+import 'ocr_fields_test.dart' show seeOcr;
+import 'ocr_management_test.dart' show fixture, FakeImages, FakeMedia;
+
+class PickerStub extends Fake implements ImagePicker {
+  List<XFile> files = [];
+  LostDataResponse lost = LostDataResponse.empty();
+  int? limit;
+  bool? metadata;
+  int recoveries = 0;
+  Object? error;
+  @override
+  Future<List<XFile>> pickMultiImage({
+    double? maxWidth,
+    double? maxHeight,
+    int? imageQuality,
+    int? limit,
+    bool requestFullMetadata = true,
+  }) async {
+    this.limit = limit;
+    metadata = requestFullMetadata;
+    if (error != null) throw error!;
+    return files;
+  }
+
+  @override
+  Future<LostDataResponse> retrieveLostData() async {
+    recoveries++;
+    return lost;
+  }
+}
+
+class CountedFile extends Fake implements XFile {
+  CountedFile(this.size, this.bytes);
+  final int size;
+  final Uint8List bytes;
+  int reads = 0;
+  @override
+  Future<int> length() async => size;
+  @override
+  Future<Uint8List> readAsBytes() async {
+    reads++;
+    return bytes;
+  }
+}
+
+class BatchImages extends FakeImages {
+  List<Uint8List> files = [fixture(), fixture()];
+  Completer<List<Uint8List>>? pending;
+  @override
+  Future<List<Uint8List>> pickMany() async =>
+      pending == null ? files : await pending!.future;
+  @override
+  Future<List<Uint8List>> recover() async => files;
+}
+
+class ExpiringImportStore extends OfflineStore {
+  ExpiringImportStore() : super(NativeDatabase.memory());
+  VoidCallback? afterInsert;
+  @override
+  Future<void> customStatement(String statement, [List<Object?>? args]) async {
+    await super.customStatement(statement, args);
+    if (statement.startsWith('INSERT INTO image_drafts(')) afterInsert?.call();
+  }
+}
+
+class LostSelectionImages extends BatchImages {
+  List<Uint8List> lost = [];
+  int recoveries = 0, discards = 0;
+  final nativeOpened = Completer<void>();
+  @override
+  Future<List<Uint8List>> pickMany() {
+    if (!nativeOpened.isCompleted) nativeOpened.complete();
+    return super.pickMany();
+  }
+
+  @override
+  Future<List<Uint8List>> recover() async {
+    recoveries++;
+    final images = lost;
+    lost = [];
+    return images;
+  }
+
+  @override
+  Future<void> discardUnclaimedSelection() async {
+    discards++;
+    lost = [];
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  group('native image selection adapter', () {
+    late PickerStub picker;
+    late DeviceQuestionImageService service;
+    setUp(() {
+      picker = PickerStub();
+      service = DeviceQuestionImageService(picker: picker);
+    });
+    tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+    test(
+      'multi-select keeps all original bytes and requests bounded minimal metadata',
+      () async {
+        final first = fixture(), second = Uint8List.fromList(fixture());
+        picker.files = [XFile.fromData(first), XFile.fromData(second)];
+        final result = await service.pickMany();
+        expect(result, [first, second]);
+        expect(picker.limit, 10);
+        expect(picker.metadata, isFalse);
+        picker.files = [];
+        expect(await service.pickMany(), isEmpty);
+      },
+    );
+
+    test(
+      'Android recovery returns every file and supports a legacy single result',
+      () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        picker.lost = LostDataResponse(
+          files: [XFile.fromData(fixture()), XFile.fromData(fixture())],
+        );
+        expect(await service.recover(), hasLength(2));
+        picker.lost = LostDataResponse(file: XFile.fromData(fixture()));
+        expect(await service.recover(), hasLength(1));
+        picker.lost = LostDataResponse.empty();
+        expect(await service.recover(), isEmpty);
+        picker.lost = LostDataResponse(
+          exception: PlatformException(code: 'permission_denied'),
+        );
+        await expectLater(service.recover(), throwsA(isA<PlatformException>()));
+        final calls = picker.recoveries;
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        expect(await service.recover(), isEmpty);
+        expect(picker.recoveries, calls);
+      },
+    );
+
+    test(
+      'platform limit violations and oversized files are rejected before reading',
+      () async {
+        final file = CountedFile(10485761, fixture());
+        picker.files = [for (var i = 0; i < 11; i++) file];
+        await expectLater(service.pickMany(), throwsStateError);
+        expect(file.reads, 0);
+        picker.files = [file];
+        await expectLater(service.pickMany(), throwsStateError);
+        expect(file.reads, 0);
+        picker.error = PlatformException(code: 'photo_access_denied');
+        await expectLater(
+          service.pickMany(),
+          throwsA(isA<PlatformException>()),
+        );
+      },
+    );
+
+    test(
+      'invalid or over-dimensioned later images fail the entire selection',
+      () async {
+        picker.files = [
+          XFile.fromData(fixture()),
+          XFile.fromData(Uint8List(8)),
+        ];
+        await expectLater(service.pickMany(), throwsStateError);
+        final huge = Uint8List.fromList(fixture());
+        final sof = Iterable<int>.generate(
+          huge.length - 1,
+        ).firstWhere((i) => huge[i] == 255 && huge[i + 1] == 192);
+        huge[sof + 5] = huge[sof + 7] = 0x17;
+        huge[sof + 6] = huge[sof + 8] =
+            0x70; // 6000 x 6000, no pixel allocation.
+        picker.files = [XFile.fromData(huge)];
+        await expectLater(service.pickMany(), throwsStateError);
+        picker.files = [
+          XFile.fromData(Uint8List.fromList([137, 80, 78, 71, 13, 10, 26, 10])),
+        ];
+        await expectLater(service.pickMany(), throwsStateError);
+      },
+    );
+  });
+
+  group('durable scoped image imports', () {
+    late OfflineStore store;
+    late OfflineQuestionMediaRepository repo;
+    late FakeMedia remote;
+    String? owner, family;
+    void connect() {
+      repo = OfflineQuestionMediaRepository(
+        store: store,
+        live: remote,
+        accountId: () => owner,
+        parentFamily: () => family,
+        autoSync: false,
+      );
+    }
+
+    setUp(() async {
+      store = OfflineStore(NativeDatabase.memory());
+      remote = FakeMedia();
+      owner = 'parent';
+      family = 'family';
+      connect();
+      await store.customSelect('SELECT 1').get();
+    });
+    tearDown(() async {
+      await repo.dispose();
+      await store.close();
+    });
+
+    group('Android interrupted native picker', () {
+      late LostSelectionImages images;
+      setUp(() {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        images = LostSelectionImages();
+      });
+      tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      Future<void> pending() async {
+        await store.openImagePicker(
+          'parent',
+          'family',
+          'a',
+          'original-request',
+          childInput: false,
+          recover: false,
+          discardUnclaimed: images.discardUnclaimedSelection,
+        );
+        images.lost = [
+          fixture(),
+          Uint8List.fromList([...fixture(), 31]),
+        ];
+      }
+
+      Future<List<String>> select(
+        String child, {
+        bool recover = true,
+        bool asChild = false,
+        String group = 'family',
+        Future<bool> Function()? replace,
+      }) => repo.importPickerImages(
+        child,
+        group,
+        images,
+        childInput: asChild,
+        recover: recover,
+        checkPage: () {},
+        confirmReplace: replace ?? () async => false,
+      );
+
+      test(
+        'reopened file binds both originals to their initiating account, family, child and input mode',
+        () async {
+          final directory = await Directory.systemTemp.createTemp(
+            'planet-picker-scope-',
+          );
+          final file = File('${directory.path}/offline.sqlite');
+          try {
+            await repo.dispose();
+            await store.close();
+            store = OfflineStore(NativeDatabase(file));
+            connect();
+            await pending();
+            final selected = [...images.lost];
+            await repo.dispose();
+            await store.close();
+            store = OfflineStore(NativeDatabase(file));
+            connect();
+            await expectLater(select('b'), throwsStateError);
+            await expectLater(select('a', asChild: true), throwsStateError);
+            family = 'another-family';
+            await expectLater(
+              select('a', group: 'another-family'),
+              throwsStateError,
+            );
+            owner = 'another-account';
+            await expectLater(
+              select('b', asChild: true, group: 'another-family'),
+              throwsStateError,
+            );
+            expect(images.recoveries, 0);
+            expect(await store.imageDrafts(owner!), isEmpty);
+            owner = 'parent';
+            family = 'family';
+            final ids = await select('a');
+            expect(ids.toSet(), hasLength(2));
+            for (var i = 0; i < ids.length; i++) {
+              final row = (await repo.draft(ids[i], 'family'));
+              expect(row['child_id'], 'a');
+              expect(row['original'], selected[i]);
+              expect(row['metadata']['import_index'], i + 1);
+              expect(row['metadata']['consent'], false);
+            }
+            await expectLater(select('a'), throwsStateError);
+            expect(images.recoveries, 1);
+            expect(await store.imageDrafts('parent'), hasLength(2));
+          } finally {
+            await repo.dispose();
+            await store.close();
+            store = OfflineStore(NativeDatabase.memory());
+            connect();
+            await directory.delete(recursive: true);
+          }
+        },
+      );
+
+      test(
+        'legacy results cannot be recovered and are discarded before a fresh selection',
+        () async {
+          images.lost = [fixture(), fixture()];
+          await expectLater(select('b', asChild: true), throwsStateError);
+          expect(images.recoveries, 0);
+          expect(images.lost, hasLength(2));
+          images.files = [fixture()];
+          expect(
+            await select('b', asChild: true, recover: false),
+            hasLength(1),
+          );
+          expect(images.discards, 1);
+          expect(images.lost, isEmpty);
+        },
+      );
+
+      test(
+        'explicit replacement drains the previous receipt and protects the new request against stale completion',
+        () async {
+          await pending();
+          owner = 'other';
+          family = null;
+          expect(await select('b', asChild: true, recover: false), isEmpty);
+          expect(images.lost, hasLength(2));
+          expect(images.discards, 1);
+          images.pending = Completer<List<Uint8List>>();
+          final newSelection = repo.importPickerImages(
+            'b',
+            'family',
+            images,
+            childInput: true,
+            recover: false,
+            confirmReplace: () async => true,
+            checkPage: () {},
+          );
+          await images.nativeOpened.future;
+          expect(images.lost, isEmpty);
+          owner = 'parent';
+          family = 'family';
+          await expectLater(select('a'), throwsStateError);
+          await store.finishImagePicker('parent', 'original-request');
+          expect(await store.read('other', 'native-image-picker'), isNotNull);
+          owner = 'other';
+          family = null;
+          images.pending!.complete([fixture()]);
+          expect(await newSelection, hasLength(1));
+          expect(await store.imageDrafts('parent'), isEmpty);
+          expect(await store.imageDrafts('other', childId: 'b'), hasLength(1));
+        },
+      );
+
+      test(
+        'deletion releases the old scope without requiring the removed account',
+        () async {
+          await pending();
+          await store.removeAccountData('parent', 'job');
+          owner = 'other';
+          family = null;
+          images.files = [fixture()];
+          final ids = await select(
+            'b',
+            asChild: true,
+            recover: false,
+            replace: () async =>
+                throw StateError('deleted scope cannot be required'),
+          );
+          expect(ids, hasLength(1));
+          expect(images.lost, isEmpty);
+          expect(images.recoveries, 0);
+        },
+      );
+    });
+
+    test(
+      'imports are independent unconsented drafts, isolated by owner and child',
+      () async {
+        final bytes = fixture();
+        final ids = await repo.importImages(
+          'child',
+          'family',
+          () async => [bytes, bytes],
+        );
+        expect(ids.toSet(), hasLength(2));
+        final rows = await repo.drafts('child', 'family');
+        expect(rows.map((r) => r['import_index']), [1, 2]);
+        for (final id in ids) {
+          final row = await repo.draft(id, 'family');
+          expect(row['original'], bytes);
+          expect(row['processed'], isNull);
+          expect(row['stage'], 'editing');
+          expect(row['metadata']['consent'], false);
+          expect(row['metadata']['config'], isNull);
+          expect(row['metadata']['recognition'], isNull);
+        }
+        expect(await repo.drafts('other-child', 'family'), isEmpty);
+        await repo.synchronize();
+        expect(remote.saves, 0);
+        owner = 'other-parent';
+        expect(await repo.drafts('child', 'family'), isEmpty);
+        expect(
+          await repo.importImages('child', 'family', () async => []),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'a quota failure rolls back all new images while preserving prior drafts',
+      () async {
+        for (var i = 0; i < 49; i++) {
+          await repo.saveDraft(
+            'child',
+            'family',
+            'existing-$i',
+            {},
+            fixture(),
+            null,
+          );
+        }
+        await expectLater(
+          repo.importImages(
+            'child',
+            'family',
+            () async => [fixture(), fixture()],
+          ),
+          throwsStateError,
+        );
+        final rows = await repo.drafts('child', 'family');
+        expect(rows, hasLength(49));
+        expect(
+          rows.every(
+            (row) => (row['draft_id'] as String).startsWith('existing-'),
+          ),
+          true,
+        );
+        expect(rows.every((row) => row['import_index'] == null), true);
+      },
+    );
+
+    test(
+      'account or PIN changes while the picker is open reject all returned images',
+      () async {
+        for (final change in [
+          () => owner = 'other-parent',
+          () => family = null,
+        ]) {
+          owner = 'parent';
+          family = 'family';
+          final selected = Completer<List<Uint8List>>();
+          final importing = repo.importImages(
+            'child',
+            'family',
+            () => selected.future,
+          );
+          final rejected = expectLater(importing, throwsStateError);
+          change();
+          selected.complete([fixture(), fixture()]);
+          await rejected;
+        }
+        expect(await store.imageDrafts('parent'), isEmpty);
+        expect(await store.imageDrafts('other-parent'), isEmpty);
+      },
+    );
+
+    test(
+      'privacy cleanup and invalid batches cannot repopulate local images',
+      () async {
+        final selected = Completer<List<Uint8List>>();
+        final importing = repo.importImages(
+          'child',
+          'family',
+          () => selected.future,
+        );
+        final rejected = expectLater(importing, throwsStateError);
+        await store.removeAccountData('parent', 'deleting');
+        selected.complete([fixture()]);
+        await rejected;
+        owner = 'fresh-parent';
+        await expectLater(
+          repo.importImages(
+            'child',
+            'family',
+            () async => [fixture(), Uint8List(8)],
+          ),
+          throwsStateError,
+        );
+        await expectLater(
+          repo.importImages(
+            'child',
+            'family',
+            () async => List.generate(11, (_) => fixture()),
+          ),
+          throwsStateError,
+        );
+        expect(await repo.drafts('child', 'family'), isEmpty);
+      },
+    );
+
+    test(
+      'all imported originals and order survive a database restart',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-planet-import-',
+        );
+        final file = File('${directory.path}/cache.sqlite');
+        try {
+          await repo.dispose();
+          await store.close();
+          store = OfflineStore(NativeDatabase(file));
+          connect();
+          final ids = await repo.importImages(
+            'child',
+            'family',
+            () async => [fixture(), fixture()],
+          );
+          await repo.dispose();
+          await store.close();
+          store = OfflineStore(NativeDatabase(file));
+          connect();
+          expect(
+            (await repo.drafts('child', 'family')).map((r) => r['draft_id']),
+            ids,
+          );
+          expect((await repo.draft(ids.last, 'family'))['original'], fixture());
+          expect(
+            (await repo.draft(ids.first, 'family'))['metadata']['consent'],
+            false,
+          );
+        } finally {
+          await repo.dispose();
+          await store.close();
+          store = OfflineStore(NativeDatabase.memory());
+          connect();
+          await directory.delete(recursive: true);
+        }
+      },
+    );
+
+    Future<void> mount(
+      WidgetTester tester,
+      BatchImages images, {
+      bool ocr = false,
+      bool childInput = false,
+    }) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            questionMediaRepositoryProvider.overrideWithValue(repo),
+            questionImageServiceProvider.overrideWithValue(images),
+            activeParentFamilyProvider.overrideWith(
+              (ref) => ref.watch(parentFamilyIdProvider),
+            ),
+            parentFamilyIdProvider.overrideWith((ref) => family),
+          ],
+          child: MaterialApp(
+            theme: ThemeData(splashFactory: InkRipple.splashFactory),
+            home: ocr
+                ? QuestionOcrScreen(
+                    childId: 'child',
+                    familyId: 'family',
+                    childInput: childInput,
+                  )
+                : const ImageDraftsScreen(childId: 'child', familyId: 'family'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    test(
+      'PIN expiry after the first SQL insert rolls back the entire batch',
+      () async {
+        await repo.dispose();
+        await store.close();
+        final expiring = ExpiringImportStore();
+        store = expiring;
+        connect();
+        expiring.afterInsert = () => family = null;
+        await expectLater(
+          repo.importImages(
+            'child',
+            'family',
+            () async => [fixture(), fixture()],
+          ),
+          throwsStateError,
+        );
+        expect(await store.imageDrafts('parent'), isEmpty);
+        expect(remote.saves, 0);
+      },
+    );
+
+    testWidgets(
+      'draft list recovery leaves the sibling receipt untouched and replacement requires a separate decision',
+      (tester) async {
+        await tester.runAsync(() async {
+          final images = LostSelectionImages();
+          await store.openImagePicker(
+            'parent',
+            'family',
+            'sibling',
+            'sibling-request',
+            childInput: false,
+            recover: false,
+            discardUnclaimed: () async {},
+          );
+          images.lost = [fixture(), fixture()];
+          await mount(tester, images);
+          Future<void> requestReplacement() async {
+            await tester.tap(find.text('多图导入（每次最多10张）'));
+            final dialog = find.text('放弃本机上次未恢复的选图？');
+            // The draft screen displays an indeterminate progress bar while the
+            // native operation is waiting for this modal to resolve.
+            for (var i = 0; i < 50 && dialog.evaluate().isEmpty; i++) {
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+              await tester.pump(const Duration(milliseconds: 20));
+            }
+            await tester.pump(const Duration(milliseconds: 250));
+            expect(dialog, findsOneWidget);
+          }
+
+          await tester.tap(find.text('恢复中断的图片选择（Android）'));
+          await tester.pumpAndSettle();
+          expect(images.recoveries, 0);
+          expect(await store.imageDrafts('parent', childId: 'child'), isEmpty);
+          await requestReplacement();
+          await tester.tap(find.text('保留上次选择'));
+          await tester.pumpAndSettle();
+          expect(images.lost, hasLength(2));
+          expect(images.discards, 0);
+          await requestReplacement();
+          await tester.tap(find.text('放弃并重新选图'));
+          await tester.pumpAndSettle();
+          expect(images.recoveries, 0);
+          expect(images.discards, 1);
+          expect(
+            await store.imageDrafts('parent', childId: 'child'),
+            hasLength(2),
+          );
+          await tester.pumpWidget(const SizedBox());
+        });
+      },
+    );
+
+    testWidgets(
+      'a delayed native selection is rejected after the page loses parent authorization',
+      (tester) async {
+        await tester.runAsync(() async {
+          final images = BatchImages()..pending = Completer<List<Uint8List>>();
+          await mount(tester, images);
+          await tester.tap(find.text('多图导入（每次最多10张）'));
+          await tester.pump();
+          final container = ProviderScope.containerOf(
+            tester.element(find.byType(ImageDraftsScreen)),
+          );
+          container.read(parentFamilyIdProvider.notifier).state = null;
+          images.pending!.complete([fixture(), fixture()]);
+          await tester.pumpAndSettle();
+          expect(await store.imageDrafts('parent'), isEmpty);
+          expect(find.textContaining('本次未导入'), findsOneWidget);
+          await tester.pumpWidget(const SizedBox());
+        });
+      },
+    );
+
+    testWidgets(
+      'OCR multi-import opens the durable list and keeps per-image consent separate',
+      (tester) async {
+        await tester.runAsync(() async {
+          await mount(tester, BatchImages(), ocr: true);
+          await tester.tap(find.text('多图导入（每次最多10张）'));
+          await tester.pumpAndSettle();
+          expect(find.byType(ImageDraftsScreen), findsOneWidget);
+          expect(await repo.drafts('child', 'family'), hasLength(2));
+          await tester.scrollUntilVisible(
+            find.text('继续校对').first,
+            160,
+            scrollable: find.byType(Scrollable).first,
+          );
+          await tester.tap(find.text('继续校对').first);
+          await tester.pumpAndSettle();
+          expect(find.text('导入图片 · 第1/2张'), findsOneWidget);
+          final consent = find.textContaining('同意将原图、处理图');
+          await tester.scrollUntilVisible(
+            consent,
+            180,
+            scrollable: find.byType(Scrollable).first,
+          );
+          expect(
+            tester
+                .widget<CheckboxListTile>(
+                  find.ancestor(
+                    of: consent,
+                    matching: find.byType(CheckboxListTile),
+                  ),
+                )
+                .value,
+            false,
+          );
+          final consentBox = find.descendant(
+            of: find.ancestor(
+              of: consent,
+              matching: find.byType(CheckboxListTile),
+            ),
+            matching: find.byType(Checkbox),
+          );
+          await tester.ensureVisible(consentBox);
+          await tester.pumpAndSettle();
+          await tester.tap(consentBox);
+          await tester.pumpAndSettle();
+          final rows = await repo.drafts('child', 'family');
+          expect(rows.first['import_index'], 1);
+          expect(
+            (await repo.draft(
+              rows.first['draft_id'] as String,
+              'family',
+            ))['metadata']['consent'],
+            true,
+          );
+          expect(
+            (await repo.draft(
+              rows.last['draft_id'] as String,
+              'family',
+            ))['metadata']['consent'],
+            false,
+          );
+          expect(remote.saves, 0);
+          await tester.pumpWidget(const SizedBox());
+        });
+      },
+    );
+
+    testWidgets(
+      'child can correct two unconsented photos and submit just one for parent review',
+      (tester) async {
+        await tester.runAsync(() async {
+          family = null;
+          final images = BatchImages();
+          Future<void> waitFor(Finder target) async {
+            for (var i = 0; i < 150 && target.evaluate().isEmpty; i++) {
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+              await tester.pump(const Duration(milliseconds: 20));
+            }
+            expect(
+              target,
+              findsOneWidget,
+              reason: tester
+                  .widgetList<Text>(find.byType(Text))
+                  .map((text) => text.data)
+                  .join(' / '),
+            );
+          }
+
+          Future<void> tap(Finder target) async {
+            await seeOcr(tester, target);
+            if (target.hitTestable().evaluate().isEmpty &&
+                find.byType(SnackBar).evaluate().isNotEmpty) {
+              ScaffoldMessenger.of(
+                tester.element(target),
+              ).removeCurrentSnackBar();
+              await tester.pumpAndSettle();
+            }
+            await tester.tap(target);
+            await tester.pumpAndSettle();
+          }
+
+          Future<void> openImage(int index) async {
+            final title = find.text('批量导入 · 第$index/2张');
+            await seeOcr(tester, title);
+            final row = find.ancestor(of: title, matching: find.byType(Card));
+            await tap(find.descendant(of: row, matching: find.text('继续校对')));
+            await seeOcr(tester, find.text('导入图片 · 第$index/2张'));
+          }
+
+          await mount(tester, images, ocr: true, childInput: true);
+          await tap(find.text('多图导入（每次最多10张）'));
+          await waitFor(find.byType(ImageDraftsScreen));
+          final rows = await repo.drafts(
+            'child',
+            'family',
+            includeChildDrafts: true,
+          );
+          expect(rows, hasLength(2));
+          final ids = [for (final row in rows) row['draft_id'] as String];
+          final field = find.widgetWithText(TextFormField, '题目');
+          for (final index in [1, 2]) {
+            await openImage(index);
+            await tap(find.text('设备端识别 / 重试'));
+            await waitFor(find.textContaining('识别完成，以下'));
+            await tap(find.text('校对本机草稿'));
+            await waitFor(find.byType(ReviewQuestionEditor));
+            await seeOcr(tester, field);
+            await tester.enterText(field, '第$index张校对后的题干');
+            tester.testTextInput.hide();
+            await tester.pump();
+            if (index == 1) await tap(find.text('已核对题干的文字与字段归属'));
+            await tap(find.text('保存本机草稿'));
+            await waitFor(find.text('已保存本机草稿'));
+            expect(find.byType(ReviewQuestionEditor), findsNothing);
+            await tester.pageBack();
+            await tester.pumpAndSettle();
+            expect(find.byType(ImageDraftsScreen), findsOneWidget);
+          }
+          await repo.synchronize(retryBlocked: true);
+          expect(remote.saves, 0);
+          for (final index in [1, 2]) {
+            final row = await repo.draft(
+              ids[index - 1],
+              'family',
+              childInput: true,
+            );
+            expect(row['stage'], 'editing');
+            expect(row['metadata']['consent'], false);
+            expect(row['metadata']['config'], isNull);
+            expect(
+              row['metadata']['editor']['ocr_corrections']['prompt'],
+              '第$index张校对后的题干',
+            );
+            expect(
+              row['metadata']['editor']['ocr_field_confirmations'],
+              index == 1 ? ['prompt'] : isEmpty,
+            );
+          }
+
+          await tester.pumpWidget(const SizedBox());
+          await mount(tester, images);
+          await openImage(1);
+          await tap(find.textContaining('同意将原图、处理图'));
+          await tap(find.text('校对、配置答案并保存'));
+          await waitFor(find.byType(ReviewQuestionEditor));
+          await seeOcr(tester, field);
+          expect(
+            tester.widget<TextFormField>(field).controller!.text,
+            '第1张校对后的题干',
+          );
+          await tap(find.text('保存给家长确认'));
+          expect(find.byType(ReviewQuestionEditor), findsOneWidget);
+          expect(
+            (await repo.draft(ids.first, 'family', childInput: true))['stage'],
+            'editing',
+          );
+          final confirm = find.textContaining('我已核对原图和所有题目文字');
+          await seeOcr(tester, confirm, delta: -240);
+          await tester.tap(confirm);
+          await tester.pumpAndSettle();
+          await tap(find.text('保存给家长确认'));
+          await waitFor(find.byType(ImageDraftsScreen));
+          expect(
+            (await repo.draft(ids.first, 'family', childInput: true))['stage'],
+            'queued',
+          );
+          await repo.synchronize();
+          expect(remote.ids, [ids.first]);
+          expect(remote.config!['requires_parent_review'], isTrue);
+          expect(remote.config!['prompt'], '第1张校对后的题干');
+          final sibling = await repo.draft(
+            ids.last,
+            'family',
+            childInput: true,
+          );
+          expect(sibling['stage'], 'editing');
+          expect(sibling['metadata']['consent'], false);
+          expect(
+            sibling['metadata']['editor']['ocr_corrections']['prompt'],
+            '第2张校对后的题干',
+          );
+          await tester.pumpWidget(const SizedBox());
+        });
+      },
+    );
+
+    testWidgets(
+      'recovery imports every file and large text keeps batch controls usable',
+      (tester) async {
+        await tester.runAsync(() async {
+          tester.view.physicalSize = const Size(360, 800);
+          tester.view.devicePixelRatio = 1;
+          tester.platformDispatcher.textScaleFactorTestValue = 2;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          await store.openImagePicker(
+            'parent',
+            'family',
+            'child',
+            'interrupted',
+            childInput: false,
+            recover: false,
+            discardUnclaimed: () async {},
+          );
+          await mount(tester, BatchImages());
+          final recover = find.text('恢复中断的图片选择（Android）');
+          await tester.scrollUntilVisible(recover, 200);
+          await tester.tap(recover);
+          await tester.pumpAndSettle();
+          expect(await repo.drafts('child', 'family'), hasLength(2));
+          await tester.scrollUntilVisible(find.text('批量导入 · 第2/2张'), 200);
+          expect(tester.takeException(), isNull);
+          expect(remote.saves, 0);
+          await tester.pumpWidget(const SizedBox());
+        });
+      },
+    );
+  });
+}

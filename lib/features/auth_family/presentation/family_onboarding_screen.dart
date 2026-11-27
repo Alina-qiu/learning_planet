@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/family_providers.dart';
+import 'child_profile_fields.dart';
+import 'family_creation_screen.dart';
+import 'app_sign_out.dart';
+import '../../data_management/presentation/account_deletion_screen.dart';
 
 class FamilyOnboardingScreen extends ConsumerStatefulWidget {
   const FamilyOnboardingScreen({super.key});
@@ -15,14 +19,13 @@ class _FamilyOnboardingScreenState
     extends ConsumerState<FamilyOnboardingScreen> {
   final _formKey = GlobalKey<FormState>();
   final _familyController = TextEditingController();
-  final _childController = TextEditingController();
-  var _grade = 1;
+  final _childInput = ChildProfileInput();
   var _isSaving = false;
 
   @override
   void dispose() {
     _familyController.dispose();
-    _childController.dispose();
+    _childInput.dispose();
     super.dispose();
   }
 
@@ -30,7 +33,7 @@ class _FamilyOnboardingScreenState
       value == null || value.trim().isEmpty ? '此项不能为空' : null;
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_isSaving || !_formKey.currentState!.validate()) return;
     setState(() => _isSaving = true);
     try {
       await ref
@@ -38,10 +41,12 @@ class _FamilyOnboardingScreenState
           .createFamilyWithChild(
             familyName: _familyController.text.trim(),
             timezone: 'Asia/Shanghai',
-            childNickname: _childController.text.trim(),
-            grade: _grade,
+            childNickname: _childInput.nickname.text.trim(),
+            grade: _childInput.grade,
+            textbookLabels: _childInput.labels,
+            avatarKey: _childInput.avatarKey,
           );
-      ref.invalidate(familiesProvider);
+      if (mounted) ref.invalidate(familiesProvider);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -54,8 +59,23 @@ class _FamilyOnboardingScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (ref.watch(familyCreationRepositoryProvider) != null) {
+      return const FamilyCreationScreen();
+    }
     return Scaffold(
-      appBar: AppBar(title: const Text('创建家庭')),
+      appBar: AppBar(
+        title: const Text('创建家庭'),
+        actions: [
+          const AppSignOutButton(),
+          IconButton(
+            tooltip: '注销我的账号',
+            icon: const Icon(Icons.person_remove_outlined),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const AccountDeletionScreen()),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -76,30 +96,7 @@ class _FamilyOnboardingScreenState
                       validator: _required,
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _childController,
-                      decoration: const InputDecoration(
-                        labelText: '孩子昵称',
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: _required,
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<int>(
-                      initialValue: _grade,
-                      decoration: const InputDecoration(
-                        labelText: '年级',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        for (var grade = 1; grade <= 6; grade++)
-                          DropdownMenuItem(
-                            value: grade,
-                            child: Text('$grade 年级'),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() => _grade = value ?? 1),
-                    ),
+                    ChildProfileFields(input: _childInput),
                     const SizedBox(height: 24),
                     FilledButton(
                       onPressed: _isSaving ? null : _submit,
