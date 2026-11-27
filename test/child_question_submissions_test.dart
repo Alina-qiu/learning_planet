@@ -56,11 +56,17 @@ class SubmissionRemote implements ChildSubmissionRemote {
   Future<Map<String, dynamic>> Function()? saving;
   final requests = <({String id, Map<String, dynamic> config})>[];
   final images = <String>[];
+  final listModes = <bool>[];
   @override
   Future<Map<String, dynamic>> list(
     String child,
-    Map<String, dynamic>? cursor,
-  ) async => page;
+    Map<String, dynamic>? cursor, {
+    bool pendingOnly = false,
+  }) async {
+    listModes.add(pendingOnly);
+    return page;
+  }
+
   @override
   Future<Map<String, dynamic>> read(String draft) async =>
       loading == null ? value : loading!();
@@ -358,6 +364,11 @@ void main() {
           (await h.service.list(submissionScope, access))['items'],
           hasLength(1),
         );
+        await expectLater(
+          h.service.list(submissionScope, access, pendingOnly: true),
+          throwsStateError,
+        );
+        expect(h.remote.listModes, [false]);
         expect(
           (await h.service.read(submissionScope, access, 'draft'))['state'],
           'pending',
@@ -381,6 +392,27 @@ void main() {
           ),
           isNotEmpty,
         );
+      },
+    );
+    test(
+      'pending inbox rejects approved rows and sibling or family responses',
+      () async {
+        h.parent = true;
+        final access = h.service.capture(submissionScope);
+        for (final field in ['owner_id', 'child_id', 'family_id']) {
+          h.remote.page = {...submissionPage(), field: 'other'};
+          await expectLater(
+            h.service.list(submissionScope, access, pendingOnly: true),
+            throwsStateError,
+          );
+        }
+        h.remote.page = submissionPage();
+        h.remote.page['items'][0]['state'] = 'approved';
+        await expectLater(
+          h.service.list(submissionScope, access, pendingOnly: true),
+          throwsStateError,
+        );
+        expect(h.remote.listModes, everyElement(isTrue));
       },
     );
     test(
@@ -515,10 +547,17 @@ void main() {
         await api.signIn();
         api.handle = (r) => MockSupabase.json(r, submissionValue());
         final remote = SupabaseChildSubmissionRemote(api.client);
-        await remote.list('child', {
-          'created_at': '2026-11-05T00:00:00Z',
-          'id': 'draft',
-        });
+        final cursor = {'created_at': '2026-11-05T00:00:00Z', 'id': 'draft'};
+        await remote.list('child', cursor);
+        expect(
+          api.calls.last.url.path,
+          '/rest/v1/rpc/child_question_submissions',
+        );
+        await remote.list('child', cursor, pendingOnly: true);
+        expect(
+          api.calls.last.url.path,
+          '/rest/v1/rpc/pending_child_question_submissions',
+        );
         expect(MockSupabase.body(api.calls.last), {
           'target_child_id': 'child',
           'after_created_at': '2026-11-05T00:00:00Z',
@@ -589,97 +628,112 @@ void main() {
       expect(result?['ocr_confirmed'], true);
     },
   );
-  testWidgets(
-    'parent screen keeps the original approval intent across a lost response and hides data after PIN loss',
-    (tester) async {
-      final h = SubmissionHarness()..parent = true;
-      addTearDown(h.close);
-      final container = ProviderContainer(
-        overrides: [
-          childQuestionSubmissionsProvider.overrideWithValue(h.service),
-          activeParentFamilyProvider.overrideWith(
-            (ref) => ref.watch(parentFamilyIdProvider),
-          ),
-        ],
-      );
-      container.read(parentFamilyIdProvider.notifier).state = 'family';
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            home: const ChildQuestionSubmissionsScreen(
-              childId: 'child',
-              familyId: 'family',
+  for (final pendingOnly in [false, true]) {
+    testWidgets(
+      'parent approves once after a lost response with pendingOnly=$pendingOnly and PIN loss hides data',
+      (tester) async {
+        final h = SubmissionHarness()..parent = true;
+        addTearDown(h.close);
+        final container = ProviderContainer(
+          overrides: [
+            childQuestionSubmissionsProvider.overrideWithValue(h.service),
+            activeParentFamilyProvider.overrideWith(
+              (ref) => ref.watch(parentFamilyIdProvider),
+            ),
+          ],
+        );
+        container.read(parentFamilyIdProvider.notifier).state = 'family';
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              home: ChildQuestionSubmissionsScreen(
+                childId: 'child',
+                familyId: 'family',
+                pendingOnly: pendingOnly,
+              ),
             ),
           ),
-        ),
-      );
-      Future<void> settle() async {
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 60)),
+        );
+        Future<void> settle() async {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 60)),
+          );
+          await tester.pumpAndSettle();
+        }
+
+        await settle();
+        expect(h.remote.listModes, [pendingOnly]);
+        await tester.tap(find.text('2+2=?'));
+        await settle();
+        await tester.ensureVisible(find.text('核对标准答案并确认入库'));
+        await tester.tap(find.text('核对标准答案并确认入库'));
+        await tester.pumpAndSettle();
+        final answer = find.widgetWithText(TextFormField, '标准答案（一行一个可接受答案）');
+        await tester.scrollUntilVisible(
+          find.text('已核对题干的文字与字段归属'),
+          250,
+          scrollable: find.byType(Scrollable).first,
         );
         await tester.pumpAndSettle();
-      }
-
-      await settle();
-      await tester.tap(find.text('2+2=?'));
-      await settle();
-      await tester.ensureVisible(find.text('核对标准答案并确认入库'));
-      await tester.tap(find.text('核对标准答案并确认入库'));
-      await tester.pumpAndSettle();
-      final answer = find.widgetWithText(TextFormField, '标准答案（一行一个可接受答案）');
-      await tester.scrollUntilVisible(
-        find.text('已核对题干的文字与字段归属'),
-        250,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('已核对题干的文字与字段归属'));
-      await tester.scrollUntilVisible(
-        answer,
-        250,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.enterText(answer, '4');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('保存'),
-        300,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.pumpAndSettle();
-      final finalConfirmation = find.widgetWithText(
-        CheckboxListTile,
-        '我已逐项核对原图、所有题目文字（含低置信/未知置信内容）及标准答案',
-      );
-      await tester.ensureVisible(finalConfirmation);
-      await tester.pumpAndSettle();
-      await tester.tap(finalConfirmation);
-      await tester.pumpAndSettle();
-      h.remote.saving = () async => throw const SocketException('reply lost');
-      await tester.ensureVisible(find.text('保存'));
-      await tester.tap(find.text('保存'));
-      await settle();
-      expect(h.remote.requests, hasLength(1));
-      await tester.ensureVisible(find.text('重试原确认请求'));
-      await tester.tap(find.text('重试原确认请求'));
-      await settle();
-      expect(h.remote.requests, hasLength(2));
-      expect(h.remote.requests[0].id, h.remote.requests[1].id);
-      expect(h.remote.requests[0].config, h.remote.requests[1].config);
-      h.remote.saving = null;
-      await tester.tap(find.text('重试原确认请求'));
-      await settle();
-      expect(find.text('家长已确认并入库'), findsOneWidget);
-      h.parent = false;
-      container.read(parentFamilyIdProvider.notifier).state = null;
-      container.read(parentAuthorizationRevisionProvider.notifier).state++;
-      await tester.pumpAndSettle();
-      expect(find.text('2+2=?'), findsNothing);
-      expect(find.text('重试原确认请求'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-      container.dispose();
-    },
-  );
+        await tester.tap(find.text('已核对题干的文字与字段归属'));
+        await tester.scrollUntilVisible(
+          answer,
+          250,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.enterText(answer, '4');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('保存'),
+          300,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        final finalConfirmation = find.widgetWithText(
+          CheckboxListTile,
+          '我已逐项核对原图、所有题目文字（含低置信/未知置信内容）及标准答案',
+        );
+        await tester.ensureVisible(finalConfirmation);
+        await tester.pumpAndSettle();
+        await tester.tap(finalConfirmation);
+        await tester.pumpAndSettle();
+        h.remote.saving = () async => throw const SocketException('reply lost');
+        await tester.ensureVisible(find.text('保存'));
+        await tester.tap(find.text('保存'));
+        await settle();
+        expect(h.remote.requests, hasLength(1));
+        await tester.ensureVisible(find.text('重试原确认请求'));
+        await tester.tap(find.text('重试原确认请求'));
+        await settle();
+        expect(h.remote.requests, hasLength(2));
+        expect(h.remote.requests[0].id, h.remote.requests[1].id);
+        expect(h.remote.requests[0].config, h.remote.requests[1].config);
+        h.remote.saving = null;
+        if (pendingOnly) h.remote.page['items'] = <Map<String, dynamic>>[];
+        await tester.tap(find.text('重试原确认请求'));
+        await settle();
+        if (pendingOnly) {
+          expect(h.remote.listModes, [true, true]);
+          expect(find.text('当前没有待确认的错题。'), findsOneWidget);
+          expect(find.text('2+2=?'), findsNothing);
+        } else {
+          expect(find.text('家长已确认并入库'), findsOneWidget);
+        }
+        h.parent = false;
+        container.read(parentFamilyIdProvider.notifier).state = null;
+        container.read(parentAuthorizationRevisionProvider.notifier).state++;
+        await tester.pumpAndSettle();
+        expect(find.text('2+2=?'), findsNothing);
+        expect(find.text('重试原确认请求'), findsNothing);
+        if (pendingOnly) {
+          expect(find.textContaining('重新验证 PIN'), findsOneWidget);
+          expect(find.text('重新读取提交记录'), findsNothing);
+        }
+        await tester.pumpWidget(const SizedBox());
+        container.dispose();
+      },
+    );
+  }
 }

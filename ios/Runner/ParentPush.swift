@@ -7,6 +7,10 @@ import CoreFoundation
 // Native-only background delivery: never opens Flutter's account database or
 // stores a session/token in UserDefaults. All state transitions run on main.
 final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
+  #if targetEnvironment(simulator) && LP_QUIET_SIMULATOR_TEST
+  enum ReceiptStage { case entered, claimed, completed(UIBackgroundFetchResult) }
+  static var observeTaskReceipt: ((ReceiptStage, [AnyHashable: Any], Int) -> Void)?
+  #endif
   private let taskReminders: Bool
   init(taskReminders: Bool = false) { self.taskReminders = taskReminders; super.init() }
   private let store = UserDefaults.standard
@@ -28,8 +32,21 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
   }
   func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) -> Bool {
+    #if targetEnvironment(simulator) && LP_QUIET_SIMULATOR_TEST
+    let observer = taskReminders ? Self.observeTaskReceipt : nil
+    let state = application.applicationState.rawValue
+    observer?(.entered, userInfo, state)
+    #endif
     guard userInfo["version"] as? String == (taskReminders ? "task-push-v1" : "parent-push-v1") else { return false }
+    #if targetEnvironment(simulator) && LP_QUIET_SIMULATOR_TEST
+    observer?(.claimed, userInfo, state)
+    receive(userInfo) { outcome in
+      observer?(.completed(outcome), userInfo, state)
+      completionHandler(outcome)
+    }
+    #else
     receive(userInfo, completion: completionHandler)
+    #endif
     return true
   }
 

@@ -60,6 +60,41 @@ export async function familyOverviewCases({client,scalar,login,denied,check}) {
     try { assert.deepEqual((await report()).children,r.children); } finally { await client.query('rollback'); }
     assert.equal(await scalar("select count(*) from public.redemptions where child_id=$1 and status in ('requested','approved')",[child]),'4');
   });
+  await check('the family count and parent pending-question pages agree for each child, including tied timestamps', async () => {
+    const page = (id, cursor = null) => scalar('select public.pending_child_question_submissions($1,$2,$3)',
+      [id, cursor?.created_at ?? null, cursor?.id ?? null]);
+    await client.query('reset role');
+    await client.query('begin');
+    try {
+      // Only submitted child drafts still awaiting review belong in either result.
+      await client.query(`insert into public.question_ocr_drafts
+        (id,child_id,owner_id,original_path,processed_path,requires_parent_review,submitted_at,deleting,child_submission)
+        select id,case when n<=52 then $1::uuid else $2::uuid end,$3,'original/'||id,'processed/'||id,
+          n<>56,case when n<>54 then '2026-11-27 00:00Z'::timestamptz end,n=55,'{"prompt":"Private draft"}'::jsonb
+        from (select n,gen_random_uuid() as id from generate_series(1,56) n) input`, [child,sibling,owner]);
+      await auth();
+      const rows = (await report()).children;
+      assert.deepEqual(Object.fromEntries(rows.map(row => [row.child_id,row.pending_question_reviews])),
+        {[child]:52,[sibling]:1,[empty]:0});
+      assert.ok(!JSON.stringify(rows).includes('Private draft'));
+      const first = await page(child), second = await page(child,first.next_cursor);
+      assert.equal(first.items.length,50);
+      assert.equal(first.next_cursor.id,first.items.at(-1).id);
+      assert.equal(first.next_cursor.created_at,first.items.at(-1).submitted_at);
+      assert.equal(second.items.length,2);
+      assert.equal(second.next_cursor,null);
+      const all = [...first.items,...second.items];
+      assert.ok(all.every(row => row.state==='pending' && row.question_id===null));
+      const ids = all.map(row=>row.id);
+      assert.deepEqual(ids,[...new Set(ids)].sort().reverse());
+      const other = await page(sibling);
+      assert.equal(other.child_id,sibling);
+      assert.equal(other.items.length,1);
+      assert.ok(!ids.includes(other.items[0].id));
+      assert.deepEqual((await page(empty)).items,[]);
+    } finally { await client.query('rollback'); }
+    await auth();
+  });
   await check('overview takes today from server family timezone and returns zero rows for an empty family',async()=>{
     await client.query('reset role');
     await client.query("update public.families set timezone='Pacific/Pago_Pago' where id=$1",[family]);
@@ -75,9 +110,15 @@ export async function familyOverviewCases({client,scalar,login,denied,check}) {
   });
   await check('overview requires this session PIN, rejects foreign and anonymous access, and allows authorized ordinary parents',async()=>{
     await login(owner,'overview-no-pin'); await denied('select public.family_overview($1)',[family]);
+    await denied('select public.pending_child_question_submissions($1)',[child]);
     await login(outsider,'overview-outsider'); await denied('select public.family_overview($1)',[family]);
+    await denied('select public.pending_child_question_submissions($1)',[child]);
     await client.query('reset role'); await client.query('set role anon'); await denied('select public.family_overview($1)',[family]);
+    await denied('select public.pending_child_question_submissions($1)',[child]);
     await login(parent,'overview-parent'); await pin(); assert.equal((await report()).children.length,3);
+    assert.deepEqual((await scalar('select public.pending_child_question_submissions($1)',[child])).items,[]);
+    await denied('select public.pending_child_question_submissions($1,$2,null)',[child,'2026-11-27']);
+    await denied('select public.pending_child_question_submissions($1,$2,$3)',[child,'infinity',randomUUID()]);
     await denied('select public.family_overview($1)',[randomUUID()]);
     await scalar('select public.revoke_parent_authorization()'); await denied('select public.family_overview($1)',[family]);
     await auth(); await pin();
@@ -88,6 +129,7 @@ export async function familyOverviewCases({client,scalar,login,denied,check}) {
     await login(parent,'overview-parent'); await pin();
     await client.query('reset role'); await client.query('delete from public.family_members where family_id=$1 and user_id=$2',[family,parent]);
     await login(parent,'overview-parent'); await denied('select public.family_overview($1)',[family]);
+    await denied('select public.pending_child_question_submissions($1)',[child]);
     await auth();
   });
 }

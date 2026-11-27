@@ -2,12 +2,51 @@ import Flutter
 import UIKit
 import UserNotifications
 
+#if targetEnvironment(simulator) && LP_QUIET_SIMULATOR_TEST
+// Only the dedicated XCTest simulator host includes this observer. Flutter holds
+// lifecycle delegates weakly. Register first and let the real handlers claim the
+// notification. Deliberately do not implement or advertise background fetch.
+final class SimulatorReceiptObserver: NSObject, FlutterApplicationLifeCycleDelegate {
+  static let shared = SimulatorReceiptObserver()
+  static var forwarded: ((String) -> Void)?
+  var payload: ((UIApplication, [AnyHashable: Any]) -> Void)?
+  private(set) var registrationStatus = "pending"
+  var registration: ((UIApplication, String) -> Void)?
+  func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    registrationStatus = "registered"
+    registration?(application, registrationStatus)
+  }
+  func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+    registrationStatus = "failed"
+    registration?(application, registrationStatus)
+  }
+  func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+    fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) -> Bool {
+    payload?(application, userInfo)
+    return false
+  }
+}
+#endif
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let parentPush = ParentPush()
   private let taskPush = ParentPush(taskReminders: true)
   private let nativeDiagnostics = NativeDiagnostics()
   private lazy var taskNotifications = TaskNotificationDelegate(forward: self, taskPush: taskPush)
+  #if targetEnvironment(simulator) && LP_QUIET_SIMULATOR_TEST
+  override func forwardingTarget(for aSelector: Selector!) -> Any? {
+    let target = super.forwardingTarget(for: aSelector)
+    if target != nil, let selector = aSelector {
+      switch NSStringFromSelector(selector) {
+      case "application:didReceiveRemoteNotification:fetchCompletionHandler:": SimulatorReceiptObserver.forwarded?("host-remote")
+      case "application:performFetchWithCompletionHandler:": SimulatorReceiptObserver.forwarded?("host-fetch")
+      default: break
+      }
+    }
+    return target
+  }
+  #endif
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -15,6 +54,9 @@ import UserNotifications
     // Register before any Flutter engine is needed. Flutter forwards this
     // optional UIApplication callback dynamically through lifecycle delegates.
     // Swift imports addApplicationLifeCycleDelegate: as add(_:).
+    #if targetEnvironment(simulator) && LP_QUIET_SIMULATOR_TEST
+    add(SimulatorReceiptObserver.shared)
+    #endif
     add(parentPush)
     add(taskPush)
     nativeDiagnostics.start()

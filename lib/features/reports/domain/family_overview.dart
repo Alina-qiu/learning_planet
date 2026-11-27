@@ -15,10 +15,12 @@ class OverviewChild {
     required this.awaitingExpiry,
     required this.pendingAwards,
     required this.pendingCoins,
+    this.pendingQuestionReviews,
   });
   final String id, nickname;
   final List<OverviewDay> days;
   final int requested, approved, awaitingExpiry, pendingAwards, pendingCoins;
+  final int? pendingQuestionReviews;
   OverviewDay get today => days.last;
   int get weekExpected => days.fold(0, (total, day) => total + day.expected);
   int get weekCompleted => days.fold(0, (total, day) => total + day.completed);
@@ -64,6 +66,9 @@ class FamilyOverview {
           awaitingExpiry: _count(row['awaiting_expiry']),
           pendingAwards: _count(row['pending_awards']),
           pendingCoins: _count(row['pending_coins']),
+          pendingQuestionReviews: row.containsKey('pending_question_reviews')
+              ? _count(row['pending_question_reviews'])
+              : null,
         );
       }),
     );

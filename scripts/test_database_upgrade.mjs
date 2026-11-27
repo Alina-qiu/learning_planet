@@ -15,7 +15,7 @@ const report = {runId, passed: false, status: 'running', scope: 'Populated local
 const saveReport = () => writeFile(`${output}/results.json`, JSON.stringify(report, null, 2) + '\n');
 await saveReport();
 const owner = randomUUID(), outsider = randomUUID(), session = randomUUID();
-const raceOwner = randomUUID();
+const raceOwner = randomUUID(), pendingOwner = randomUUID();
 const data = {}, saved = [];
 let database, client;
 const scalar = async (sql, args = []) => Object.values((await client.query(sql, args)).rows[0])[0];
@@ -237,6 +237,26 @@ async function seedV2Worksheets() {
   }
 }
 
+async function seedPendingQuestion() {
+  await login(pendingOwner);
+  data.pendingFamily = await scalar("select public.onboard_family('Pending review upgrade','UTC','Older child',2::smallint)");
+  data.pendingChild = await scalar('select id from public.children where family_id=$1', [data.pendingFamily]);
+  await scalar("select public.set_parent_pin($1,'2468')", [data.pendingFamily]);
+  await scalar("select public.verify_parent_pin($1,'2468')", [data.pendingFamily]);
+  data.pendingQuestionDraft = randomUUID();
+  const draft = await scalar('select public.begin_child_question_upload($1,$2,$3)',
+    [data.pendingChild, data.pendingQuestionDraft, 'e'.repeat(64)]);
+  await client.query("insert into storage.objects(bucket_id,name) values ('wrong-question-images',$1),('wrong-question-images',$2)",
+    [draft.original_path, draft.processed_path]);
+  const config = {kind:'question', subject:'math', prompt:'Historical pending question', answers:[],
+    ocr_confirmed:true, requires_parent_review:true};
+  assert.equal((await scalar('select public.submit_child_question($1,$2,$3)',
+    [draft.id, config, null])).state, 'pending');
+  const overview = await scalar('select public.family_overview($1)', [data.pendingFamily]);
+  assert.ok(!Object.hasOwn(overview.children.find(c => c.child_id === data.pendingChild), 'pending_question_reviews'));
+  await capture('question_ocr_drafts', 'id=$1', [draft.id]);
+}
+
 const checkpoints = new Map([
   ['202609160008_task_maintenance.sql', ['008: old family, children, completed/pending tasks and ledger', seedCore]],
   ['202609160011_wrong_question_pinyin_review.sql', ['011: partially answered frozen review with private answer keys', seedReview]],
@@ -247,12 +267,13 @@ const checkpoints = new Map([
   ['202611240073_review_candidate_lock.sql', ['073: active parent devices and a leased delivery on a retired transport', seedLegacyPushDevice]],
   ['202611260074_parent_push_transports.sql', ['074: published unstarted review, pre-upgrade offline start and later key edit', seedPendingReviewStart]],
   ['202611270075_refresh_unstarted_review.sql', ['075: queued worksheet, live v2 lease and published v2 PDF', seedV2Worksheets]],
+  ['202611270077_review_backlog_before_generation.sql', ['077: a submitted child question predates the parent overview count', seedPendingQuestion]],
 ]);
 
 try {
   database = await startTestDatabase({port: await freePort(),
     users: [{id: owner, email: 'upgrade@example.test'}, {id: outsider, email: 'outsider@example.test'},
-      {id: raceOwner, email: 'review-generation@example.test'}],
+      {id: raceOwner, email: 'review-generation@example.test'}, {id: pendingOwner, email: 'pending-review@example.test'}],
     onMigration: async (name, context) => {
       client = context.client;
       report.migrations.push({name, sha256: createHash('sha256').update(await readFile(`supabase/migrations/${name}`)).digest('hex')});
@@ -308,6 +329,16 @@ try {
     const snapshot = await scalar('select public.load_review_task($1)', [review]);
     assert.deepEqual(snapshot.items.map(i => i.wrong_question_id), [data.lateQuestion]);
     assert.equal(await scalar('select public.generate_daily_wrong_review_task($1)', [data.raceChild]), review);
+  });
+  await check('the upgraded overview and pending-only page find the historical child submission', async () => {
+    await login(pendingOwner);
+    await scalar("select public.verify_parent_pin($1,'2468')", [data.pendingFamily]);
+    const overview = await scalar('select public.family_overview($1)', [data.pendingFamily]);
+    assert.equal(overview.children.find(c => c.child_id === data.pendingChild).pending_question_reviews, 1);
+    const page = await scalar('select public.pending_child_question_submissions($1)', [data.pendingChild]);
+    assert.deepEqual(page.items.map(row => [row.id, row.title, row.state]),
+      [[data.pendingQuestionDraft, 'Historical pending question', 'pending']]);
+    assert.equal(page.next_cursor, null);
   });
   await check('all captured historical fields survive the complete ordered upgrade', async () => {
     await clearIdentity();

@@ -4,13 +4,13 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-当前 Android 联调包支持逐张校对本机草稿。最新 APK 及 SHA-256 见[构建记录](ANDROID_BUILD.md)。此前 `ce1b5a0` 的 Android 10 模拟器登录合成家庭后，完整首页三次冷启动上界分别为 3.22、2.93、4.12 秒。服务端版本 `6bfd0ab` 在 Windows 与 Linux 各通过 914 项 Flutter 测试。[此前首页实测](../build/child-isolation-20261127/release/home-acceptance.json) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45907928103) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45907928107)
+Android 联调包支持逐张校对本机草稿、按张同意上传和家长确认答案。提交 `a25c5d3` 的已登录家庭在 Android 10 模拟器连续三次重开 Release 后，完整首页最迟在 1.65、3.85、3.66 秒可操作。该提交在 Windows 和 Linux 各通过 916 项 Flutter 测试。两台模拟器使用同一家庭时，iPhone 离线重开再联网，6.182 秒发起首个取得新状态的请求。[安装包](ANDROID_BUILD.md) · [本机操作与截图](../build/ocr-local-20261127/DELIVERY.md) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459668) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459657)
 
 现在可以用同一个本机安装包分几天试用同一测试家庭。在项目目录执行 `& ./scripts/local_backend.ps1 -KeepData` 后，关闭服务再用同一命令启动，家庭账号、孩子、账本和私有文件会保留。[本机运行步骤](LOCAL_DEBUG.md) · [两份调试包的用途](ANDROID_BUILD.md) · [双孩子与首页启动实测](../build/child-isolation-20261127/DELIVERY.md)
 
 全新 Android API 36 模拟器安装本机联调 APK 后，已走通收取验证码、首次登录、创建家庭与孩子、进入首页及首次设置家长 PIN。启动服务的窗口会打印能在本机直接使用的收件和停止命令。[首次试用图解](../build/iphone-isolation-20261127/entry/首次试用.md) · [本机安装指引](LOCAL_DEBUG.md)
 
-本机 PostgreSQL 15 已通过 420 项数据库检查，79 份迁移覆盖 9 个有数据的历史节点，22 项升级检查全部通过。新增的 077 修复家庭当地午夜至 00:05 的复习积压数。保留数据模式也在同一测试家庭上实际从 076 升到 077，原任务、两笔奖励流水和两张私有图片均已核对。[本机运行步骤](LOCAL_DEBUG.md) · [复习规则](REVIEW_AUTO_COMPLETION.md) · [数据库与版本升级](../scripts/test_database_upgrade.mjs)
+本机 PostgreSQL 15 已通过 421 项数据库检查。80 份迁移覆盖 10 个有数据的历史节点，24 项升级检查通过。升级至 078 后，家长可在家庭概览看到孩子此前提交的待确认错题数量，点击即可核对。未提交、清理中、已确认的错题均不占待办。[家庭概览](FAMILY_OVERVIEW.md) · [本机运行步骤](LOCAL_DEBUG.md) · [数据库与版本升级](../scripts/test_database_upgrade.mjs)
 
 基线提交 `e178b18` 在 Android 10 模拟器上完成了邮箱验证码登录和一次实际中文印刷图识别，孩子校对并保存后，联网刷新仍显示“待家长确认”。[基线联调版首页](../build/acceptance-20261126/android-local-debug-home.json) · [中文识别与保存](../build/acceptance-20261126/android-release-ocr.json)
 
@@ -87,7 +87,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 |---|---|---|
 | 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS Debug/Release](IOS_BUILD.md)已通过CI未签名编译及资源检查，尚未签名或真机运行 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
-| 后端 | Supabase PostgreSQL/Auth/Storage，77 份业务迁移至 075 | 本机 PG 15.19、GoTrue、PostgREST、Storage、MinIO 已有联调，用户云端项目待准备 |
+| 后端 | Supabase PostgreSQL/Auth/Storage，80 份迁移至 078 | 本机 PostgreSQL 15.19、GoTrue、PostgREST、Storage 和 MinIO 已联调，托管项目待准备 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
@@ -96,7 +96,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 
 依赖声明见[pubspec.yaml](../pubspec.yaml)、[package.json](../package.json)，架构细节见[ARCHITECTURE.md](ARCHITECTURE.md)。本机工具安装在`D:\learning-planet-tools`，未修改系统PATH。
 
-本机 `app-local-debug.apk` 可登录电脑上的临时服务，在 Android 模拟器或通过 USB 连接的手机上操作家庭业务。两种方式都使用 ADB 端口转发。临时服务每次启动都会建立空的测试数据库。普通 `app-debug.apk` 可以打开未配置后端时的启动页。[安装包](ANDROID_BUILD.md) · [启动服务和模拟器](LOCAL_DEBUG.md)
+本机 `app-local-debug.apk` 通过 ADB 端口转发连接电脑服务，支持 Android 模拟器和通过 USB 连接的手机。启动时使用 `-KeepData` 可以连续使用同一家庭，省略该参数会创建一次性测试环境。普通 `app-debug.apk` 在未配置后端时展示配置提示。[安装包](ANDROID_BUILD.md) · [启动服务与模拟器](LOCAL_DEBUG.md)
 
 ## 已确认的产品规则
 
@@ -150,7 +150,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
 | 7.1–7.3 AI契约/审核/隐私 | [AI分析](AI_ANALYSIS.md)、[相似题](SIMILAR_QUESTIONS.md)、[上传提示](WORKSHEET_ACCESSIBILITY.md) | 实际供应商配置、预算和保留策略、教材质量评测；端侧自动模糊未实现，PRD将其列为可选 |
-| 8 数据模型/状态机 | 76 份[迁移](../supabase/migrations)、[411 项全库检查](../build/acceptance-20261126/database-checks.log)、[18 项有数据升级检查](../build/acceptance-20261126/database-upgrade.json)、[本机 Auth/Storage 恢复](BACKUP_RESTORE.md) | 云端迁移、真实 Auth/Storage 版本升级、目标环境备份恢复及回滚 |
+| 8 数据模型/状态机 | 80 份迁移通过 421 项数据库检查，10 个有数据的历史节点通过 24 项升级检查。此前提交 `a25c5d3` 另通过 9 项备份恢复检查。[升级用例](../scripts/test_database_upgrade.mjs) · [此前恢复验收](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459668) · [备份恢复](BACKUP_RESTORE.md) | 托管环境迁移、升级与备份恢复 |
 | 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
 | 12 / 15 迭代与原型 | [离线 HTML 原型](demo/index.html)覆盖冒险大厅、今日复习、错题宝库、任务中心、奖励商店和家长控制台。支持用示例家庭完成第 15.1 节的五项操作，运行 `node scripts/package_demo.mjs` 可生成单文件版本。 | 孩子与家长的实际可用性观察、四周家庭试用仍待开展。V2 功能按验证结果决定。 |
@@ -159,7 +159,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | 提交 `8f39cdc` 的 Android 10 Release 常规冷启动 3/3 达标，孩子、余额与可点击的任务最迟在 4.074、3.775、3.567 秒出现。三次点击完成后，按钮均在 217 毫秒内禁用，其中两次可确认在 500 毫秒内显示保存提示。[本轮启动与反馈](../build/review-refresh-20261126/RESULTS-8f39cdc.md) · [此前测试条件](APP_PERFORMANCE.md) | 一次保存提示的取样区间为 313–515 毫秒。较早版本每轮重装后的三次启动中有一次超出 6 秒。真机性能和重装后的稳定性仍待验证。 |
+| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | Android 10 模拟器连续三次冷启动已登录家庭，完整首页在 1.65、3.85、3.66 秒内可见。同一 Release 包完成一项普通任务，手指按下后 191–232 毫秒显示本机保存成功。[三次启动](../build/ocr-local-20261127/release/home-acceptance.json) · [任务反馈](../build/ocr-local-20261127/release/completion-feedback.json) · [列表和较早的启动测量](APP_PERFORMANCE.md) | Android 与 iPhone 真机、重装后首次启动、各主要列表的目标设备耗时 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | API 29 模拟器恢复本机服务连接后，前台 9.34 秒发出首个快照请求。会话过期、离线重开后再次恢复连接，1.48 秒发出首个快照请求，1.56 秒开始补传操作。[同步时间及账本](../build/acceptance-20261124/android-reconnect.json) | 目标手机的无线网络切换、系统后台限制仍待验证 |
@@ -174,7 +174,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 
 | 编号 | 当前证据 | PRD 场景状态 |
 |---|---|---|
-| AC-01 Android/iOS同步且只奖励一次 | iPhone 缓存待办和零余额并离线重开，Android 完成同一任务。iPhone 重连后 9.276 秒发起首个新快照请求，双方最终显示 7 金币、5 XP。数据库中开始和完成各一个回执，金币与 XP 各一条账本。[双端完整运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45880413245) | 提交 `ce1b5a0` 已在 Android 10、iOS 18.5 两个原生模拟器和同一数据库上通过，目标手机待验收。[后续检查](https://github.com/Alina-qiu/learning_planet/pull/1/checks) |
+| AC-01 Android/iOS同步且只奖励一次 | 提交 `a25c5d3` 中，iPhone 缓存后离线重开，Android 完成任务。iPhone 重连后 6.182 秒发起首个读到新状态的请求。孩子得到 7 金币和 5 XP，两笔流水各一条，兄弟姐妹的任务与钱包保持原值。[双端运行](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459657) | Android 10、iOS 18.5 模拟器和本机数据库已验证。目标手机与托管环境待验收。 |
 | AC-02 重复提交只有一条奖励 | [并发报告](../build/concurrency_integration/results.json)记录 80 条命令重放、4 次丢回执及每个孩子的账本行数 | 本机服务重放场景通过 |
 | AC-03 改时不重复生成或领奖 | API 36 模拟器产生三天连续奖励，系统日期分别拨快、拨慢 48 小时，冷启动并重新从本机服务读取，核对原任务、奖励与账本 ID | 系统改时场景在 Android 模拟器与本机服务通过 |
 | AC-04 离线打卡、上线余额一致 | API 29 实际应用在服务已记账而手机丢失回执时重发同一命令。第二次断网打卡后重开，联网自动补传，两项任务合计 50 金币、40 XP。后续同步的四条账本 ID 及金额均一致。[API 29 记录](../build/acceptance-20261124/android-reconnect.json) · [API 36 记录](../build/auto_sync_device_results/walkthrough.json) | 两个 Android 模拟器版本分别连接本机服务通过 |

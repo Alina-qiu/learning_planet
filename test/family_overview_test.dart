@@ -17,12 +17,16 @@ import 'package:learning_planet/features/reports/presentation/family_overview_sc
 import 'package:learning_planet/features/reports/presentation/learning_report_screen.dart';
 import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'package:learning_planet/features/tasks/data/task_repository.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/child_question_submissions_screen.dart';
 import 'support/mock_supabase.dart';
 import 'widget_test.dart' as fixture;
 import 'economy_test.dart' show FakeEconomy;
 import 'learning_report_test.dart' show FakeReports;
 
-Map<String, dynamic> overviewData({bool empty = false}) => {
+Map<String, dynamic> overviewData({
+  bool empty = false,
+  Map<String, int> pendingReviews = const {'child': 2, 'sibling': 1},
+}) => {
   'family_id': 'family',
   'family_name': '星星家',
   'timezone': 'Asia/Shanghai',
@@ -51,6 +55,8 @@ Map<String, dynamic> overviewData({bool empty = false}) => {
           'awaiting_expiry': 1,
           'pending_awards': 2,
           'pending_coins': 50,
+          if (pendingReviews.containsKey(pair.$1))
+            'pending_question_reviews': pendingReviews[pair.$1],
         },
   ],
 };
@@ -58,13 +64,17 @@ Map<String, dynamic> overviewData({bool empty = false}) => {
 class FakeOverview implements FamilyOverviewRepository {
   int calls = 0;
   bool fail = false, empty = false;
+  Map<String, int> pendingReviews = {'child': 2, 'sibling': 1};
   Completer<FamilyOverview>? pending;
   @override
   Future<FamilyOverview> load(String familyId) async {
     calls++;
     if (fail) throw StateError('Private backend detail');
     if (pending != null) return pending!.future;
-    return FamilyOverview.fromJson(overviewData(empty: empty), familyId);
+    return FamilyOverview.fromJson(
+      overviewData(empty: empty, pendingReviews: pendingReviews),
+      familyId,
+    );
   }
 }
 
@@ -138,6 +148,13 @@ void main() {
       expect(trend.first.rate, isNull);
       expect(report.children.first.weekCompleted, 1);
       expect(report.children.first.weekExpected, 2);
+      expect(report.children.first.pendingQuestionReviews, 2);
+      final partial = FamilyOverview.fromJson(
+        overviewData(pendingReviews: {'child': 0}),
+        'family',
+      );
+      expect(partial.children.first.pendingQuestionReviews, 0);
+      expect(partial.children.last.pendingQuestionReviews, isNull);
       expect(report.trend([report.children.last]).last.rate, .8);
       expect(report.trend([]).every((day) => day.rate == null), isTrue);
       expect(() => report.children.clear(), throwsUnsupportedError);
@@ -160,6 +177,8 @@ void main() {
         (data) => data['children'][0]['days'][0]['day'] = '2026-10-29',
         (data) => data['children'][0]['days'].removeLast(),
         (data) => data['children'][0]['pending_coins'] = 1.5,
+        (data) => data['children'][0]['pending_question_reviews'] = -1,
+        (data) => data['children'][0]['pending_question_reviews'] = null,
       ]) {
         final data = overviewData();
         change(data);
@@ -213,9 +232,11 @@ void main() {
       final container = await mountOverview(tester, repo);
       expect(find.text('今日完成 9/12 项'), findsOneWidget);
       expect(find.textContaining('待审批 3 · 待履约 2'), findsOneWidget);
+      expect(find.text('待确认标准答案：3 道错题'), findsOneWidget);
       await tester.tap(find.widgetWithText(ChoiceChip, '小月'));
       await tester.pumpAndSettle();
       expect(find.text('今日完成 8/10 项'), findsOneWidget);
+      expect(find.text('待确认标准答案：1 道错题'), findsOneWidget);
       expect(container.read(selectedChildIdProvider), isNull);
       expect(repo.calls, 1);
       await tapOverview(tester, find.text('待审批 2'));
@@ -234,6 +255,53 @@ void main() {
       expect(
         (report.childId, report.familyId, report.initialPeriod),
         ('sibling', 'family', 'week'),
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'parent opens the selected child pending inbox and returning refreshes the count at double text size',
+    (tester) async {
+      final repo = FakeOverview();
+      await mountOverview(tester, repo, scale: 2);
+      await tester.tap(find.widgetWithText(ChoiceChip, '小月'));
+      await tester.pumpAndSettle();
+      await tapOverview(tester, find.text('待确认错题 1 道'));
+      final screen = tester.widget<ChildQuestionSubmissionsScreen>(
+        find.byType(ChildQuestionSubmissionsScreen),
+      );
+      expect(
+        (screen.familyId, screen.childId, screen.pendingOnly),
+        ('family', 'sibling', true),
+      );
+      expect(find.text('待确认错题'), findsOneWidget);
+      repo.pendingReviews['sibling'] = 0;
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      final cleared = find.widgetWithText(OutlinedButton, '待确认错题 0 道');
+      await tester.scrollUntilVisible(cleared, 240);
+      expect(tester.widget<OutlinedButton>(cleared).onPressed, isNull);
+      expect(repo.calls, 2);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'a missing child count leaves the total unknown and opens the compatible submission history',
+    (tester) async {
+      final repo = FakeOverview()..pendingReviews = {'child': 2};
+      await mountOverview(tester, repo);
+      expect(find.textContaining('待确认错题数量暂不可用'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ChoiceChip, '小月'));
+      await tester.pumpAndSettle();
+      expect(find.text('待确认标准答案：0 道错题'), findsNothing);
+      await tapOverview(tester, find.text('查看错题提交'));
+      final screen = tester.widget<ChildQuestionSubmissionsScreen>(
+        find.byType(ChildQuestionSubmissionsScreen),
+      );
+      expect(
+        (screen.familyId, screen.childId, screen.pendingOnly),
+        ('family', 'sibling', false),
       );
       await tester.pumpWidget(const SizedBox());
     },

@@ -16,7 +16,11 @@ typedef SubmissionAccess = ({
 });
 
 abstract interface class ChildSubmissionRemote {
-  Future<Map<String, dynamic>> list(String child, Map<String, dynamic>? cursor);
+  Future<Map<String, dynamic>> list(
+    String child,
+    Map<String, dynamic>? cursor, {
+    bool pendingOnly = false,
+  });
   Future<Map<String, dynamic>> read(String draft);
   Future<Map<String, dynamic>> approve(
     String draft,
@@ -36,14 +40,20 @@ class SupabaseChildSubmissionRemote implements ChildSubmissionRemote {
   @override
   Future<Map<String, dynamic>> list(
     String child,
-    Map<String, dynamic>? cursor,
-  ) => _rpc('child_question_submissions', {
-    'target_child_id': child,
-    if (cursor != null) ...{
-      'after_created_at': cursor['created_at'],
-      'after_id': cursor['id'],
+    Map<String, dynamic>? cursor, {
+    bool pendingOnly = false,
+  }) => _rpc(
+    pendingOnly
+        ? 'pending_child_question_submissions'
+        : 'child_question_submissions',
+    {
+      'target_child_id': child,
+      if (cursor != null) ...{
+        'after_created_at': cursor['created_at'],
+        'after_id': cursor['id'],
+      },
     },
-  });
+  );
   @override
   Future<Map<String, dynamic>> read(String draft) =>
       _rpc('child_question_submission', {'target_draft_id': draft});
@@ -169,9 +179,15 @@ class ChildQuestionSubmissions {
     SubmissionScope scope,
     SubmissionAccess access, {
     Map<String, dynamic>? cursor,
+    bool pendingOnly = false,
   }) async {
     await _check(scope, access);
-    final row = await remote.list(scope.childId, cursor);
+    if (pendingOnly && !access.parent) throw StateError('请先验证家长 PIN');
+    final row = await remote.list(
+      scope.childId,
+      cursor,
+      pendingOnly: pendingOnly,
+    );
     await _check(scope, access);
     _scope(scope, access, row);
     if (row['items'] is! List || (row['items'] as List).length > 50) {
@@ -184,6 +200,7 @@ class ChildQuestionSubmissions {
           !ids.add(item['id'] as String) ||
           item['title'] is! String ||
           !['pending', 'approved'].contains(item['state']) ||
+          (pendingOnly && item['state'] != 'pending') ||
           item['submitted_at'] is! String ||
           DateTime.tryParse(item['submitted_at'] as String) == null) {
         throw StateError('错题列表无效');

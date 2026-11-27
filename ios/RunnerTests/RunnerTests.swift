@@ -25,18 +25,6 @@ private enum Probe {
   }
 }
 
-private final class RegistrationProbe: NSObject, FlutterApplicationLifeCycleDelegate {
-  var status = "pending"
-  func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-    status = "registered"
-    try? Probe.write("registration", ["callback": status, "registered": application.isRegisteredForRemoteNotifications])
-  }
-  func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-    status = "failed"
-    try? Probe.write("registration", ["callback": status, "registered": application.isRegisteredForRemoteNotifications])
-  }
-}
-
 @MainActor private final class FixtureBackgroundTask {
   var identifier = UIBackgroundTaskIdentifier.invalid
   func start() {
@@ -52,39 +40,26 @@ private final class RegistrationProbe: NSObject, FlutterApplicationLifeCycleDele
   }
 }
 
-// Only compiled into RunnerTests. Observe each fixture's exact UIKit selector,
-// forwarding every call and original completion unchanged. ParentPush also has
-// a parent-message delegate instance; it returns false for task payloads.
-extension ParentPush {
-  @MainActor @objc dynamic fileprivate func ac09Observe(_ app: UIApplication, payload: [AnyHashable: Any],
-    completion: @escaping (UIBackgroundFetchResult) -> Void) -> Bool {
-    guard let id = payload["message_id"] as? String,
-      let item = Probe.ids.first(where: { $0.value == id }) else {
-      return ac09Observe(app, payload: payload, completion: completion)
-    }
-    // This selector executes on the application main thread. Capture state at
-    // entry, not after the asynchronous authorization or notification callbacks.
-    let state = app.applicationState.rawValue
-    do { try Probe.write("entered-" + item.key, ["message": id, "state": state]) }
-    catch { XCTFail("Could not record native callback entry: \(error)") }
-    let handled = ac09Observe(app, payload: payload) { outcome in
-      let parameters = ["scope_nonce", "issued_ms", "scheduled_ms", "expires_ms", "version",
-                        "message_id", "timezone", "quiet_start", "quiet_end", "kind", "settings_version"]
-      let data = Dictionary(uniqueKeysWithValues: parameters.compactMap { key in
-        (payload[key] as? String).map { (key, $0) }
-      })
-      do {
-        try Probe.write(item.key, ["payload": data, "aps": payload["aps"] as? [String: Any] ?? [:],
-          "state": state, "result": outcome.rawValue, "message": id])
-      } catch { XCTFail("Could not record callback outcome: \(error)") }
-      completion(outcome)
-    }
-    if handled {
-      // Only the delegate that claims this task version can write this record.
-      do { try Probe.write("claimed-" + item.key, ["message": id, "state": state, "handled": true]) }
-      catch { XCTFail("Could not record the task delegate claim: \(error)") }
-    }
-    return handled
+// Unrelated notifications leave a count. Per-case evidence contains only fixture values.
+private func writeObservation(_ name: String, _ values: [String: Any]) {
+  do { try Probe.write(name, values) }
+  catch { XCTFail("Could not record " + name + ": " + String(describing: error)) }
+}
+
+private func observeTask(_ stage: ParentPush.ReceiptStage, _ payload: [AnyHashable: Any], _ state: Int) {
+  guard let id = payload["message_id"] as? String,
+    let name = Probe.ids.first(where: { $0.value == id })?.key else { return }
+  switch stage {
+  case .entered: writeObservation("entered-" + name, ["message": id, "state": state])
+  case .claimed: writeObservation("claimed-" + name, ["message": id, "state": state, "handled": true])
+  case .completed(let outcome):
+    let parameters = ["scope_nonce", "issued_ms", "scheduled_ms", "expires_ms", "version",
+                      "message_id", "timezone", "quiet_start", "quiet_end", "kind", "settings_version"]
+    let data = Dictionary(uniqueKeysWithValues: parameters.compactMap { key in
+      (payload[key] as? String).map { (key, $0) }
+    })
+    writeObservation(name, ["payload": data, "aps": payload["aps"] as? [String: Any] ?? [:],
+      "state": state, "result": outcome.rawValue, "message": id])
   }
 }
 
@@ -110,27 +85,48 @@ final class RunnerTests: XCTestCase {
 
     let selector = NSSelectorFromString("application:didReceiveRemoteNotification:fetchCompletionHandler:")
     let original = try XCTUnwrap(class_getInstanceMethod(ParentPush.self, selector))
-    let observer = try XCTUnwrap(class_getInstanceMethod(ParentPush.self,
-      #selector(ParentPush.ac09Observe(_:payload:completion:))))
     let originalTypes = String(cString: try XCTUnwrap(method_getTypeEncoding(original)))
-    let observerTypes = String(cString: try XCTUnwrap(method_getTypeEncoding(observer)))
-    guard originalTypes == observerTypes else {
-      XCTFail("Observer ABI must match the native Flutter delegate's selector")
-      return
-    }
-    let appDelegate = try XCTUnwrap(UIApplication.shared.delegate as? AppDelegate)
-    XCTAssertTrue(appDelegate.responds(to: selector))
     let app = UIApplication.shared
-    let registration = RegistrationProbe()
+    let appDelegate = try XCTUnwrap(app.delegate as? AppDelegate)
+    let remoteSupported = appDelegate.responds(to: selector)
+    XCTAssertTrue(remoteSupported)
+    let fetch = NSSelectorFromString("application:performFetchWithCompletionHandler:")
+    let lifecycle = SimulatorReceiptObserver.shared
+    var counts: [String: Int] = [:]
+    func count(_ name: String, state: Int) {
+      counts[name, default: 0] += 1
+      writeObservation(name, ["state": state, "count": counts[name]!])
+    }
+    // FlutterAppDelegate dynamically forwards these optional selectors. A routing
+    // observation identifies the selector but has no access to its arguments.
+    SimulatorReceiptObserver.forwarded = { name in
+      if Thread.isMainThread { count(name, state: app.applicationState.rawValue) }
+      else { DispatchQueue.main.async { count(name, state: -1) } }
+    }
+    lifecycle.payload = { application, payload in
+      let state = application.applicationState.rawValue
+      if let id = payload["message_id"] as? String,
+        let name = Probe.ids.first(where: { $0.value == id })?.key {
+        writeObservation("app-" + name, ["message": id, "state": state])
+      } else { count("app-unmatched", state: state) }
+    }
+    ParentPush.observeTaskReceipt = observeTask
+    defer {
+      SimulatorReceiptObserver.forwarded = nil
+      lifecycle.payload = nil
+      lifecycle.registration = nil
+      ParentPush.observeTaskReceipt = nil
+    }
     if source == "system" {
-      appDelegate.add(registration)
+      lifecycle.registration = { application, status in
+        writeObservation("registration", ["callback": status, "registered": application.isRegisteredForRemoteNotifications])
+      }
+      if lifecycle.registrationStatus != "pending" { lifecycle.registration?(app, lifecycle.registrationStatus) }
       app.registerForRemoteNotifications()
-      for _ in 0..<50 where registration.status == "pending" {
+      for _ in 0..<50 where lifecycle.registrationStatus == "pending" {
         try await Task.sleep(nanoseconds: 100_000_000)
       }
     }
-    method_exchangeImplementations(original, observer)
-    defer { method_exchangeImplementations(original, observer) }
 
     // The real AppDelegate's task delegate receives the notification. This
     // separate controller sets up the same app-wide preferences via production
@@ -176,7 +172,9 @@ final class RunnerTests: XCTestCase {
     try Probe.write("ready", ["ids": Probe.ids, "scope": Probe.scope, "anchor": Probe.anchor,
       "scheduled": at, "state": UIApplication.shared.applicationState.rawValue, "started": wall,
       "registrationRequested": source == "system", "registered": app.isRegisteredForRemoteNotifications,
-      "registrationCallback": source == "system" ? registration.status : "notRequested",
+      "registrationCallback": source == "system" ? lifecycle.registrationStatus : "notRequested",
+      "backgroundRefreshStatus": app.backgroundRefreshStatus.rawValue,
+      "remoteSelectorSupported": remoteSupported, "fetchSelectorSupported": appDelegate.responds(to: fetch),
       "pid": ProcessInfo.processInfo.processIdentifier, "authorization": settings.authorizationStatus.rawValue,
       "selector": NSStringFromSelector(selector), "encoding": originalTypes])
 

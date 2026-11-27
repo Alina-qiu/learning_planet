@@ -54,12 +54,19 @@ export async function childQuestionSubmissionCases({client,scalar,login,denied,c
     for(const role of ['anon','service_role']) {await client.query('reset role');await client.query('set role '+role);await denied('select public.child_question_submissions($1)',[child]);}await parentLogin();
   });
   await check('explicit parent confirmation creates one question with confirmed answers and preserves raw child input and OCR metrics',async()=>{
+    const pendingList = () => scalar('select public.pending_child_question_submissions($1)', [child]);
+    const pendingCount = async () => (await scalar('select public.family_overview($1)', [family]))
+      .children.find(row => row.child_id === child).pending_question_reviews;
+    assert.equal(await pendingCount(), 1);
+    assert.deepEqual((await pendingList()).items.map(row => row.id), [draft.id]);
     const key=randomUUID();
     let first;
     const concurrentTask=await generateDuringReviewChange(client,child,async()=>{
       first=await scalar(approveSql,[draft.id,key,answer]);
     });
     question=first.question_id;
+    assert.equal(await pendingCount(), 0);
+    assert.deepEqual((await pendingList()).items, []);
     assert.equal(first.state,'approved');assert.ok(first.confirmed_at);assert.deepEqual(first.config.answers,[]);
     assert.deepEqual(await scalar(approveSql,[draft.id,key,answer]),first);
     await denied(approveSql,[draft.id,key,{...answer,answers:['999']}]);await denied(approveSql,[draft.id,randomUUID(),answer]);

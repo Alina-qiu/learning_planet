@@ -4,6 +4,7 @@ import '../../auth_family/application/auth_providers.dart';
 import '../../auth_family/application/family_providers.dart';
 import '../../economy/presentation/economy_screen.dart';
 import '../../tasks/presentation/task_management_screen.dart';
+import '../../wrong_questions/presentation/child_question_submissions_screen.dart';
 import '../data/family_overview_repository.dart';
 import '../domain/family_overview.dart';
 import 'learning_report_screen.dart';
@@ -87,6 +88,10 @@ class _FamilyOverviewScreenState extends ConsumerState<FamilyOverviewScreen> {
         .where((child) => selectedId == null || child.id == selectedId)
         .toList();
     final days = report.trend(selected);
+    final pendingQuestions =
+        selected.every((c) => c.pendingQuestionReviews != null)
+        ? selected.fold<int>(0, (n, c) => n + c.pendingQuestionReviews!)
+        : null;
     return RefreshIndicator(
       onRefresh: () async {
         _refresh();
@@ -145,6 +150,11 @@ class _FamilyOverviewScreenState extends ConsumerState<FamilyOverviewScreen> {
                 Text(
                   '待审批 ${selected.fold<int>(0, (n, c) => n + c.requested)} · 待履约 ${selected.fold<int>(0, (n, c) => n + c.approved)} · 超额金币待确认 ${selected.fold<int>(0, (n, c) => n + c.pendingAwards)} 笔',
                 ),
+                Text(
+                  pendingQuestions == null
+                      ? '待确认错题数量暂不可用，可查看各孩子的提交'
+                      : '待确认标准答案：$pendingQuestions 道错题',
+                ),
                 const SizedBox(height: 16),
                 Text('近七日完成趋势', style: Theme.of(context).textTheme.titleMedium),
                 const Text('按任务所属日期统计，补签会更新对应日期。'),
@@ -194,6 +204,22 @@ class _FamilyOverviewScreenState extends ConsumerState<FamilyOverviewScreen> {
             spacing: 8,
             runSpacing: 4,
             children: [
+              OutlinedButton(
+                onPressed: child.pendingQuestionReviews == 0
+                    ? null
+                    : () => _open(
+                        ChildQuestionSubmissionsScreen(
+                          childId: child.id,
+                          familyId: widget.familyId,
+                          pendingOnly: child.pendingQuestionReviews != null,
+                        ),
+                      ),
+                child: Text(
+                  child.pendingQuestionReviews == null
+                      ? '查看错题提交'
+                      : '待确认错题 ${child.pendingQuestionReviews} 道',
+                ),
+              ),
               OutlinedButton(
                 onPressed: child.requested == 0
                     ? null

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import '../../auth_family/application/auth_providers.dart';
 import '../../auth_family/application/family_providers.dart';
 import '../../auth_family/presentation/parent_mode_prompt.dart';
 import '../data/child_question_submissions.dart';
@@ -12,9 +13,11 @@ class ChildQuestionSubmissionsScreen extends ConsumerStatefulWidget {
   const ChildQuestionSubmissionsScreen({
     required this.childId,
     required this.familyId,
+    this.pendingOnly = false,
     super.key,
   });
   final String childId, familyId;
+  final bool pendingOnly;
   @override
   ConsumerState<ChildQuestionSubmissionsScreen> createState() =>
       _ChildQuestionSubmissionsScreenState();
@@ -52,6 +55,11 @@ class _ChildQuestionSubmissionsScreenState
 
   Future<void> _load({bool more = false}) async {
     if (_busy || !mounted) return;
+    if (widget.pendingOnly &&
+        (ref.read(activeParentFamilyProvider) != widget.familyId ||
+            ref.read(signingOutProvider))) {
+      return;
+    }
     final epoch = ++_epoch;
     setState(() {
       _busy = true;
@@ -74,6 +82,7 @@ class _ChildQuestionSubmissionsScreenState
         _scope,
         access,
         cursor: more ? _cursor : null,
+        pendingOnly: widget.pendingOnly,
       );
       if (!mounted || epoch != _epoch) return;
       setState(() {
@@ -131,7 +140,8 @@ class _ChildQuestionSubmissionsScreenState
               builder: (_, ref, _) {
                 ref.watch(activeParentFamilyProvider);
                 ref.watch(parentAuthorizationRevisionProvider);
-                return service.isCurrent(_scope, access)
+                return !ref.watch(signingOutProvider) &&
+                        service.isCurrent(_scope, access)
                     ? ReviewQuestionEditor(
                         pinyin: false,
                         fromImage: true,
@@ -169,27 +179,32 @@ class _ChildQuestionSubmissionsScreenState
         _approval!,
       );
       if (!mounted || epoch != _epoch) return;
-      setState(() {
-        _selected = {...confirmed, 'image_urls': row['image_urls']};
-        _rows = [
-          for (final r in _rows)
-            r['id'] == confirmed['draft_id']
-                ? {
-                    ...r,
-                    'state': 'approved',
-                    'question_id': confirmed['question_id'],
-                  }
-                : r,
-        ];
-        _approval = null;
-        _request = null;
-      });
       ref.invalidate(reviewQuestionsProvider(widget.childId));
       ref.invalidate(questionCatalogRepositoryProvider);
       ref.invalidate(reviewOverviewProvider(widget.childId));
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('标准答案已确认，错题已加入复习库。本次确认不发放奖励。')),
       );
+      if (widget.pendingOnly) {
+        setState(() => _busy = false);
+        await _load();
+      } else {
+        setState(() {
+          _selected = {...confirmed, 'image_urls': row['image_urls']};
+          _rows = [
+            for (final r in _rows)
+              r['id'] == confirmed['draft_id']
+                  ? {
+                      ...r,
+                      'state': 'approved',
+                      'question_id': confirmed['question_id'],
+                    }
+                  : r,
+          ];
+          _approval = null;
+          _request = null;
+        });
+      }
     } catch (error) {
       if (mounted && epoch == _epoch) {
         setState(() => _error = '确认结果未取得：$error。可重试原确认请求；若已由其他家长处理，请返回刷新。');
@@ -207,11 +222,17 @@ class _ChildQuestionSubmissionsScreenState
     ref.listen(parentAuthorizationRevisionProvider, (_, _) {
       setState(_reset);
     });
+    if (widget.pendingOnly && (!parent || ref.watch(signingOutProvider))) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('待确认错题')),
+        body: const Center(child: Text('家长授权已到期，请返回首页重新验证 PIN')),
+      );
+    }
     final selected = _current ? _selected : null;
     final config = selected?['config'] as Map?;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('孩子提交与家长确认'),
+        title: Text(widget.pendingOnly ? '待确认错题' : '孩子提交与家长确认'),
         actions: [
           IconButton(
             onPressed: _busy || _approval != null ? null : () => _load(),
@@ -300,10 +321,14 @@ class _ChildQuestionSubmissionsScreenState
                   if (_approval != null)
                     const Text('已保留本次确认内容，重试不会重复建题。返回刷新可查看服务端最终状态。'),
                 ] else if (_current) ...[
-                  if (_rows.isEmpty && !_busy)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text('暂无已提交记录。本机草稿须完成校对并上传后才会出现在这里。'),
+                  if (_rows.isEmpty && !_busy && _error == null)
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        widget.pendingOnly
+                            ? '当前没有待确认的错题。'
+                            : '暂无已提交记录。本机草稿须完成校对并上传后才会出现在这里。',
+                      ),
                     ),
                 ],
               ],
