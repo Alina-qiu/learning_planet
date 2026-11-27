@@ -58,7 +58,8 @@ class _FamilyOverviewScreenState extends ConsumerState<FamilyOverviewScreen> {
                 .watch(familyOverviewProvider(widget.familyId))
                 .when(
                   skipLoadingOnRefresh: false,
-                  data: _content,
+                  data: (report) =>
+                      SafeArea(top: false, child: _content(report)),
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
                   error: (_, __) => Center(

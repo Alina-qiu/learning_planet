@@ -628,6 +628,104 @@ void main() {
       expect(result?['ocr_confirmed'], true);
     },
   );
+  for (final size in [const Size(360, 640), const Size(640, 360)]) {
+    testWidgets(
+      'submission list and approval stay tappable above system bars at $size',
+      (tester) async {
+        final h = SubmissionHarness()..parent = true;
+        addTearDown(h.close);
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = size;
+        final landscape = size.width > size.height;
+        final insets = landscape
+            ? const FakeViewPadding(top: 24, left: 44, right: 48, bottom: 24)
+            : const FakeViewPadding(top: 24, bottom: 48);
+        tester.view.viewPadding = insets;
+        tester.view.padding = insets;
+        addTearDown(tester.view.reset);
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final first = (h.remote.page['items'] as List).first as Map;
+        h.remote.page['items'] = [
+          for (var i = 0; i < 12; i++)
+            {...first, 'id': 'draft-$i', 'title': '错题 $i'},
+        ];
+        h.remote.value['draft_id'] = 'draft-11';
+        h.remote.value['config']['prompt'] = List.filled(
+          12,
+          '请计算四加五的结果。',
+        ).join();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              childQuestionSubmissionsProvider.overrideWithValue(h.service),
+              activeParentFamilyProvider.overrideWithValue('family'),
+            ],
+            child: const MaterialApp(
+              home: ChildQuestionSubmissionsScreen(
+                childId: 'child',
+                familyId: 'family',
+                pendingOnly: true,
+              ),
+            ),
+          ),
+        );
+        Future<void> settle() async {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 80)),
+          );
+          await tester.pumpAndSettle();
+        }
+
+        Future<void> reveal(Finder control) async {
+          final scroll = find.byType(Scrollable).first;
+          await tester.scrollUntilVisible(control, 180, scrollable: scroll);
+          await tester.ensureVisible(control);
+          await tester.pumpAndSettle();
+          final rect = tester.getRect(control);
+          expect(rect.top, greaterThanOrEqualTo(insets.top));
+          expect(rect.left, greaterThanOrEqualTo(insets.left));
+          expect(rect.right, lessThanOrEqualTo(size.width - insets.right));
+          expect(rect.bottom, lessThanOrEqualTo(size.height - insets.bottom));
+          expect(control.hitTestable(), findsOneWidget);
+        }
+
+        await settle();
+        final last = find.widgetWithText(ListTile, '错题 11');
+        await reveal(last);
+        await tester.tap(last);
+        await settle();
+        final approve = find.widgetWithText(FilledButton, '核对标准答案并确认入库');
+        await reveal(approve);
+        expect(
+          tester.getRect(find.byType(CustomScrollView)).bottom,
+          size.height - insets.bottom,
+        );
+        if (landscape) {
+          tester.view.viewInsets = const FakeViewPadding(bottom: 100);
+          tester.view.padding = FakeViewPadding(
+            top: insets.top,
+            left: insets.left,
+            right: insets.right,
+          );
+          await tester.pumpAndSettle();
+          expect(
+            tester.getRect(find.byType(CustomScrollView)).bottom,
+            size.height - 100,
+          );
+          tester.view.resetViewInsets();
+          tester.view.padding = insets;
+          await tester.pumpAndSettle();
+          await reveal(approve);
+        }
+        await tester.tap(approve);
+        await tester.pumpAndSettle();
+        expect(find.byType(ReviewQuestionEditor), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
   for (final pendingOnly in [false, true]) {
     testWidgets(
       'parent approves once after a lost response with pendingOnly=$pendingOnly and PIN loss hides data',

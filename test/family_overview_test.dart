@@ -83,9 +83,10 @@ Future<ProviderContainer> mountOverview(
   FakeOverview repo, {
   bool parent = true,
   double scale = 1,
+  Size size = const Size(360, 800),
   fixture.SwitchingAuthRepository? auth,
 }) async {
-  tester.view.physicalSize = const Size(360, 800);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -396,6 +397,41 @@ void main() {
       }
     },
   );
+  for (final size in [const Size(360, 800), const Size(640, 360)]) {
+    testWidgets(
+      'the final overview action stays within system bars at $size with double text',
+      (tester) async {
+        final insets = size.width > size.height
+            ? const FakeViewPadding(top: 24, left: 44, right: 48)
+            : const FakeViewPadding(top: 24, bottom: 60);
+        tester.view.viewPadding = insets;
+        tester.view.padding = insets;
+        addTearDown(tester.view.resetPadding);
+        addTearDown(tester.view.resetViewPadding);
+        await mountOverview(tester, FakeOverview(), scale: 2, size: size);
+        await tapOverview(tester, find.widgetWithText(ChoiceChip, '小月'));
+        final last = find.widgetWithText(TextButton, '查看周报');
+        final scroll = find.byType(Scrollable).first;
+        await tester.scrollUntilVisible(last, 250, scrollable: scroll);
+        final position = tester.state<ScrollableState>(scroll).position;
+        position.jumpTo(position.maxScrollExtent);
+        await tester.pumpAndSettle();
+        final rect = tester.getRect(last);
+        expect(rect.left, greaterThanOrEqualTo(insets.left));
+        expect(rect.right, lessThanOrEqualTo(size.width - insets.right));
+        expect(rect.bottom, lessThanOrEqualTo(size.height - insets.bottom));
+        await tester.tap(last);
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<LearningReportScreen>(find.byType(LearningReportScreen))
+              .childId,
+          'sibling',
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
   testWidgets(
     'production home exposes the overview only after family PIN and routes to that family',
     (tester) async {

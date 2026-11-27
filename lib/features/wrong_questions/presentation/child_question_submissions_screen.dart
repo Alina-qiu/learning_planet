@@ -241,130 +241,136 @@ class _ChildQuestionSubmissionsScreenState
           ),
         ],
       ),
-      body: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverList.list(
-              children: [
-                const Text('孩子提交的题目须经家长确认标准答案，才会加入奖励复习。提交和确认本身均不发奖励。'),
-                if (!parent)
-                  OutlinedButton(
-                    onPressed: _busy
-                        ? null
-                        : () async {
-                            await enterParentMode(
-                              context,
-                              ref,
-                              widget.familyId,
-                            );
-                            if (mounted) await _load();
-                          },
-                    child: const Text('家长验证 PIN 后确认'),
-                  ),
-                if (_busy) const LinearProgressIndicator(),
-                if (_error != null) Text(_error!),
-                if (!_current && !_busy)
-                  FilledButton(
-                    onPressed: () => _load(),
-                    child: const Text('重新读取提交记录'),
-                  ),
-                if (selected != null) ...[
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            setState(() {
-                              _selected = null;
-                              _approval = null;
-                              _request = null;
-                            });
-                            _load();
-                          },
-                    child: const Text('返回列表并刷新'),
-                  ),
-                  Text(
-                    selected['state'] == 'approved' ? '家长已确认并入库' : '待家长确认标准答案',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const Text('以下为孩子提交时的内容；正式答案以复习库中家长确认后的题目为准。'),
-                  SelectableText(config?['prompt'] as String? ?? ''),
-                  Text(
-                    '孩子填写的参考答案：${(config?['answers'] as List? ?? []).join('；')}',
-                  ),
-                  for (final url in selected['image_urls'] as List? ?? [])
-                    SizedBox(
-                      height: 240,
-                      child: InteractiveViewer(
-                        child: Image.network(
-                          url as String,
-                          errorBuilder: (_, _, _) => const Text('图片加载失败，请刷新'),
+      body: SafeArea(
+        top: false,
+        child: CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList.list(
+                children: [
+                  const Text('孩子提交的题目须经家长确认标准答案，才会加入奖励复习。提交和确认本身均不发奖励。'),
+                  if (!parent)
+                    OutlinedButton(
+                      onPressed: _busy
+                          ? null
+                          : () async {
+                              await enterParentMode(
+                                context,
+                                ref,
+                                widget.familyId,
+                              );
+                              if (mounted) await _load();
+                            },
+                      child: const Text('家长验证 PIN 后确认'),
+                    ),
+                  if (_busy) const LinearProgressIndicator(),
+                  if (_error != null) Text(_error!),
+                  if (!_current && !_busy)
+                    FilledButton(
+                      onPressed: () => _load(),
+                      child: const Text('重新读取提交记录'),
+                    ),
+                  if (selected != null) ...[
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              setState(() {
+                                _selected = null;
+                                _approval = null;
+                                _request = null;
+                              });
+                              _load();
+                            },
+                      child: const Text('返回列表并刷新'),
+                    ),
+                    Text(
+                      selected['state'] == 'approved'
+                          ? '家长已确认并入库'
+                          : '待家长确认标准答案',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const Text('以下为孩子提交时的内容；正式答案以复习库中家长确认后的题目为准。'),
+                    SelectableText(config?['prompt'] as String? ?? ''),
+                    Text(
+                      '孩子填写的参考答案：${(config?['answers'] as List? ?? []).join('；')}',
+                    ),
+                    for (final url in selected['image_urls'] as List? ?? [])
+                      SizedBox(
+                        height: 240,
+                        child: InteractiveViewer(
+                          child: Image.network(
+                            url as String,
+                            errorBuilder: (_, _, _) => const Text('图片加载失败，请刷新'),
+                          ),
                         ),
                       ),
+                    ExpansionTile(
+                      title: const Text('原始 OCR（只读）'),
+                      children: [
+                        SelectableText(
+                          (selected['recognition'] as Map?)?['text']
+                                  as String? ??
+                              '手工校对，无识别文本',
+                        ),
+                      ],
                     ),
-                  ExpansionTile(
-                    title: const Text('原始 OCR（只读）'),
-                    children: [
-                      SelectableText(
-                        (selected['recognition'] as Map?)?['text'] as String? ??
-                            '手工校对，无识别文本',
+                    if (parent && selected['state'] == 'pending')
+                      FilledButton(
+                        onPressed: _busy ? null : _review,
+                        child: Text(
+                          _approval == null ? '核对标准答案并确认入库' : '重试原确认请求',
+                        ),
                       ),
-                    ],
-                  ),
-                  if (parent && selected['state'] == 'pending')
-                    FilledButton(
-                      onPressed: _busy ? null : _review,
-                      child: Text(
-                        _approval == null ? '核对标准答案并确认入库' : '重试原确认请求',
+                    if (_approval != null)
+                      const Text('已保留本次确认内容，重试不会重复建题。返回刷新可查看服务端最终状态。'),
+                  ] else if (_current) ...[
+                    if (_rows.isEmpty && !_busy && _error == null)
+                      Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          widget.pendingOnly
+                              ? '当前没有待确认的错题。'
+                              : '暂无已提交记录。本机草稿须完成校对并上传后才会出现在这里。',
+                        ),
                       ),
-                    ),
-                  if (_approval != null)
-                    const Text('已保留本次确认内容，重试不会重复建题。返回刷新可查看服务端最终状态。'),
-                ] else if (_current) ...[
-                  if (_rows.isEmpty && !_busy && _error == null)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        widget.pendingOnly
-                            ? '当前没有待确认的错题。'
-                            : '暂无已提交记录。本机草稿须完成校对并上传后才会出现在这里。',
-                      ),
-                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-          if (_current && selected == null)
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverList.builder(
-                itemCount: _rows.length,
-                itemBuilder: (context, index) {
-                  final row = _rows[index];
-                  return Card(
-                    child: ListTile(
-                      title: Text(row['title'] as String),
-                      subtitle: Text(
-                        row['state'] == 'approved' ? '已确认入库' : '待家长确认',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _busy ? null : () => _open(row['id'] as String),
-                    ),
-                  );
-                },
               ),
             ),
-          if (_current && selected == null && _cursor != null)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: OutlinedButton(
-                  onPressed: _busy ? null : () => _load(more: true),
-                  child: const Text('加载更多'),
+            if (_current && selected == null)
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                sliver: SliverList.builder(
+                  itemCount: _rows.length,
+                  itemBuilder: (context, index) {
+                    final row = _rows[index];
+                    return Card(
+                      child: ListTile(
+                        title: Text(row['title'] as String),
+                        subtitle: Text(
+                          row['state'] == 'approved' ? '已确认入库' : '待家长确认',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: _busy ? null : () => _open(row['id'] as String),
+                      ),
+                    );
+                  },
                 ),
               ),
-            ),
-        ],
+            if (_current && selected == null && _cursor != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: OutlinedButton(
+                    onPressed: _busy ? null : () => _load(more: true),
+                    child: const Text('加载更多'),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
