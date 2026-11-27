@@ -9,7 +9,7 @@ export function validParentPush(value,now=Date.now()) {
   const d=value?.data;
   if(value?.status!=='authorized' || !['apns','gateway'].includes(value.transport) ||
     typeof value.registration_token!=='string' || !/^[!-~]{1,4096}$/.test(value.registration_token) ||
-    (value.transport==='apns' && !/^[0-9a-f]{64}$/.test(value.registration_token)) ||
+    (value.transport==='apns' && !/^(?:[0-9a-f]{2}){1,2048}$/.test(value.registration_token)) ||
     !d || typeof d!=='object' || Array.isArray(d) || Object.keys(d).sort().join(',')!==fields.join(',') ||
     Object.values(d).some(v=>typeof v!=='string') || d.version!=='parent-push-v1' ||
     !uuid.test(d.message_id) || !uuid.test(d.scope_nonce) || !['redemption','weekly'].includes(d.kind) ||

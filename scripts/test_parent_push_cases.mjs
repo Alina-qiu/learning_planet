@@ -89,6 +89,23 @@ export async function parentPushCases({client,scalar,login,denied,check}) {
     assert.equal((await f.authorize(job)).registration_token,'b'.repeat(64));
     assert.equal((await f.finish(job,'accepted')).status,'sent');
   });
+  await check('parent APNs activation and renewal preserve complete variable-length hex tokens',async()=>{
+    const f=await fixture();
+    const registered='ab'.repeat(48),rotated='cd'.repeat(2048);
+    const invalid=[null,'','a'.repeat(65),'gz'.repeat(48),'AB'.repeat(32),'ab\ncd','ef'.repeat(2049)];
+    await f.prepare();
+    for(const token of invalid) await assert.rejects(f.activate(1,token,'apns'),/INVALID_PUSH_TOKEN/);
+    assert.equal((await f.activate(1,registered,'apns')).state,'enabled');
+    await login(f.owner,'renew-without-pin');
+    for(const token of invalid) await assert.rejects(f.renew(token),/INVALID_PUSH_TOKEN/);
+    assert.equal((await f.readDevice()).registration_token,registered);
+    await login(f.owner,'renew-without-pin');
+    for(const token of ['ab','ed'.repeat(32),rotated]) assert.equal((await f.renew(token)).state,'enabled');
+    await f.enqueue();
+    const [job]=await f.claim(['apns']);
+    assert.equal((await f.authorize(job)).registration_token,rotated);
+    assert.equal((await f.finish(job,'accepted')).status,'sent');
+  });
   await check('same installation can transfer to another authorized parent without inheriting the old intent',async()=>{
     const f=await fixture();await f.prepare();await f.activate();
     await login(f.peer);await scalar("select public.verify_parent_pin($1,'1234')",[f.family]);

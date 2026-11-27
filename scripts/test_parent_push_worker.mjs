@@ -54,6 +54,31 @@ test('APNs signs a valid ES256 token and sends background-only requests with exp
   assert.equal(await transport(message('apns')),'accepted');assert.equal(jwt,first);
 });
 
+test('parent APNs queue sends complete variable-length hex tokens and rejects malformed endpoints before delivery',async()=>{
+  const valid=['00','ab'.repeat(32),'cd'.repeat(48),'ef'.repeat(2048)];
+  const invalid=[null,'','a'.repeat(65),'gh'.repeat(48),'AB'.repeat(32),'ab\ncd','ef'.repeat(2049)];
+  const tokens=[...valid,...invalid],claims=tokens.map(()=>({job_id:randomUUID(),lease_token:randomUUID()}));
+  const endpoints=new Map(claims.map((claim,index)=>[claim.job_id,tokens[index]]));
+  const sent=[],finished=new Map();
+  const transports=create(apns,async url=>{
+    sent.push(url);
+    return new Response(null,{status:200});
+  });
+  const rpc=async(name,args)=>{
+    if(name==='enqueue_parent_push_jobs') return {data:claims.length};
+    if(name==='claim_parent_push_jobs') return {data:claims};
+    if(name==='authorize_parent_push_job') return {data:{...message('apns',args.target_job_id),
+      registration_token:endpoints.get(args.target_job_id)}};
+    assert.equal(name,'finish_parent_push_job');
+    finished.set(args.target_job_id,args.outcome);
+    return {data:{status:args.outcome==='accepted'?'sent':'cancelled'}};
+  };
+  const stats=await drainParentPush(rpc,transports,{now:()=>instant});
+  assert.deepEqual(sent.sort(),valid.map(token=>'https://api.sandbox.push.apple.com/3/device/'+token).sort());
+  assert.deepEqual(claims.map(c=>finished.get(c.job_id)),tokens.map(t=>valid.includes(t)?'accepted':'rejected'));
+  assert.deepEqual(stats,{claimed:claims.length,sent:valid.length,queued:0,cancelled:invalid.length,deferred:0,unsettled:0});
+});
+
 test('APNs maps device revocation and service errors without forwarding provider body text',async()=>{
   let status=410,reason='Unregistered';
   const transport=create({...apns,PARENT_PUSH_APNS_ENVIRONMENT:'production'},async(url)=>{

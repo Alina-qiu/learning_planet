@@ -6,6 +6,8 @@
 
 本轮改进了已登录家庭冷启动和错题列表。家庭权限、删除记录及在线目录核验完成后，如果目录与加密数据库完全相同且无需清理，首页可以直接使用核验结果。错题本打开时只加载当前标签。持久试用服务可以跨日运行，App 关闭后仍会生成每日复习并处理注销。[首页与列表性能](APP_PERFORMANCE.md) · [错题分页](QUESTION_CATALOG_PAGINATION.md) · [本机试用](LOCAL_DEBUG.md) · [本轮验收记录](../build/trial-acceptance-20261127/DELIVERY.md)
 
+提交 `a34bcbe` 的完整首页在标准 Android API 36 模拟器连续 3 次冷启动中均于 6 秒内出现。Android 10 模拟器共有 4 次尝试，3 次达到目标，1 次系统启动超时。iOS 18.5 模拟器通过了任务流和四种中文 OCR 场景。iPhone 后台系统注入的第一条静默任务提醒在 35 秒内未取得应用回执。家长提醒的注册、续订和发送现已支持可变长度的 APNs 设备令牌。[首页逐次测量](APP_PERFORMANCE.md) · [iOS 任务与 OCR](https://github.com/Alina-qiu/learning_planet/actions/runs/45961743243) · [后台回执](https://github.com/Alina-qiu/learning_planet/actions/runs/45961743413) · [家长提醒](PARENT_REMOTE_PUSH.md)
+
 提交 `9cfc243` 的 Android 联调包支持逐张校对本机草稿、按张同意上传，家长可以从家庭概览直接确认指定孩子的标准答案。测试中，家长补正一道题后，该孩子的待办清零，另一名孩子的两题仍在。Android 10 模拟器连续三次强停重开 Release 版，已登录家庭的完整首页分别在 3.70、5.01、4.48 秒内可操作。Windows 和 Linux 各通过 924 项 Flutter 测试。[安装包](ANDROID_BUILD.md) · [本机验收](../build/mobile-acceptance-20261127/DELIVERY.md) · [确认操作与截图](../build/mobile-acceptance-20261127/overview-device/REPORT.md)
 
 提交 `5d423b0` 修复了 iPhone 模拟器 OCR 测试服务发现。常规 CI 的 11 项作业及双端同步的 3 项作业均通过。iPhone 离线重启并重连后，首次成功取得新快照的请求在 0.514 秒时发出，账本只记了一次奖励。独立的系统推送测试在后台注入后 35 秒内没有观察到 App 接收回调，真机 APNs 仍待验证。[双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45944731154) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45944731173) · [系统推送记录](https://github.com/Alina-qiu/learning_planet/actions/runs/45944731177)
@@ -14,11 +16,11 @@
 
 全新 Android API 36 模拟器安装本机联调 APK 后，已走通收取验证码、首次登录、创建家庭与孩子、进入首页及首次设置家长 PIN。启动服务的窗口会打印能在本机直接使用的收件和停止命令。[首次试用图解](../build/iphone-isolation-20261127/entry/首次试用.md) · [本机安装指引](LOCAL_DEBUG.md)
 
-本机 PostgreSQL 15 已通过 421 项数据库检查。80 份迁移覆盖 10 个有数据的历史节点，24 项升级检查通过。升级至 078 后，家长可在家庭概览看到孩子此前提交的待确认错题数量，点击即可核对。未提交、清理中、已确认的错题均不占待办。[家庭概览](FAMILY_OVERVIEW.md) · [本机运行步骤](LOCAL_DEBUG.md) · [数据库与版本升级](../scripts/test_database_upgrade.mjs)
+本机 PostgreSQL 15 已通过 422 项数据库检查。81 份迁移覆盖 10 个有数据的历史节点，24 项升级检查通过。升级至 078 后，家长可在家庭概览看到孩子此前提交的待确认错题数量，点击即可核对。未提交、清理中、已确认的错题均不占待办。[家庭概览](FAMILY_OVERVIEW.md) · [本机运行步骤](LOCAL_DEBUG.md) · [数据库与版本升级](../scripts/test_database_upgrade.mjs)
 
 基线提交 `e178b18` 在 Android 10 模拟器上完成了邮箱验证码登录和一次实际中文印刷图识别，孩子校对并保存后，联网刷新仍显示“待家长确认”。[基线联调版首页](../build/acceptance-20261126/android-local-debug-home.json) · [中文识别与保存](../build/acceptance-20261126/android-release-ocr.json)
 
-需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，当前 SHA-256 为 `9db16801b0d0d782a42a3c494bcd409a5886651cf5fbbd426d5a878ac8210ce9`。第 6.5 节明确了每日复习开始前的选题规则，第 9 节采用 6 秒首页目标。
+需求依据为工作区[PRD V1.1](../学习星球_产品需求文档_PRD.docx)，当前 SHA-256 为 `b2c364196610dfc8038ca00477f2e82f3643f95c29f04b678f14722c352e2173`。第 5.4 节规定依次通过 1、3、7、30 天四次复测后掌握，第 6.5 节规定当日复习开始前更新选题，第 9 节采用 6 秒首页目标。
 
 ## 当前开发进度
 
@@ -91,7 +93,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 |---|---|---|
 | 客户端 | Flutter 3.47.4 / Dart 3.13.3、Riverpod | Android可构建；[iOS Debug/Release](IOS_BUILD.md)已通过CI未签名编译及资源检查，尚未签名或真机运行 |
 | 本机数据 | Drift、SQLite3MultipleCiphers、安全存储 | 有原生模拟器加密检查；真机备份/锁屏/物理清理待验收 |
-| 后端 | Supabase PostgreSQL/Auth/Storage，80 份迁移至 078 | 本机 PostgreSQL 15.19、GoTrue、PostgREST、Storage 和 MinIO 已联调，托管项目待准备 |
+| 后端 | Supabase PostgreSQL/Auth/Storage，81 份迁移至 079 | 本机 PostgreSQL 15.19、GoTrue、PostgREST、Storage 和 MinIO 已联调，托管项目待准备 |
 | 服务端任务 | Deno Edge Functions、SQL维护任务 | PDF、删除、AI与推送入口已实现；托管Cron、监控告警尚待运行确认 |
 | 图片与OCR | image_picker、端侧图像处理、ML Kit中文识别 | 不通过云OCR识别；真实教材、手写、公式和设备权限待验证 |
 | PDF与拼音 | 服务端确定性PDF、中文字体、拼音规则库；客户端读取原始字节预览和导出 | 已有本机真实PDF证据；系统打印/分享及两端一致性待验收 |
@@ -154,7 +156,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | 6.8 静态成长与反馈 | [成长](GROWTH_AND_EVENTS.md)、[离线成长](OFFLINE_GROWTH.md)、[反馈](TASK_COMPLETION_FEEDBACK.md) | 目标手机音效/静音/减少动态效果、孩子可用性；未引入战斗数值或学习地图 |
 | 6.9 日/周/月报告 | [学习报告](LEARNING_REPORTS.md)、[AI周报](AI_WEEKLY_REPORTS.md)、`test/monthly_report_test.dart` | 真实数据趋势、模型引用一致性、真实家庭建议反馈 |
 | 7.1–7.3 AI契约/审核/隐私 | [AI分析](AI_ANALYSIS.md)、[相似题](SIMILAR_QUESTIONS.md)、[上传提示](WORKSHEET_ACCESSIBILITY.md) | 实际供应商配置、预算和保留策略、教材质量评测；端侧自动模糊未实现，PRD将其列为可选 |
-| 8 数据模型/状态机 | 80 份迁移通过 421 项数据库检查，10 个有数据的历史节点通过 24 项升级检查。此前提交 `a25c5d3` 另通过 9 项备份恢复检查。[升级用例](../scripts/test_database_upgrade.mjs) · [此前恢复验收](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459668) · [备份恢复](BACKUP_RESTORE.md) | 托管环境迁移、升级与备份恢复 |
+| 8 数据模型/状态机 | 81 份迁移通过 422 项数据库检查，10 个有数据的历史节点通过 24 项升级检查。此前提交 `a25c5d3` 另通过 9 项备份恢复检查。[升级用例](../scripts/test_database_upgrade.mjs) · [此前恢复验收](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459668) · [备份恢复](BACKUP_RESTORE.md) | 托管环境迁移、升级与备份恢复 |
 | 10 通知策略 | [任务本地通知](LOCAL_NOTIFICATIONS.md)、[家长通知](PARENT_NOTIFICATIONS.md)、[远程推送](PARENT_REMOTE_PUSH.md) | iOS后台安静边界、真实APNs送达与系统限制 |
 | 11 衡量指标 | [业务指标](BUSINESS_METRICS.md)、[自主开始](TASK_START_METRICS.md)、[家庭留存](FAMILY_RETENTION.md)、[配置耗时](PARENT_CONFIGURATION_TIME.md) | 真实家庭数据；四周连续使用、70%独立打卡、每周配置≤10分钟尚无证据 |
 | 12 / 15 迭代与原型 | [离线 HTML 原型](demo/index.html)覆盖冒险大厅、今日复习、错题宝库、任务中心、奖励商店和家长控制台。支持用示例家庭完成第 15.1 节的五项操作，运行 `node scripts/package_demo.mjs` 可生成单文件版本。 | 孩子与家长的实际可用性观察、四周家庭试用仍待开展。V2 功能按验证结果决定。 |
@@ -163,7 +165,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | `9cfc243` 的 Android 10 模拟器连续三次冷启动已登录家庭，完整首页在 3.70、5.01、4.48 秒内可见。此前 `a25c5d3` 完成一项普通任务，从手指按下到显示本机保存成功为 191–232 毫秒。[三次启动](../build/mobile-acceptance-20261127/release/home-acceptance.json) · [任务反馈](../build/ocr-local-20261127/release/completion-feedback.json) · [列表和较早的启动测量](APP_PERFORMANCE.md) | Android 与 iPhone 真机、重装后首次启动、各主要列表的目标设备耗时 |
+| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | `a34bcbe` 的 API 36 模拟器 3/3 次、Android 10 模拟器 3/4 次确认完整首页在 6 秒内可见。两个环境在 1.5 秒内确认错题本首题可见的次数分别为 2/3 和 1/3。此前 `a25c5d3` 完成普通任务的本机反馈为 191–232 毫秒。[启动与列表逐次记录](APP_PERFORMANCE.md) · [任务反馈](../build/ocr-local-20261127/release/completion-feedback.json) | Android 与 iPhone 真机、重装后首次启动、各主要列表的目标设备耗时 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | API 29 模拟器恢复本机服务连接后，前台 9.34 秒发出首个快照请求。会话过期、离线重开后再次恢复连接，1.48 秒发出首个快照请求，1.56 秒开始补传操作。[同步时间及账本](../build/acceptance-20261124/android-reconnect.json) | 目标手机的无线网络切换、系统后台限制仍待验证 |

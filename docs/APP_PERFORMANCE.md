@@ -6,7 +6,13 @@
 
 测量从发出冷启动指令开始，到实际屏幕上同时出现孩子昵称、服务端已确认的余额、当天任务及其操作按钮为止。家庭目录通过权限和删除核验后，相同目录可以跳过重复写入。首页同时请求任务、余额和家庭日期时，共用一次受访问权限保护的本机快照，离线操作按队列顺序投影到任务。金币和 XP 使用已经确认的数值。[本轮完整首页实测](../build/trial-acceptance-20261127/ready-home.json) · [离线与权限回归](../test/offline_tasks_test.dart)
 
-## 2026-11-27 从首页打开错题本
+在提交 `a34bcbe` 的签名 Release 包上，标准 Android API 36 模拟器连续三次冷启动，完整首页分别在 **5.475、5.467、5.462 秒**内可见。Android 10 模拟器四次尝试中，三次在 **5.747、5.725、5.685 秒**内可见，一次系统启动命令超时。两个环境均保留已有家庭的登录和数据。[API 36 记录](../build/trial-acceptance-20261127/device36/home/results.json) · [Android 10 记录](../build/trial-acceptance-20261127/ready-home.json)
+
+## 从首页打开错题本
+
+`a34bcbe` 在 API 36 有 2/3 次、在 Android 10 有 1/3 次确认在点击后的 1.5 秒内显示首题。API 36 的首次自动点击打开了第三题，列表稳定后已打开第一题。Android 10 有一张截图在 1.477 秒时还看不到首题，另一张到达时已是 1.515 秒。当前测量尚未确认列表持续达到目标。[API 36 逐次记录](../build/trial-acceptance-20261127/device36/catalog/results.json) · [Android 10 逐次记录](../build/trial-acceptance-20261127/ready-deadline/results.json)
+
+### 同日较早的候选版本
 
 在 Android 10 模拟器的 Release 包中，已登录家庭有 75 道错题。三次从首页点击“错题本与拼音复习”，在点击后只采一张接近时限的屏幕图，分别在 **1.483、1.473、1.466 秒**内采到第一道题。随后三次均能点开同一题的详情。计时开始于电脑发出触摸指令前，结束于截图到达电脑后。这些数值是题名已经出现的上界。[时限截图与操作结果](../build/trial-acceptance-20261127/optimized-deadline/results.json)
 
