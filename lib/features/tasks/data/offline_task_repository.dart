@@ -23,6 +23,20 @@ class TaskSnapshotMissing extends StateError {
   TaskSnapshotMissing(super.message);
 }
 
+typedef _TaskRead = ({
+  String owner,
+  int privacy,
+  Map<String, dynamic> snapshot,
+  List<Map<String, dynamic>> commands,
+});
+
+class _TaskReadRequest {
+  _TaskReadRequest(this.includeTasks);
+
+  bool includeTasks, readingSummary = false;
+  late final Future<_TaskRead> result;
+}
+
 class _TaskClockAnchor {
   const _TaskClockAnchor(this.received, this.server);
   final DateTime received, server;
@@ -77,7 +91,7 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   Stream<String> get remoteDeletions => _remoteDeletions.stream;
   final _lastAttempt = <String, DateTime>{};
   final _displayClocks = <String, _TaskClockAnchor>{};
-  final _preparing = <(String, String, int), Future<String>>{};
+  final _preparing = <(String, String, int), _TaskReadRequest>{};
   Future<void> _tail = Future.value();
   Future<void>? _inFlight;
   String? _syncOwner, _syncChild;
@@ -330,87 +344,120 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
     return _displayClocks[childId]?.at(clock());
   }
 
-  Future<String> _prepare(String childId) {
+  Future<_TaskRead> _prepare(String childId, {bool includeTasks = false}) {
     final owner = _account();
     final key = (owner, childId, store.privacyGeneration);
-    return _preparing.putIfAbsent(key, () {
-      return _prepareChild(owner, childId).whenComplete(() {
-        _preparing.remove(key);
-      });
+    final existing = _preparing[key];
+    if (existing != null && (!includeTasks || !existing.readingSummary)) {
+      if (includeTasks) existing.includeTasks = true;
+      return existing.result;
+    }
+    final request = _TaskReadRequest(includeTasks);
+    _preparing[key] = request;
+    request.result = _prepareChild(owner, childId, request).whenComplete(() {
+      if (identical(_preparing[key], request)) _preparing.remove(key);
     });
+    return request.result;
   }
 
-  Future<String> _prepareChild(String owner, String childId) async {
-    final cached = await store.readTaskSummary(owner, childId);
+  void _checkRead(String owner, int privacy) {
     _check(owner);
+    if (privacy != store.privacyGeneration) throw StateError('家庭数据已变化');
+  }
+
+  Future<_TaskRead> _prepareChild(
+    String owner,
+    String childId,
+    _TaskReadRequest request,
+  ) async {
+    Future<_TaskRead?> read() => _locked(
+      () => store.transaction(() async {
+        final privacy = store.privacyGeneration;
+        request.readingSummary = !request.includeTasks;
+        final snapshot = request.includeTasks
+            ? await store.read(owner, 'tasks:$childId')
+            : await store.readTaskSummary(owner, childId);
+        _checkRead(owner, privacy);
+        if (snapshot == null) return null;
+        final initial = _state.revision == 0;
+        final commands = initial || request.includeTasks
+            ? await store.commands(owner, childId: initial ? null : childId)
+            : const <Map<String, dynamic>>[];
+        _checkRead(owner, privacy);
+        if (initial) {
+          _publishRows(owner, commands, _state.phase, dataChanged: false);
+        }
+        return (
+          owner: owner,
+          privacy: privacy,
+          snapshot: snapshot,
+          commands: commands,
+        );
+      }),
+    );
+
+    final cached = await read();
     if (cached == null) {
-      if (await store.accountDeletionJob(owner) != null) {
-        throw StateError('账号已申请注销');
-      }
-      if (await store.isChildDeleted(childId)) {
-        throw StateError('孩子已删除，请选择其他孩子');
-      }
-      if (await store.familyAccessRevoked(owner, childId: childId)) {
-        throw StateError('家庭访问权限已撤销');
-      }
+      final denied = await store.childAccessDenial(owner, childId);
       _check(owner);
+      if (denied != null) {
+        throw StateError(switch (denied) {
+          'account' => '账号已申请注销',
+          'child' => '孩子已删除，请选择其他孩子',
+          _ => '家庭访问权限已撤销',
+        });
+      }
       _activeChild = childId;
       await synchronize(childId);
-      return owner;
+      return await read() ?? (throw TaskSnapshotMissing('此孩子尚未缓存，请先联网打开一次任务'));
     }
+    _checkRead(owner, cached.privacy);
     _activeChild = childId;
-    if (_state.revision == 0) {
-      await _publish(owner, _state.phase, dataChanged: false);
-    }
     final last = _lastAttempt[childId];
     if (_foreground &&
         (last == null || clock().difference(last).inSeconds >= 10)) {
       _backgroundSync(childId);
     }
-    return owner;
+    return cached;
   }
 
   @override
   Future<List<TaskItem>> loadTasks(String childId) async {
-    final owner = await _prepare(childId);
-    return _locked(() async {
-      final cache = await _cache(owner, childId);
-      final tasks = {
-        for (final row in (cache['tasks'] as List))
-          (row as Map<String, dynamic>)['id'] as String: TaskItem.fromJson(row),
-      };
-      for (final row in await store.commands(owner, childId: childId)) {
-        if (row['state'] != 'pending') continue;
-        final command = row['command'] as Map<String, dynamic>;
-        final task = tasks[command['task_id']];
-        if (task == null || task.isTerminal) {
-          continue;
-        }
-        tasks[task.id] = _project(task, command);
+    final read = await _prepare(childId, includeTasks: true);
+    _checkRead(read.owner, read.privacy);
+    final cache = read.snapshot;
+    final tasks = {
+      for (final row in (cache['tasks'] as List))
+        (row as Map<String, dynamic>)['id'] as String: TaskItem.fromJson(row),
+    };
+    for (final row in read.commands) {
+      if (row['child_id'] != childId || row['state'] != 'pending') continue;
+      final command = row['command'] as Map<String, dynamic>;
+      final task = tasks[command['task_id']];
+      if (task == null || task.isTerminal) {
+        continue;
       }
-      _check(owner);
-      final anchor = _TaskClockAnchor.fromSnapshot(cache);
-      if (anchor == null) {
-        _displayClocks.remove(childId);
-      } else {
-        _displayClocks[childId] = anchor;
-      }
-      return TaskItem.ordered(tasks.values);
-    });
+      tasks[task.id] = _project(task, command);
+    }
+    final anchor = _TaskClockAnchor.fromSnapshot(cache);
+    if (anchor == null) {
+      _displayClocks.remove(childId);
+    } else {
+      _displayClocks[childId] = anchor;
+    }
+    return TaskItem.ordered(tasks.values);
   }
 
   @override
   Future<WalletSummary> loadWallet(String childId) async {
-    final owner = await _prepare(childId);
-    return _locked(() async {
-      final snapshot = await _cache(owner, childId, includeTasks: false);
-      final wallet = snapshot['wallet'] as Map<String, dynamic>;
-      return WalletSummary(
-        coins: wallet['coin_balance'] as int,
-        frozen: wallet['frozen_balance'] as int,
-        xp: wallet['xp'] as int,
-      );
-    });
+    final read = await _prepare(childId);
+    _checkRead(read.owner, read.privacy);
+    final wallet = read.snapshot['wallet'] as Map<String, dynamic>;
+    return WalletSummary(
+      coins: wallet['coin_balance'] as int,
+      frozen: wallet['frozen_balance'] as int,
+      xp: wallet['xp'] as int,
+    );
   }
 
   /// Already confirmed timezone only; observing it never starts another sync.
@@ -429,15 +476,14 @@ class OfflineTaskRepository implements TaskRepository, AttributedTaskStarter {
   });
 
   Future<DateTime> today(String childId) async {
-    final owner = await _prepare(childId);
-    return _locked(() async {
-      final cache = await _cache(owner, childId, includeTasks: false);
-      final local = tz.TZDateTime.from(
-        _anchoredNow(cache),
-        tz.getLocation(cache['timezone'] as String),
-      );
-      return DateTime(local.year, local.month, local.day);
-    });
+    final read = await _prepare(childId);
+    _checkRead(read.owner, read.privacy);
+    final cache = read.snapshot;
+    final local = tz.TZDateTime.from(
+      _anchoredNow(cache),
+      tz.getLocation(cache['timezone'] as String),
+    );
+    return DateTime(local.year, local.month, local.day);
   }
 
   static TaskItem _project(TaskItem task, Map<String, dynamic> command) {

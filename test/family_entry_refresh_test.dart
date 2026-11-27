@@ -218,8 +218,9 @@ void main() {
         accountId: () => 'parent',
         load: () async {
           membershipChecks++;
-          if (!allowMembership)
+          if (!allowMembership) {
             throw const PostgrestException(message: 'denied', code: '42501');
+          }
           return {'owner_id': 'parent', 'states': []};
         },
         cancelNotifications: (_) async {},

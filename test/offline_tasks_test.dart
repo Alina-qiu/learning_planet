@@ -171,8 +171,49 @@ class _HeldSnapshotReply extends FakeTaskRemote {
   }
 }
 
+class _MeasuredTaskStore extends OfflineStore {
+  _MeasuredTaskStore(super.executor);
+  int fullReads = 0, summaries = 0;
+  final queues = <String?>[];
+  Future<void> Function()? afterSummary;
+  void Function()? afterTasks;
+
+  void resetCounts() {
+    fullReads = summaries = 0;
+    queues.clear();
+  }
+
+  @override
+  Future<Map<String, dynamic>?> read(String owner, String key) async {
+    final value = await super.read(owner, key);
+    if (key.startsWith('tasks:')) {
+      fullReads++;
+      afterTasks?.call();
+    }
+    return value;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> readTaskSummary(
+    String owner,
+    String childId,
+  ) async {
+    final value = await super.readTaskSummary(owner, childId);
+    summaries++;
+    await afterSummary?.call();
+    return value;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> commands(String owner, {String? childId}) {
+    queues.add(childId);
+    return super.commands(owner, childId: childId);
+  }
+}
+
 void main() {
   late OfflineStore store;
+  late _MeasuredTaskStore measured;
   late OfflineTaskRepository repository;
   late FakeTaskRemote remote;
   late DateTime now;
@@ -190,7 +231,7 @@ void main() {
   setUp(() async {
     now = DateTime.utc(2026, 9, 16, 8);
     owner = 'user-a';
-    store = OfflineStore(NativeDatabase.memory());
+    store = measured = _MeasuredTaskStore(NativeDatabase.memory());
     remote = FakeTaskRemote(() => now)..seed('child');
     repository = make()..setForeground(false);
     await repository.loadTasks('child');
@@ -205,6 +246,84 @@ void main() {
     now = now.add(const Duration(seconds: 11));
     await repository.synchronize('child');
   }
+
+  test(
+    'cold home readers share one guarded snapshot and ordered outbox; wallet-only stays small',
+    () async {
+      remote.seed('second');
+      await repository.loadTasks('second');
+      await repository.start('task-second');
+      await repository.loadTasks('child');
+      await repository.start('task-child');
+      await repository.complete('task-child');
+      await repository.dispose();
+      repository = make()..setForeground(false);
+      measured.resetCounts();
+
+      final (wallet, day, tasks) = await (
+        repository.loadWallet('child'),
+        repository.today('child'),
+        repository.loadTasks('child'),
+      ).wait;
+      expect(tasks.single.id, 'task-child');
+      expect(tasks.single.status, TaskStatus.completed);
+      expect((wallet.coins, wallet.xp), (100, 200));
+      expect(day, DateTime(2026, 9, 16));
+      expect(repository.state.pending, 3);
+      expect(repository.displayTime('child'), now);
+      expect((measured.fullReads, measured.summaries), (1, 0));
+      expect(measured.queues, [null]);
+
+      measured.resetCounts();
+      now = now.add(const Duration(hours: 9));
+      final (balance, tomorrow) = await (
+        repository.loadWallet('child'),
+        repository.today('child'),
+      ).wait;
+      expect(balance.coins, 100);
+      expect(tomorrow, DateTime(2026, 9, 17));
+      expect((measured.fullReads, measured.summaries), (0, 1));
+      expect(measured.queues, isEmpty);
+    },
+  );
+
+  test(
+    'tasks joining an active wallet summary get a complete snapshot',
+    () async {
+      final entered = Completer<void>(), release = Completer<void>();
+      measured.afterSummary = () {
+        entered.complete();
+        return release.future;
+      };
+      final balance = repository.loadWallet('child');
+      await entered.future;
+      final tasks = repository.loadTasks('child');
+      release.complete();
+      expect((await balance).coins, 100);
+      expect((await tasks).single.id, 'task-child');
+    },
+  );
+
+  test(
+    'an owner or privacy change during a shared read hides all home fields',
+    () async {
+      for (final changeOwner in [false, true]) {
+        owner = 'user-a';
+        measured.afterTasks = () {
+          if (changeOwner) {
+            owner = 'user-b';
+          } else {
+            store.privacyGeneration++;
+          }
+        };
+        await Future.wait([
+          expectLater(repository.loadWallet('child'), throwsStateError),
+          expectLater(repository.today('child'), throwsStateError),
+          expectLater(repository.loadTasks('child'), throwsStateError),
+        ]);
+      }
+    },
+  );
 
   test(
     'offline intervals persist, exclude pauses, and do not mint local rewards',
