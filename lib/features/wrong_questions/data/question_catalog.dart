@@ -15,6 +15,24 @@ typedef QuestionCatalogScope = ({
   String archive,
   String keyword,
 });
+QuestionCatalogScope questionCatalogScope({
+  required String child,
+  required String family,
+  String kind = 'question',
+  String subject = 'all',
+  String mastery = 'all',
+  String archive = 'all',
+  String keyword = '',
+}) => (
+  child: child,
+  family: family,
+  kind: kind,
+  subject: subject,
+  mastery: mastery,
+  archive: archive,
+  keyword: keyword.trim(),
+);
+
 Map<String, dynamic> catalogFilters(QuestionCatalogScope s) => {
   'kind': s.kind,
   'subject': s.subject,

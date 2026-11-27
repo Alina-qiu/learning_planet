@@ -233,13 +233,11 @@ class HomeScreen extends ConsumerWidget {
                         final familyId = children
                             .firstWhere((child) => child.id == selectedChildId)
                             .familyId;
-                        await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => ReviewHubScreen(
-                              childId: selectedChildId,
-                              familyId: familyId,
-                            ),
-                          ),
+                        await ReviewHubScreen.open(
+                          context,
+                          ref,
+                          childId: selectedChildId,
+                          familyId: familyId,
                         );
                         if (context.mounted) {
                           ref.invalidate(tasksProvider(selectedChildId));

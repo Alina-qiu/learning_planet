@@ -13,6 +13,7 @@ import 'package:learning_planet/features/tasks/data/task_repository.dart';
 import 'package:learning_planet/features/wrong_questions/data/question_catalog.dart';
 import 'package:learning_planet/features/wrong_questions/data/review_repository.dart';
 import 'package:learning_planet/features/wrong_questions/presentation/review_hub_screen.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/review_session_screen.dart';
 import 'review_module_test.dart' show FakeReviewRepository;
 import 'support/mock_supabase.dart';
 
@@ -597,6 +598,249 @@ void main() {
     await last;
   });
 
+  for (final scale in [1.0, 2.0]) {
+    testWidgets(
+      'a late overview leaves the first question tappable at the same point at scale $scale',
+      (tester) async {
+        tester.view.physicalSize = Size(
+          scale == 1 ? 400 : 320,
+          scale == 1 ? 960 : 780,
+        );
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final overview = Completer<Map<String, dynamic>>();
+        final catalog = ScriptedCatalog(
+          (scope, _) async => QuestionCatalogPage(
+            items: [for (var i = 0; i < 5; i++) row(i, child: scope.child)],
+            syncedAt: DateTime.utc(2026),
+          ),
+        );
+        await mountCatalog(
+          tester,
+          catalog,
+          scale: scale,
+          authorized: false,
+          overview: (_) => overview.future,
+          settle: false,
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 32));
+        final first = find.widgetWithText(ListTile, '题目 0');
+        if (first.hitTestable().evaluate().isEmpty) {
+          await tester.scrollUntilVisible(
+            first,
+            120,
+            scrollable: find.byType(Scrollable).first,
+          );
+          await tester.ensureVisible(first);
+          await tester.pump();
+        }
+        expect(first.hitTestable(), findsOneWidget);
+        final before = tester.getRect(first);
+        overview.complete({
+          'due': 8,
+          'backlog': 23,
+          'task_id': 'task',
+          'reminder': {'allowed': true, 'remind_local': '明天 13:00'},
+        });
+        await tester.pumpAndSettle();
+        expect(tester.getRect(first), before);
+        await tester.tapAt(before.center);
+        await tester.pumpAndSettle();
+        expect(find.text('错题详情'), findsOneWidget);
+        expect(find.text('题目 0'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  testWidgets(
+    'today review opens and retries while the catalog is waiting; offline reminders remain disabled',
+    (tester) async {
+      final page = Completer<QuestionCatalogPage>();
+      final children = <String>[];
+      await mountCatalog(
+        tester,
+        ScriptedCatalog((_, _) => page.future),
+        authorized: false,
+        settle: false,
+        overview: (child) async {
+          children.add(child);
+          if (children.length == 1) throw StateError('概览暂不可用');
+          return {
+            'due': 4,
+            'backlog': 9,
+            'task_id': 'saved-task',
+            'offline_cache': true,
+            'reminder': {'allowed': true},
+          };
+        },
+      );
+      await tester.pump();
+      expect(children, isEmpty);
+      await tester.tap(find.text('今日复习'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+      expect(children, ['child']);
+      expect(find.textContaining('概览暂不可用'), findsOneWidget);
+      await tester.tap(find.text('重试'));
+      await tester.pump();
+      await tester.pump();
+      expect(children, ['child', 'child']);
+      expect(find.text('今日待复习 4 题 · 积压 9 题'), findsOneWidget);
+      expect(find.text('离线缓存；已缓存题目可作答，判定与奖励联网确认'), findsOneWidget);
+      expect(find.text('去复习'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, '联网后可设置稍后提醒'))
+            .onPressed,
+        isNull,
+      );
+      page.complete(
+        QuestionCatalogPage(items: [row(0)], syncedAt: DateTime.utc(2026)),
+      );
+      await tester.tap(find.byTooltip('关闭'));
+      await tester.pumpAndSettle();
+      expect(find.text('离线 · 待复习 4 题 · 积压 9 题'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'switching child before the sheet first paints never subscribes to the old overview',
+    (tester) async {
+      final child = ValueNotifier('first'),
+          firstPage = Completer<QuestionCatalogPage>();
+      addTearDown(child.dispose);
+      final requested = <String>[];
+      await mountCatalog(
+        tester,
+        ScriptedCatalog(
+          (s, _) async => s.child == 'first'
+              ? firstPage.future
+              : QuestionCatalogPage(
+                  items: [row(0, child: s.child)],
+                  syncedAt: DateTime.utc(2026),
+                ),
+        ),
+        currentChild: child,
+        settle: false,
+        authorized: false,
+        overview: (id) async {
+          requested.add(id);
+          return {'due': 2, 'backlog': 0};
+        },
+      );
+      await tester.pump();
+      expect(requested, isEmpty);
+      await tester.tap(find.text('今日复习'));
+      child.value = 'second';
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(requested, ['second']);
+      firstPage.complete(
+        QuestionCatalogPage(items: [], syncedAt: DateTime.utc(2026)),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'a child change resets visible filters and cancels the old pending search',
+    (tester) async {
+      final child = ValueNotifier('first'), calls = <QuestionCatalogScope>[];
+      addTearDown(child.dispose);
+      await mountCatalog(
+        tester,
+        ScriptedCatalog((scope, _) async {
+          calls.add(scope);
+          return QuestionCatalogPage(
+            items: [row(0, child: scope.child)],
+            syncedAt: DateTime.utc(2026),
+          );
+        }),
+        currentChild: child,
+        authorized: false,
+      );
+      await tester.enterText(find.byType(TextField), '已提交的关键词');
+      await tester.pump(const Duration(milliseconds: 310));
+      await tester.pumpAndSettle();
+      final subjects = find.byType(DropdownButton<String>).first;
+      await tester.ensureVisible(subjects);
+      await tester.tap(subjects);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('数学').last);
+      await tester.pumpAndSettle();
+      expect(calls.last.subject, 'math');
+      expect(calls.last.keyword, '已提交的关键词');
+      await tester.enterText(find.byType(TextField), '尚在等待的关键词');
+      child.value = 'second';
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      final second = calls.where((s) => s.child == 'second').toList();
+      expect(second, isNotEmpty);
+      expect(
+        second.every(
+          (s) =>
+              s.keyword.isEmpty &&
+              s.subject == 'all' &&
+              s.mastery == 'all' &&
+              s.archive == 'all',
+        ),
+        isTrue,
+      );
+      expect(calls.where((s) => s.keyword == '尚在等待的关键词'), isEmpty);
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        isEmpty,
+      );
+      expect(tester.widget<DropdownButton<String>>(subjects).value, 'all');
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'changing children dismisses the old overview and goes to the new child review',
+    (tester) async {
+      final currentChild = ValueNotifier('first');
+      addTearDown(currentChild.dispose);
+      await mountCatalog(
+        tester,
+        ScriptedCatalog(
+          (scope, _) async => QuestionCatalogPage(
+            items: [row(0, child: scope.child)],
+            syncedAt: DateTime.utc(2026),
+          ),
+        ),
+        currentChild: currentChild,
+        authorized: false,
+        overview: (child) async => {
+          'due': child == 'first' ? 3 : 7,
+          'backlog': 0,
+          'task_id': 'task-$child',
+        },
+      );
+      await tester.tap(find.text('今日复习'));
+      await tester.pumpAndSettle();
+      expect(find.text('今日待复习 3 题 · 积压 0 题'), findsOneWidget);
+      currentChild.value = 'second';
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+      await tester.tap(find.text('今日复习'));
+      await tester.pumpAndSettle();
+      expect(find.text('今日待复习 7 题 · 积压 0 题'), findsOneWidget);
+      await tester.tap(find.text('去复习'));
+      await tester.pumpAndSettle();
+      final session = tester.widget<ReviewSessionScreen>(
+        find.byType(ReviewSessionScreen),
+      );
+      expect(
+        (session.childId, session.familyId, session.taskId),
+        ('second', 'family', 'task-second'),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets(
     'thousand-record hub builds visible cards only and remains scrollable at double text size',
     (tester) async {
@@ -697,6 +941,10 @@ Future<void> mountCatalog(
   WidgetTester tester,
   QuestionCatalogRepository repository, {
   double scale = 1,
+  bool authorized = true,
+  Future<Map<String, dynamic>> Function(String)? overview,
+  bool settle = true,
+  ValueNotifier<String>? currentChild,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -706,7 +954,11 @@ Future<void> mountCatalog(
         taskRepositoryProvider.overrideWithValue(
           const UnconfiguredTaskRepository(),
         ),
-        activeParentFamilyProvider.overrideWithValue('family'),
+        activeParentFamilyProvider.overrideWithValue(
+          authorized ? 'family' : null,
+        ),
+        if (overview != null)
+          reviewOverviewProvider.overrideWith((_, child) => overview(child)),
       ],
       child: MaterialApp(
         theme: ThemeData(splashFactory: InkRipple.splashFactory),
@@ -716,9 +968,15 @@ Future<void> mountCatalog(
           ).copyWith(textScaler: TextScaler.linear(scale)),
           child: child!,
         ),
-        home: const ReviewHubScreen(childId: 'child', familyId: 'family'),
+        home: currentChild == null
+            ? const ReviewHubScreen(childId: 'child', familyId: 'family')
+            : ValueListenableBuilder<String>(
+                valueListenable: currentChild,
+                builder: (_, child, _) =>
+                    ReviewHubScreen(childId: child, familyId: 'family'),
+              ),
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
 }

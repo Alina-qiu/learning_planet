@@ -28,13 +28,59 @@ class ReviewHubScreen extends ConsumerStatefulWidget {
     super.key,
   });
   final String childId, familyId;
+
+  static Future<void> open(
+    BuildContext context,
+    WidgetRef ref, {
+    required String childId,
+    required String familyId,
+  }) async {
+    final firstPage = ref.listenManual(
+      questionCatalogProvider(
+        questionCatalogScope(child: childId, family: familyId),
+      ),
+      (_, _) {},
+    );
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) {
+            // The default tab takes over this subscription in its first frame.
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => firstPage.close(),
+            );
+            return ReviewHubScreen(childId: childId, familyId: familyId);
+          },
+        ),
+      );
+    } finally {
+      firstPage.close();
+    }
+  }
+
   @override
   ConsumerState<ReviewHubScreen> createState() => _ReviewHubScreenState();
 }
 
 class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
   bool _busy = false;
+  bool _catalogPainted = false;
+  ModalRoute<dynamic>? _overviewRoute;
   Timer? _searchDebounce;
+  @override
+  void didUpdateWidget(ReviewHubScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.childId != widget.childId ||
+        oldWidget.familyId != widget.familyId) {
+      _catalogPainted = false;
+      _searchDebounce?.cancel();
+      _keyword = '';
+      _subject = _mastery = _archive = 'all';
+      _selected.clear();
+      _dismissOverviewAfterFrame(_overviewRoute);
+    }
+  }
+
   @override
   void dispose() {
     _searchDebounce?.cancel();
@@ -219,33 +265,109 @@ class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
     if (mounted) _refresh();
   }
 
-  QuestionCatalogScope _scope(bool pinyin) => (
+  void _dismissOverviewAfterFrame(ModalRoute<dynamic>? route) {
+    if (route == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (route.isActive) route.navigator?.removeRoute(route);
+    });
+  }
+
+  Future<void> _openOverview() async {
+    final child = widget.childId, family = widget.familyId;
+    // An overlay may build before the underlying hub receives its new child.
+    final scopeFrame = WidgetsBinding.instance.endOfFrame;
+    final choice = await showModalBottomSheet<({String task, bool remind})>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final route = _overviewRoute = ModalRoute.of(sheetContext);
+        return FutureBuilder<void>(
+          future: scopeFrame,
+          builder: (_, frame) {
+            if (!mounted ||
+                widget.childId != child ||
+                widget.familyId != family) {
+              _dismissOverviewAfterFrame(route);
+              return const SizedBox.shrink();
+            }
+            if (frame.connectionState != ConnectionState.done) {
+              return const SizedBox.shrink();
+            }
+            return _ReviewOverviewSheet(childId: child);
+          },
+        );
+      },
+    );
+    _overviewRoute = null;
+    if (choice == null ||
+        !mounted ||
+        widget.childId != child ||
+        widget.familyId != family) {
+      return;
+    }
+    if (!choice.remind) {
+      await _practice(choice.task);
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => ReviewReminderDialog(
+        childId: child,
+        familyId: family,
+        taskId: choice.task,
+      ),
+    );
+    if (mounted && widget.childId == child && widget.familyId == family) {
+      _refresh();
+    }
+  }
+
+  QuestionCatalogScope _scope(bool pinyin) => questionCatalogScope(
     child: widget.childId,
     family: widget.familyId,
     kind: pinyin ? 'pinyin' : 'question',
     subject: _subject,
     mastery: _mastery,
     archive: _archive,
-    keyword: _keyword.trim(),
+    keyword: _keyword,
   );
+  void _afterCatalogFrame(QuestionCatalogScope scope) {
+    // The summary can refresh and write its own cache. Give the visible catalog its first frame.
+    if (_catalogPainted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          !_catalogPainted &&
+          scope.child == widget.childId &&
+          scope.family == widget.familyId) {
+        setState(() => _catalogPainted = true);
+      }
+    });
+  }
+
   Widget _catalogList(WidgetRef tabRef, bool pinyin, bool authorized) {
     final scope = _scope(pinyin);
     return tabRef
         .watch(questionCatalogProvider(scope))
         .when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text('错题读取失败：$error'),
-              OutlinedButton(
-                onPressed: () =>
-                    ref.read(questionCatalogProvider(scope).notifier).load(),
-                child: const Text('重试读取'),
-              ),
-            ],
-          ),
+          error: (error, _) {
+            _afterCatalogFrame(scope);
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Text('错题读取失败：$error'),
+                OutlinedButton(
+                  onPressed: () =>
+                      ref.read(questionCatalogProvider(scope).notifier).load(),
+                  child: const Text('重试读取'),
+                ),
+              ],
+            );
+          },
           data: (page) {
+            _afterCatalogFrame(scope);
             final header = <Widget>[
               if (!pinyin)
                 OutlinedButton.icon(
@@ -483,70 +605,11 @@ class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
               child: Column(
                 children: [
                   if (_busy) const LinearProgressIndicator(),
-                  ref
-                      .watch(reviewOverviewProvider(widget.childId))
-                      .when(
-                        data: (value) => Card(
-                          child: Column(
-                            children: [
-                              ListTile(
-                                title: Text(
-                                  '今日待复习 ${value['due']} 题 · 积压 ${value['backlog']} 题',
-                                ),
-                                subtitle: Text(
-                                  value['offline_cache'] == true
-                                      ? '离线缓存；已缓存题目可作答，判定与奖励联网确认'
-                                      : '每天最多10题；开始后题目固定，积压顺延',
-                                ),
-                              ),
-                              if (value['task_id'] != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: FilledButton.tonal(
-                                    onPressed: _busy
-                                        ? null
-                                        : () => _practice(
-                                            value['task_id'] as String,
-                                          ),
-                                    child: const Text('去复习'),
-                                  ),
-                                ),
-                              if (value['task_id'] != null &&
-                                  value['reminder'] is Map &&
-                                  value['reminder']['allowed'] == true)
-                                TextButton.icon(
-                                  onPressed:
-                                      _busy || value['offline_cache'] == true
-                                      ? null
-                                      : () async {
-                                          await showDialog<void>(
-                                            context: context,
-                                            builder: (_) =>
-                                                ReviewReminderDialog(
-                                                  childId: widget.childId,
-                                                  familyId: widget.familyId,
-                                                  taskId:
-                                                      value['task_id']
-                                                          as String,
-                                                ),
-                                          );
-                                          if (mounted) _refresh();
-                                        },
-                                  icon: const Icon(Icons.snooze),
-                                  label: Text(
-                                    value['offline_cache'] == true
-                                        ? '联网后可设置稍后提醒'
-                                        : value['reminder']['remind_at'] == null
-                                        ? '稍后提醒'
-                                        : '稍后提醒 · ${value['reminder']['remind_local']}',
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        loading: () => const LinearProgressIndicator(),
-                        error: (error, _) => Text('复习概览读取失败：$error'),
-                      ),
+                  _ReviewOverviewEntry(
+                    childId: widget.childId,
+                    loadSummary: _catalogPainted,
+                    onOpen: _busy ? null : _openOverview,
+                  ),
                   if (!authorized)
                     const Padding(
                       padding: EdgeInsets.all(8),
@@ -595,6 +658,7 @@ class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: TextField(
+                      key: ValueKey((widget.familyId, widget.childId)),
                       decoration: const InputDecoration(
                         labelText: '搜索题目、知识点或语境',
                         prefixIcon: Icon(Icons.search),
@@ -722,6 +786,141 @@ class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewOverviewEntry extends ConsumerWidget {
+  const _ReviewOverviewEntry({
+    required this.childId,
+    required this.loadSummary,
+    required this.onOpen,
+  });
+  final String childId;
+  final bool loadSummary;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final overview = loadSummary
+        ? ref.watch(reviewOverviewProvider(childId))
+        : null;
+    final summary =
+        overview?.when(
+          data: (value) =>
+              '${value['offline_cache'] == true ? '离线 · ' : ''}待复习 ${value['due']} 题 · 积压 ${value['backlog']} 题',
+          loading: () => '正在读取复习安排…',
+          error: (_, _) => '复习安排读取失败，可查看并重试',
+        ) ??
+        '查看待复习题目与提醒';
+    return ListTile(
+      leading: const Icon(Icons.event_repeat_outlined),
+      title: const Text('今日复习'),
+      subtitle: Text(summary, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onOpen,
+    );
+  }
+}
+
+class _ReviewOverviewSheet extends ConsumerWidget {
+  const _ReviewOverviewSheet({required this.childId});
+  final String childId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final provider = reviewOverviewProvider(childId);
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      '今日复习',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '关闭',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            ref
+                .watch(provider)
+                .when(
+                  loading: () =>
+                      const LinearProgressIndicator(semanticsLabel: '正在读取复习安排'),
+                  error: (error, _) => Column(
+                    children: [
+                      Text('复习概览读取失败：$error'),
+                      OutlinedButton(
+                        onPressed: () => ref.invalidate(provider),
+                        child: const Text('重试'),
+                      ),
+                    ],
+                  ),
+                  data: (value) {
+                    final task = value['task_id'] as String?;
+                    final reminder = value['reminder'];
+                    final offline = value['offline_cache'] == true;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '今日待复习 ${value['due']} 题 · 积压 ${value['backlog']} 题',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          offline
+                              ? '离线缓存；已缓存题目可作答，判定与奖励联网确认'
+                              : '每天最多10题；开始后题目固定，积压顺延',
+                        ),
+                        if (task != null) ...[
+                          const SizedBox(height: 12),
+                          FilledButton.tonal(
+                            onPressed: () => Navigator.pop(context, (
+                              task: task,
+                              remind: false,
+                            )),
+                            child: const Text('去复习'),
+                          ),
+                          if (reminder is Map && reminder['allowed'] == true)
+                            TextButton.icon(
+                              onPressed: offline
+                                  ? null
+                                  : () => Navigator.pop(context, (
+                                      task: task,
+                                      remind: true,
+                                    )),
+                              icon: const Icon(Icons.snooze),
+                              label: Text(
+                                offline
+                                    ? '联网后可设置稍后提醒'
+                                    : reminder['remind_at'] == null
+                                    ? '稍后提醒'
+                                    : '稍后提醒 · ${reminder['remind_local']}',
+                              ),
+                            ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+          ],
         ),
       ),
     );

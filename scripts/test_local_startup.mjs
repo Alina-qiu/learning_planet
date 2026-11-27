@@ -4,13 +4,64 @@ import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {localControlInvocation, scheduleLocalSessionEnd, stopLocalSession} from './local_backend.mjs';
-import {closeServer, listen, localProcess, signedJwt} from './fixtures/http_test_tools.mjs';
+import {localControlInvocation, localRetentionMaintenance, scheduleLocalSessionEnd, stopLocalSession} from './local_backend.mjs';
+import {startTestDatabase} from './fixtures/database.mjs';
+import {closeServer, freePort, listen, localProcess, signedJwt} from './fixtures/http_test_tools.mjs';
 import {initializeLocalBucket} from './fixtures/storage_backend.mjs';
 import {initializingTrialDatabase, localSessionKeys, openLocalTrial} from './fixtures/local_trial.mjs';
 
 const daySeconds = 86400;
 const claims = jwt => JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString());
+
+test('local maintenance retries contended retention separately and purges only expired records each UTC day', async t => {
+  const owner = '00000000-0000-4000-8000-000000000001';
+  const {client, postgres} = await startTestDatabase({port: await freePort(), users: [{id: owner, email: 'retention@example.test'}]});
+  t.after(async () => { await client.end(); await postgres.stop(); });
+  const {id: family} = (await client.query("insert into public.families(name,owner_user_id) values('Trial',$1) returning id", [owner])).rows[0];
+  const {id: child} = (await client.query("insert into public.children(family_id,nickname,grade) values($1,'Child',1) returning id", [family])).rows[0];
+  async function seed(receiptDays, counterDays, intervalDays) {
+    await client.query(`insert into public.runtime_diagnostic_receipts(owner_id,event_id,payload,received_at)
+      values($1,gen_random_uuid(),'{}',now()-make_interval(days=>$2))`, [owner, receiptDays]);
+    await client.query(`insert into public.runtime_diagnostic_daily values
+      ((now() at time zone 'UTC')::date-$1::int,'client','api','database','ok','none',0,1)`, [counterDays]);
+    await client.query(`insert into public.parent_configuration_intervals
+      (owner_id,event_id,child_id,family_id,kind,started_at,ended_at,payload_hash)
+      values($1,gen_random_uuid(),$2,$3,'task',now()-make_interval(days=>$4)-interval '1 second',now()-make_interval(days=>$4),'fixture')`,
+    [owner, child, family, intervalDays]);
+  }
+  const counts = async () => (await client.query(`select
+    (select count(*)::int from public.runtime_diagnostic_receipts) receipts,
+    (select count(*)::int from public.runtime_diagnostic_daily) counters,
+    (select count(*)::int from public.parent_configuration_intervals) intervals`)).rows[0];
+  const keep = {receipts: 1, counters: 1, intervals: 1}, both = {receipts: 2, counters: 2, intervals: 2};
+  await seed(8, 89, 89);
+  await seed(10, 90, 91);
+  const tick = localRetentionMaintenance(postgres);
+  const today = new Date('2026-01-01T23:58:00Z');
+  const failure = t.mock.method(console, 'error', () => {});
+  await client.query('begin; lock table public.parent_configuration_intervals in access exclusive mode');
+  try {
+    const pending = tick(today);
+    assert.equal(tick(today), pending);
+    assert.equal((await client.query('select 1 as active')).rows[0].active, 1);
+    await pending;
+    assert.deepEqual(failure.mock.calls.map(call => call.arguments), [['Local retention maintenance failed:', '55P03']]);
+  } finally { await client.query('rollback'); }
+  assert.deepEqual(await counts(), both);
+  await tick(today);
+  assert.deepEqual(await counts(), keep);
+  await seed(10, 90, 91);
+  await tick(new Date('2026-01-01T23:59:00Z'));
+  assert.deepEqual(await counts(), both);
+  await tick(new Date('2026-01-02T00:00:00Z'));
+  assert.deepEqual(await counts(), keep);
+  const survivors = (await client.query(`select
+    (select count(*)::int from public.runtime_diagnostic_receipts where received_at >= now()-interval '9 days') receipts,
+    (select count(*)::int from public.runtime_diagnostic_daily where day = (now() at time zone 'UTC')::date-89) counters,
+    (select count(*)::int from public.parent_configuration_intervals where ended_at >= now()-interval '90 days') intervals`)).rows[0];
+  assert.deepEqual(survivors, keep);
+  assert.equal(failure.mock.callCount(), 1);
+});
 
 test('a persistent session and its worker credential remain active after the first 24 hours', t => {
   const createdAt = 1800000000, credentials = {createdAt, secret: 'x'.repeat(64)};

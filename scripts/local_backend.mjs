@@ -22,7 +22,7 @@ const respond=(response,status,body)=>{
 };
 
 async function start(keepData) {
-  let finish, ready=false, config, backendPort, timer, cancelLifetime, maintenance;
+  let finish, ready=false, config, backendPort, timer, cancelLifetime, maintenance, retention;
   const done=new Promise(resolve=>{finish=resolve;});
   const runId=randomUUID(), shutdownKey=randomBytes(32).toString('hex'), edges=new Map();
   const gateway=createServer((request,response)=>{
@@ -67,13 +67,16 @@ async function start(keepData) {
         }
       }
       await maintain();
+      const runRetention = localRetentionMaintenance(database.postgres);
       await mkdir(directory,{recursive:true});
       await writeFile(join(directory,'defines.json'),JSON.stringify({APP_ENV:'development',LOCAL_BACKEND:true,
         SUPABASE_URL:origin,SUPABASE_ANON_KEY:config.anon},null,2)+'\n',{mode:0o600});
       await writeFile(controlPath,JSON.stringify({runId,url:origin,mailUrl:config.url,mailboxKey:config.mailboxKey,shutdownKey},null,2)+'\n',{mode:0o600});
       await trial.markReady?.();
       ready=true;
+      retention=runRetention();
       timer=setInterval(()=>{
+        retention=runRetention();
         if(maintenance)return;
         maintenance=maintain().catch(error=>console.error('Local maintenance failed:',error.code??error.name))
           .finally(()=>{maintenance=null;});
@@ -90,7 +93,7 @@ async function start(keepData) {
       console.log(`Read OTP: ${cli} mail parent@example.test`);
       console.log(`Stop cleanly: ${cli} stop`);
       try {await done;} finally {
-        ready=false;clearInterval(timer);cancelLifetime();await maintenance;
+        ready=false;clearInterval(timer);cancelLifetime();await Promise.all([maintenance,retention]);
         for(const edge of edges.values())await edge.stop();edges.clear();
       }
     }, {
@@ -105,6 +108,26 @@ async function start(keepData) {
     await closeServer(gateway);
     process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);
   }
+}
+
+export function localRetentionMaintenance(postgres) {
+  let completedDay, running;
+  return function runRetention(now = new Date()) {
+    const utcDay = now.toISOString().slice(0, 10);
+    if (running || completedDay === utcDay) return running;
+    // A separate connection keeps cleanup and row-lock waits off the minute workers' connection.
+    running = (async () => {
+      const client = postgres.getPgClient();
+      try {
+        await client.connect();
+        await client.query("set lock_timeout = '2s'; set statement_timeout = '15s'");
+        await client.query('select public.purge_runtime_diagnostics(), public.purge_configuration_intervals()');
+        completedDay = utcDay;
+      } finally { await client.end(); }
+    })().catch(error => console.error('Local retention maintenance failed:', error.code ?? error.name))
+      .finally(() => { running = undefined; });
+    return running;
+  };
 }
 
 export function scheduleLocalSessionEnd(expiresAt, finish) {

@@ -11,6 +11,7 @@ import 'package:learning_planet/features/tasks/application/task_providers.dart';
 import 'package:learning_planet/features/tasks/domain/task.dart';
 import 'package:learning_planet/features/tasks/domain/task_item.dart';
 import 'package:learning_planet/features/tasks/presentation/task_management_screen.dart';
+import 'package:learning_planet/features/wrong_questions/data/question_catalog.dart';
 import 'package:learning_planet/features/wrong_questions/data/review_repository.dart';
 import 'package:learning_planet/features/wrong_questions/domain/review_confidence.dart';
 import 'package:learning_planet/features/wrong_questions/presentation/review_session_screen.dart';
@@ -19,6 +20,14 @@ import 'support/task_workload.dart' show WorkloadTasks;
 import 'task_feedback_test.dart' show MemoryFeedbackPreferences;
 
 class RecordedReview extends FakeReviewRepository {
+  final catalogChildren = <String>[];
+
+  @override
+  Future<List<Map<String, dynamic>>> questions(String childId) {
+    catalogChildren.add(childId);
+    return super.questions(childId);
+  }
+
   @override
   Future<Map<String, dynamic>> task(String taskId) async {
     final data = await super.task(taskId);
@@ -173,6 +182,61 @@ void main() {
     );
   }
   for (final fromHome in [true, false]) {
+    testWidgets(
+      '${fromHome ? 'home' : 'task list'} starts the selected child catalog on tap and hands it to the visible tab',
+      (tester) async {
+        final reviews = RecordedReview();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              taskRepositoryProvider.overrideWithValue(WorkloadTasks([])),
+              reviewRepositoryProvider.overrideWithValue(reviews),
+              familiesProvider.overrideWith((ref) async => []),
+              feedbackPreferencesStoreProvider.overrideWithValue(
+                MemoryFeedbackPreferences(),
+              ),
+            ],
+            child: MaterialApp(
+              home: fromHome
+                  ? home()
+                  : const TaskManagementScreen(
+                      childId: 'child',
+                      childNickname: '小星',
+                      familyId: 'family',
+                      isParentMode: false,
+                    ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final button = fromHome
+            ? find.text('错题本与拼音复习')
+            : find.byTooltip('错题与拼音复习');
+        await tester.ensureVisible(button);
+        final container = ProviderScope.containerOf(tester.element(button));
+        final firstPage = questionCatalogProvider(
+          questionCatalogScope(child: 'child', family: 'family'),
+        );
+        expect(reviews.catalogChildren, isEmpty);
+        await tester.tap(button);
+        expect(reviews.catalogChildren, [
+          'child',
+        ]); // Before the first route frame.
+        await tester.pumpAndSettle();
+        expect(reviews.catalogChildren, ['child']);
+        expect(container.exists(firstPage), isTrue);
+
+        await tester.enterText(find.byType(TextField), '新筛选');
+        await tester.pump(const Duration(milliseconds: 310));
+        await tester.pumpAndSettle();
+        expect(reviews.catalogChildren, ['child', 'child']);
+        expect(container.exists(firstPage), isFalse);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     for (final status in [
       TaskStatus.completed,
       TaskStatus.abandoned,

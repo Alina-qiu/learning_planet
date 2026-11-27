@@ -381,6 +381,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.text('今日复习'));
+      await tester.pumpAndSettle();
       expect(find.text('稍后提醒'), findsOneWidget);
       await tester.tap(find.text('稍后提醒'));
       await tester.pumpAndSettle();

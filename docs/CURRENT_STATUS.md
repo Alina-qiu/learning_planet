@@ -4,6 +4,8 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
+首页和任务页的错题入口共用首次读取。等待「今日复习」摘要时，孩子可以先打开错题，摘要返回后仍可在原位置点到同一题。切换孩子会清除旧筛选和待执行的搜索。本机试用服务也会按保留期限清理诊断回执、统计与家长配置记录。[本次交付与逐次实测](../build/catalog-acceptance-20261127/DELIVERY.md) · [错题本操作](QUESTION_CATALOG_PAGINATION.md) · [本机试用](LOCAL_DEBUG.md)
+
 本轮改进了已登录家庭冷启动和错题列表。家庭权限、删除记录及在线目录核验完成后，如果目录与加密数据库完全相同且无需清理，首页可以直接使用核验结果。错题本打开时只加载当前标签。持久试用服务可以跨日运行，App 关闭后仍会生成每日复习并处理注销。[首页与列表性能](APP_PERFORMANCE.md) · [错题分页](QUESTION_CATALOG_PAGINATION.md) · [本机试用](LOCAL_DEBUG.md) · [本轮验收记录](../build/trial-acceptance-20261127/DELIVERY.md)
 
 提交 `a34bcbe` 的完整首页在标准 Android API 36 模拟器连续 3 次冷启动中均于 6 秒内出现。Android 10 模拟器共有 4 次尝试，3 次达到目标，1 次系统启动超时。iOS 18.5 模拟器通过了任务流和四种中文 OCR 场景。iPhone 后台系统注入的第一条静默任务提醒在 35 秒内未取得应用回执。家长提醒的注册、续订和发送现已支持可变长度的 APNs 设备令牌。[首页逐次测量](APP_PERFORMANCE.md) · [iOS 任务与 OCR](https://github.com/Alina-qiu/learning_planet/actions/runs/45961743243) · [后台回执](https://github.com/Alina-qiu/learning_planet/actions/runs/45961743413) · [家长提醒](PARENT_REMOTE_PUSH.md)

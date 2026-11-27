@@ -143,13 +143,11 @@ class _TaskManagementScreenState extends ConsumerState<TaskManagementScreen>
               icon: const Icon(Icons.school_outlined),
               onPressed: taskActionBusy
                   ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => ReviewHubScreen(
-                          childId: widget.childId,
-                          familyId: widget.familyId!,
-                        ),
-                      ),
+                  : () => ReviewHubScreen.open(
+                      context,
+                      ref,
+                      childId: widget.childId,
+                      familyId: widget.familyId!,
                     ),
             ),
           if (widget.familyId != null)
