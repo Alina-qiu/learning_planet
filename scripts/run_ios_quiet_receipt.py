@@ -5,6 +5,8 @@ and boot the same UDID. The system scenario requests registration without record
 Both scenarios generate their messages locally.
 """
 import argparse
+from collections import deque
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -173,8 +175,9 @@ LOG_TERMS = re.compile(r"\b(pushlaunch|push|remote[ -]?notification|notification
                        r"suspend(?:ed)?|expired|registration|assertion|failed|error|no|not)\b", re.IGNORECASE)
 
 
-def log_records(raw):
-    records = []
+def log_records(raw, start, end):
+    first = []
+    last = deque(maxlen=40)
     count = 0
     for line in raw.splitlines():
         try:
@@ -187,26 +190,38 @@ def log_records(raw):
         message = row.get("eventMessage")
         if process not in LOG_PROCESSES or not isinstance(message, str) or BUNDLE.lower() not in message.lower():
             continue
-        count += 1
-        if len(records) >= 80:
+        # log show accepts whole seconds. Exclude records before the actual
+        # submission, even when the app became ready in the very same second.
+        try:
+            stamp = datetime.fromisoformat(row["timestamp"])
+            if stamp.tzinfo is None or not start <= stamp.timestamp() <= end:
+                continue
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
             continue
-        stamp = row.get("timestamp")
-        timestamp = stamp if isinstance(stamp, str) and re.fullmatch(r"\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:?\d\d)?", stamp) else None
+        count += 1
         terms = [m[0].lower().replace(" ", "") for m in LOG_TERMS.finditer(message)][:18]
-        records.append({"timestamp": timestamp, "process": process, "terms": terms})
-    return {"matchedRecordsRead": count, "recordLimit": 80, "records": records}
+        record = {"timestamp": stamp.astimezone(timezone.utc).isoformat(), "process": process, "terms": terms}
+        if len(first) < 40:
+            first.append(record)
+        else:
+            last.append(record)
+    return {"matchedRecordsRead": count, "recordLimit": 80, "records": first + list(last)}
 
 
-def simulator_log(device, observed_since):
+def simulator_log(device, observed_since, phase):
     limit = 512 * 1024
-    seconds = min(240, max(15, math.ceil(time.monotonic() - observed_since) + 15))
+    end = time.time()
+    start = min(end, max(end - 240, observed_since))
+    start_utc = datetime.fromtimestamp(start, timezone.utc)
+    end_utc = datetime.fromtimestamp(math.ceil(end), timezone.utc)
     # SpringBoard and RunningBoard also log routine view and scene changes for the same bundle.
     relevant = ' OR '.join(f'eventMessage CONTAINS[c] "{term}"' for term in
                            ("push", "notification", "background", "fetch", "wake", "deliver", "denied", "throttl"))
     predicate = ('process IN {' + ', '.join(f'"{name}"' for name in LOG_PROCESSES)
                  + f'}} AND eventMessage CONTAINS[c] "{BUNDLE}"'
                  + ' AND (process IN {"apsd", "dasd", "usernotificationsd"} OR ' + relevant + ')')
-    cmd = ["xcrun", "simctl", "spawn", device, "log", "show", "--last", f"{seconds}s", "--style", "ndjson",
+    cmd = ["xcrun", "simctl", "spawn", device, "log", "show",
+           "--start", start_utc.strftime("%Y-%m-%d %H:%M:%S%z"), "--end", end_utc.strftime("%Y-%m-%d %H:%M:%S%z"), "--style", "ndjson",
            "--info", "--debug", "--predicate", predicate]
     with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=(os.name == "posix")) as proc:
         def stop():
@@ -231,8 +246,9 @@ def simulator_log(device, observed_since):
         finally:
             timer.cancel()
             timer.join()
-    return {"device": device, "windowSeconds": seconds, "byteLimit": limit, "byteLimitReached": len(raw) > limit,
-            "timedOut": with_timeout.is_set(), "exitCode": code, **log_records(raw[:limit])}
+    return {"device": device, "phase": phase, "startUtc": start_utc.isoformat(),
+            "windowSeconds": math.ceil(end - start), "byteLimit": limit, "byteLimitReached": len(raw) > limit,
+            "timedOut": with_timeout.is_set(), "exitCode": code, **log_records(raw[:limit], start, end)}
 
 
 def stage_observations(directory, ready, source, sent):
@@ -328,14 +344,15 @@ def run(device, report, source):
             raise TimeoutError("Timed out waiting for " + description)
         directory, ready = None, None
         sent = {}
-        observed_since = time.monotonic()
+        observed_since = time.time()
+        log_phase = "setup"
         try:
             directory, ready = wait_for_ready(proc, device, bundle, started)
             write("ready", ready)
             if ready["source"] != source:
                 raise ValueError("XCTest started a different receipt scenario")
             zero = time.monotonic()
-            observed_since = zero
+            observed_since = time.time()
             def event(name):
                 path = directory / (name + ".json")
                 if path.is_file():
@@ -352,6 +369,9 @@ def run(device, report, source):
             callbacks, entries, claims, invocations = {}, {}, {}, {}
             for case in CASES:
                 data = payload(ready, case, round((time.monotonic() - zero) * 1000))
+                if not sent:
+                    observed_since = time.time()
+                    log_phase = "firstDeliveryAttempt"
                 if source == "system":
                     command = subprocess.run(simulator + ["push", device, bundle, "-"],
                                              input=json.dumps(data), text=True, capture_output=True, timeout=30)
@@ -399,7 +419,7 @@ def run(device, report, source):
             for name, collect in (
                     ("app-observations", lambda: stage_observations(directory, ready, source, sent)),
                     ("installed-entitlements", lambda: installed_entitlements(device)),
-                    ("simulator-push-log", lambda: simulator_log(device, observed_since))):
+                    ("simulator-push-log", lambda: simulator_log(device, observed_since, log_phase))):
                 try:
                     item = collect()
                 except Exception as error:

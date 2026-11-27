@@ -193,9 +193,20 @@ class _Control {
     final timeout = phase == null
         ? const Duration(minutes: 3)
         : const Duration(minutes: 15);
+    final target = uri(path);
+    // This poll runs after the restored reader verifies its cached UI. The
+    // gateway independently counts denied data requests before reconnection.
+    final poll = waitForOfflineRequest
+        ? target.replace(
+            queryParameters: {
+              ...target.queryParameters,
+              'checkpoint': 'offline-home',
+            },
+          )
+        : target;
     while (watch.elapsed < timeout) {
       final response = await client
-          .get(uri(path))
+          .get(poll)
           .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data =

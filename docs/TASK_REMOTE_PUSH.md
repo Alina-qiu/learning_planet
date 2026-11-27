@@ -13,6 +13,8 @@
 
 每个作业将自己的来源、结果、原始事件和 XCTest 日志上传到 `iphone18-background-receipt-native` 或 `iphone18-background-receipt-system`。手动运行工作流时可单选来源。
 
+提交 `9cfc243` 的 iOS 18.5 模拟器中，直接调用应用委托的四种后台消息都有回执，仅允许的消息进入通知中心。独立系统投递首次未取得进入后台的记录。重试已确认应用处于后台，系统接受了第一条静默消息，35 秒内没有观察到相应的应用回调。该次保留的系统日志均早于注入，因此无法确定原因。诊断脚本现在从第一次尝试发送的时刻查询，并在整秒边界内剔除更早的日志。[两次系统作业与原生回执](https://github.com/Alina-qiu/learning_planet/actions/runs/45934150260)
+
 提交 `a25c5d3` 的原生处理路径通过了四个场景。系统注入路径收到 `simctl push` 成功返回，运行中的 App 已切至后台，35 秒内仍未观察到第一条消息进入提醒处理器。[该次系统与原生结果](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459651)
 
 专用模拟器测试现在分别记录系统请求的委托方法、带测试消息编号的应用回调和任务处理器的回执。报告另存已安装测试包的推送权限、注册结果及针对该应用的系统投递日志摘要。无载荷后台获取只单独计数，四项验收均要求与原消息编号及内容匹配。Apple 的 Xcode 12 发行说明曾记录模拟器可能走无载荷方法，当前 Xcode 版本的行为以对应运行记录为准。[Apple 发行说明](https://developer.apple.com/documentation/xcode-release-notes/xcode-12-release-notes/) · [后台推送规则](https://developer.apple.com/documentation/usernotifications/pushing-background-updates-to-your-app)

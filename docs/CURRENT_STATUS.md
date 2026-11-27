@@ -4,7 +4,9 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-Android 联调包支持逐张校对本机草稿、按张同意上传和家长确认答案。提交 `a25c5d3` 的已登录家庭在 Android 10 模拟器连续三次重开 Release 后，完整首页最迟在 1.65、3.85、3.66 秒可操作。该提交在 Windows 和 Linux 各通过 916 项 Flutter 测试。两台模拟器使用同一家庭时，iPhone 离线重开再联网，6.182 秒发起首个取得新状态的请求。[安装包](ANDROID_BUILD.md) · [本机操作与截图](../build/ocr-local-20261127/DELIVERY.md) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459668) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459657)
+提交 `9cfc243` 的 Android 联调包支持逐张校对本机草稿、按张同意上传，家长可以从家庭概览直接确认指定孩子的标准答案。测试中，家长补正一道题后，该孩子的待办清零，另一名孩子的两题仍在。Android 10 模拟器连续三次强停重开 Release 版，已登录家庭的完整首页分别在 3.70、5.01、4.48 秒内可操作。Windows 和 Linux 各通过 924 项 Flutter 测试。[安装包](ANDROID_BUILD.md) · [本机验收](../build/mobile-acceptance-20261127/DELIVERY.md) · [确认操作与截图](../build/mobile-acceptance-20261127/overview-device/REPORT.md)
+
+同一提交的 iPhone 模拟器完成了两名孩子的在线及离线切换，Android 也确认了任务和奖励。随后 iPhone 重启，测试驱动在重连前超时。单独的 OCR 作业在发现 Dart 测试服务时超时。两次均缺少最终业务回执。此前 `a25c5d3` 的两端同步曾完整通过。[本次配对](https://github.com/Alina-qiu/learning_planet/actions/runs/45934150321) · [本次常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45934150388) · [此前的完整配对](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459657)
 
 现在可以用同一个本机安装包分几天试用同一测试家庭。在项目目录执行 `& ./scripts/local_backend.ps1 -KeepData` 后，关闭服务再用同一命令启动，家庭账号、孩子、账本和私有文件会保留。[本机运行步骤](LOCAL_DEBUG.md) · [两份调试包的用途](ANDROID_BUILD.md) · [双孩子与首页启动实测](../build/child-isolation-20261127/DELIVERY.md)
 
@@ -159,7 +161,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | Android 10 模拟器连续三次冷启动已登录家庭，完整首页在 1.65、3.85、3.66 秒内可见。同一 Release 包完成一项普通任务，手指按下后 191–232 毫秒显示本机保存成功。[三次启动](../build/ocr-local-20261127/release/home-acceptance.json) · [任务反馈](../build/ocr-local-20261127/release/completion-feedback.json) · [列表和较早的启动测量](APP_PERFORMANCE.md) | Android 与 iPhone 真机、重装后首次启动、各主要列表的目标设备耗时 |
+| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | `9cfc243` 的 Android 10 模拟器连续三次冷启动已登录家庭，完整首页在 3.70、5.01、4.48 秒内可见。此前 `a25c5d3` 完成一项普通任务，从手指按下到显示本机保存成功为 191–232 毫秒。[三次启动](../build/mobile-acceptance-20261127/release/home-acceptance.json) · [任务反馈](../build/ocr-local-20261127/release/completion-feedback.json) · [列表和较早的启动测量](APP_PERFORMANCE.md) | Android 与 iPhone 真机、重装后首次启动、各主要列表的目标设备耗时 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | API 29 模拟器恢复本机服务连接后，前台 9.34 秒发出首个快照请求。会话过期、离线重开后再次恢复连接，1.48 秒发出首个快照请求，1.56 秒开始补传操作。[同步时间及账本](../build/acceptance-20261124/android-reconnect.json) | 目标手机的无线网络切换、系统后台限制仍待验证 |

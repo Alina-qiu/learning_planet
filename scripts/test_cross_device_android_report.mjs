@@ -6,11 +6,29 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {androidEvidence, androidSessionMatches, fixtureMailboxReply, fixtureOperation} from './test_cross_device_sync.mjs';
+import {androidEvidence, androidSessionMatches, fixtureMailboxReply, fixtureOperation, iosRestoreCheckpoint} from './test_cross_device_sync.mjs';
 import {closeServer, listen, signedJwt} from './fixtures/http_test_tools.mjs';
 
 const scenario={task_id:'task',child_id:'child',family_id:'family',coins:7,xp:5};
 const report={...scenario,device:'android',test:'AC-01',stage:'confirmed',ready_with_zero_wallet:true,completed:true};
+
+test('only restored reader requests identify the scenario and cached home; host reads are passive', () => {
+  const observe = (target, method = 'GET', phase = 'writer-complete') =>
+    iosRestoreCheckpoint(method, new URL(target, 'http://127.0.0.1:54324'), phase);
+  assert.equal(observe('/scenario?device=ios'), 'scenarioRequested');
+  assert.equal(observe('/phase?device=ios&checkpoint=offline-home'), 'offlineHomeVerified');
+  assert.equal(observe('/phase?device=ios'), undefined);
+  for (const target of ['/scenario?device=android', '/phase?device=android&checkpoint=offline-home',
+    '/phase?device=ios&checkpoint=reader-reconnect', '/otp?device=ios&checkpoint=offline-home']) {
+    assert.equal(observe(target), undefined);
+  }
+  for (const target of ['/scenario?device=ios', '/phase?device=ios&checkpoint=offline-home']) {
+    assert.equal(observe(target, 'POST'), undefined);
+    for (const phase of ['initial', 'reader-ready', 'reader-reconnect', 'reader-confirmed']) {
+      assert.equal(observe(target, 'GET', phase), undefined);
+    }
+  }
+});
 
 test('the fixture mailbox reports an Auth rejection without reading or exposing mail',async ()=>{
   const neverRead = () => { throw Error('unexpected mailbox read'); };

@@ -64,11 +64,29 @@ class QuietReceiptDiagnosticTests(unittest.TestCase):
         lines = ([b"noise", json.dumps({**row, "eventMessage": "Denied push for another app"}).encode(),
                   json.dumps({**row, "processImagePath": "/tmp/Other"}).encode()]
                  + [json.dumps(row).encode()] * 85)
-        result = log_records(b"\n".join(lines))
+        result = log_records(b"\n".join(lines), 0, 2_000_000_000)
         self.assertEqual((result["matchedRecordsRead"], len(result["records"])), (85, 80))
-        self.assertEqual(result["records"][0], {"process": "dasd", "timestamp": row["timestamp"],
+        self.assertEqual(result["records"][0], {"process": "dasd", "timestamp": "2026-11-27T08:07:06.230000+00:00",
                                                 "terms": ["denied", "background", "push"]})
         self.assertNotIn("private", json.dumps(result))
+
+    def test_first_delivery_in_same_second_as_setup_retains_only_in_window_records(self):
+        def record(stamp, message):
+            return json.dumps({"process":"SpringBoard","timestamp":stamp,"eventMessage":BUNDLE + " " + message}).encode()
+
+        setup = record("1970-01-01 00:00:02.130001+0000", "delivered")
+        submit = record("1970-01-01 00:00:02.150000+0000", "received")
+        busy = record("1970-01-01 00:00:03.000000+0000", "assertion")
+        last = record("1970-01-01 01:00:04+0100", "deferred")
+        outside = record("1970-01-01 00:00:04.000001+0000", "expired")
+        lines = [setup] * 95 + [submit] + [busy] * 93 + [last, outside, record("n/a", "denied")]
+        result = log_records(b"\n".join(lines), 2.15, 4)
+        terms = [row["terms"] for row in result["records"]]
+        self.assertEqual((result["matchedRecordsRead"], len(terms)), (95, 80))
+        self.assertEqual((terms[0], terms[-1]), (["received"], ["deferred"]))
+        self.assertNotIn(["delivered"], terms)
+        self.assertNotIn(["denied"], terms)
+        self.assertNotIn(["expired"], terms)
 
     def test_log_capture_queries_selected_device_with_limit_and_deadline(self):
         proc = Mock(stdout=io.BytesIO(b"X" * (600 * 1024)), pid=452, wait=Mock(return_value=-9))
@@ -76,12 +94,14 @@ class QuietReceiptDiagnosticTests(unittest.TestCase):
         proc_context.__enter__ = Mock(return_value=proc)
         proc_context.__exit__ = Mock(return_value=False)
         with patch("run_ios_quiet_receipt.subprocess.Popen", return_value=proc_context) as start, \
-                patch("run_ios_quiet_receipt.os.name", "nt"), patch("run_ios_quiet_receipt.time.monotonic", return_value=500):
-            item = simulator_log("dedicated-udid", 0)
+                patch("run_ios_quiet_receipt.os.name", "nt"), patch("run_ios_quiet_receipt.time.time", return_value=500):
+            item = simulator_log("dedicated-udid", 0, "firstDeliveryAttempt")
         args = start.call_args.args[0]
         self.assertEqual(args[:4], ["xcrun", "simctl", "spawn", "dedicated-udid"])
         self.assertIn(BUNDLE, args[-1])
-        self.assertIn("240s", args)
+        self.assertEqual(args[args.index("--start") + 1], "1970-01-01 00:04:20+0000")
+        self.assertEqual(args[args.index("--end") + 1], "1970-01-01 00:08:20+0000")
+        self.assertEqual((item["windowSeconds"], item["phase"]), (240, "firstDeliveryAttempt"))
         self.assertTrue(item["byteLimitReached"])
         self.assertEqual(proc.stdout.tell(), item["byteLimit"] + 1)
         proc.kill.assert_called_once()
@@ -173,6 +193,7 @@ class QuietReceiptHostTests(unittest.TestCase):
                 run(device, report, "system")
             signature.assert_called_once_with(device)
             self.assertEqual(logs.call_args.args[0], device)
+            self.assertEqual(logs.call_args.args[2], "firstDeliveryAttempt")
         return {p.stem: json.loads(p.read_bytes()) for p in report.glob("*.json")}
 
     def test_system_timeout_keeps_app_and_system_stages_without_creating_a_pass(self):

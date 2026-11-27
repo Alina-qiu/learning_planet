@@ -132,6 +132,17 @@ def control_phase():
     return control_status("ios")[0]
 
 
+def ios_restore_summary(data):
+    restore = data.get("iosRestore")
+    restore = restore if isinstance(restore, dict) else {}
+    fields = {"scenarioRequested": restore.get("scenarioRequested"),
+              "offlineRequest": data.get("readerAttemptedWhileOffline"),
+              "offlineHomeVerified": restore.get("offlineHomeVerified"),
+              "reconnectRequested": restore.get("reconnectRequested")}
+    return " ".join(f"{key}={'yes' if value is True else 'no' if value is False else 'unknown'}"
+                    for key, value in fields.items())
+
+
 def verify_child_views(initial, server):
     primary, sibling = server["childProfiles"]
     require(primary["child_id"] == server["childId"] and primary["task_id"] == server["taskId"],
@@ -364,7 +375,10 @@ def driver_failure(path, name, status, phase, report=None):
         if facts:
             message += ", confirmed " + ", ".join(facts)
     if name in ("initial iPhone reader", "restored iPhone reader"):
-        data = control_data("ios").get("iosHttp")
+        state = control_data("ios")
+        if name == "restored iPhone reader":
+            message += "; iOS restore " + ios_restore_summary(state)
+        data = state.get("iosHttp")
         fields = []
         for key in ("otp", "otpStatus", "verify", "verifyStatus", "snapshot", "snapshotStatus", "mailboxReads", "mailboxStatus", "mailboxInterrupted"):
             value = data.get(key) if isinstance(data, dict) else None
@@ -501,7 +515,7 @@ def run():
             # On Android the launcher exits after am start. Only the backend's
             # verified report marks the on-device test as successfully finished.
             deadline = time.monotonic() + 21 * 60
-            last = last_app_stage = None
+            last = last_app_stage = last_restore = None
             exited_at = login_deadline = None
             final = expected == "reader-confirmed"
             with contextlib.ExitStack() as owner:
@@ -521,6 +535,15 @@ def run():
                             print(f"Android on-device stage {app_stage}", flush=True)
                         if login_deadline is not None and time.monotonic() >= login_deadline:
                             raise android_failure(f"Android login timed out after {last_app_stage}", adb_device)
+                    elif final:
+                        state = control_data("ios")
+                        phase = state.get("phase")
+                        phase = phase if phase in PHASES else None
+                        if phase:
+                            restore = ios_restore_summary(state)
+                            if restore != last_restore:
+                                print("Restored iPhone observations: " + restore, flush=True)
+                                last_restore = restore
                     else:
                         phase = control_phase()
                     if phase and phase != last:

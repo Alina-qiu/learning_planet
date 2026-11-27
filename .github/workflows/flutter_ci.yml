@@ -393,11 +393,11 @@ jobs:
         run: |
           python3 - <<'PY'
           import os, pathlib, subprocess
+          from scripts.run_ios_simulator_flow import collect_runner_log
           report = pathlib.Path('build/ios-simulator')
           device = os.environ['SIMULATOR_ID']
           commands = {
               'installed-app.txt': ['get_app_container', device, 'com.learningplanet.learningPlanet', 'app'],
-              'runner.log': ['spawn', device, 'log', 'show', '--last', '15m', '--style', 'compact', '--predicate', 'process == "Runner"'],
               'screenshot.log': ['io', device, 'screenshot', str(report / 'simulator-final.png')],
           }
           for name, arguments in commands.items():
@@ -408,6 +408,7 @@ jobs:
                   except subprocess.TimeoutExpired:
                       output.write(b'\nDiagnostic command exceeded 30 seconds\n')
                       print(name, 'timeout')
+          collect_runner_log(device, report)
           PY
       - name: Stop simulator
         timeout-minutes: 5

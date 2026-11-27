@@ -28,6 +28,12 @@ export function fixtureOperation(method, target) {
   return method === 'POST' ? countedRoutes.get(target.split('?', 1)[0]) : undefined;
 }
 
+export function iosRestoreCheckpoint(method, url, phase) {
+  if (method !== 'GET' || phase !== 'writer-complete' || url.searchParams.get('device') !== 'ios') return;
+  if (url.pathname === '/scenario') return 'scenarioRequested';
+  if (url.pathname === '/phase' && url.searchParams.get('checkpoint') === 'offline-home') return 'offlineHomeVerified';
+}
+
 // Return only the fixture status and expected code. Never forward a provider
 // error body, an address, or an authorization header to the test report.
 export async function fixtureMailboxReply(otpStatus, expectedCount, readMail) {
@@ -178,6 +184,7 @@ async function run(config, {database}) {
   let phase = phases[0], lastOtp = Date.now(), blocked = 0, blockedAfterWriter = 0, reconnectAt;
   let committedLedger, timer;
   const observations = [], sessions = {}, servers = [];
+  const iosRestore = {scenarioRequested:false, offlineHomeVerified:false, reconnectRequested:false};
   const counts = () => ({otp:0, otpOk:0, otpStatus:0, verify:0, verifyOk:0, verifyStatus:0,
     snapshot:0, snapshotOk:0, snapshotStatus:0, mailboxReads:0, mailboxStatus:0, mailboxInterrupted:0});
   const deviceHttp = {android:counts(), ios:counts()};
@@ -277,6 +284,8 @@ async function run(config, {database}) {
       const url = new URL(req.url,'http://127.0.0.1:54324');
       const device=url.searchParams.get('device');
       if (!Object.hasOwn(ports,device)) { res.writeHead(400).end(); return; }
+      const checkpoint = iosRestoreCheckpoint(req.method, url, phase);
+      if (checkpoint) iosRestore[checkpoint] = true;
       if (['/progress','/report'].includes(url.pathname)) {
         await android.receive(url.pathname,device,req,res); return;
       }
@@ -297,7 +306,7 @@ async function run(config, {database}) {
       }
       if (url.pathname!=='/phase') { res.writeHead(404).end(); return; }
       if (req.method==='GET') {
-        json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0,androidStage:android.stage,
+        json(res,200,{phase,readerAttemptedWhileOffline:blockedAfterWriter>0,iosRestore,androidStage:android.stage,
           androidCheckpoint:android.checkpoint,androidHttp:deviceHttp.android,iosHttp:deviceHttp.ios});
         return;
       }
@@ -318,6 +327,7 @@ async function run(config, {database}) {
       } else if (next==='writer-complete') {
         committedLedger=await verifiedWriterLedger();
       } else if (next==='reader-reconnect') {
+        iosRestore.reconnectRequested=true;
         assert.ok(android.saved,'Android UI report has not arrived');
         assert.ok(blockedAfterWriter>0,'Reader never attempted to use the unavailable network after completion');
         reconnectAt=Date.now();
@@ -331,7 +341,7 @@ async function run(config, {database}) {
         const siblingFinal=await siblingState(database,sibling.child_id);
         assert.deepEqual(siblingFinal,siblingInitial);
         const result={childProfiles:profiles,siblingInitial,siblingFinal,passed:true,childId:family.child,taskId:taskId,separateLogins:true,initial,final:await state(),
-          ledger:rows,receipts:finalReceipts,blockedReaderRequests:blocked,blockedAfterWriter,readerSessionRetained:true,
+          ledger:rows,receipts:finalReceipts,blockedReaderRequests:blocked,blockedAfterWriter,iosRestore,readerSessionRetained:true,
           firstSnapshotAfterReconnectMs:fresh.at-reconnectAt,
           phaseTimes:{...phaseTimes,[next]:Date.now()},snapshotCounts:Object.fromEntries(['ios','android'].map(d=>[d,observations.filter(o=>o.device===d).length]))};
         await writeFile(directory+'/server.json',JSON.stringify(result,null,2)+'\n');

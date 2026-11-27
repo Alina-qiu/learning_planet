@@ -14,31 +14,59 @@ import tempfile
 import time
 
 
-def vm_service_url(output, pid):
-    # Compact log entries include Runner[PID:thread]. Ignore any earlier launch
-    # even if it announced an otherwise valid loopback service URL.
-    output = "\n".join(line for line in output.splitlines() if f"Runner[{pid}:" in line)
-    match = re.search(
-        r"The Dart VM service is listening on (http://127\.0\.0\.1:\d+/[A-Za-z0-9_=-]+/)",
-        output,
-    )
-    return match.group(1) if match else None
+ANNOUNCEMENT = re.compile(
+    r"^(?P<time>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{1,9})\s+\w+\s+"
+    r"Runner\[(?P<pid>[1-9]\d*):[0-9a-fA-F]+\]\s+.*?The Dart VM service is listening on "
+    r"(?P<url>http://127\.0\.0\.1:(?P<port>[1-9]\d{0,4})/[A-Za-z0-9_=-]{1,512}/)(?=\s|$)"
+)
+LOG_BYTE_LIMIT = 8 * 1024 * 1024
+
+
+def read_announcements(path, offset):
+    """Read complete compact-format lines once, in bounded blocks, including late appends."""
+    matches = []
+    with path.open("rb") as log:
+        log.seek(max(0, offset - 1))
+        line_start = offset == 0 or log.read(1) == b"\n"
+        end = min(LOG_BYTE_LIMIT, offset + 262144)
+        while log.tell() < end:
+            start = log.tell()
+            line = log.readline(min(8192, end - start))
+            if not line:
+                break
+            if not line.endswith(b"\n") and len(line) < 8192:
+                # A writer may finish this entry later. If this is a block
+                # boundary the next read starts here with a fresh allowance.
+                log.seek(start)
+                break
+            match = ANNOUNCEMENT.match(line.decode("utf8", "replace")) if line_start else None
+            line_start = line.endswith(b"\n")
+            if match and int(match["port"]) <= 65535:
+                matches.append(match)
+        return log.tell(), matches
+
+
+def runner_log_command(device, kind, last="5m"):
+    command = ["xcrun", "simctl", "spawn", device, "log", kind]
+    if kind == "show":
+        command += ["--last", last]
+    predicate = 'process == "Runner"'
+    if kind == "stream":
+        predicate += ' AND eventMessage CONTAINS "The Dart VM service is listening on"'
+    return command + ["--style", "compact", "--predicate", predicate]
 
 
 def launch_pid(output, bundle):
-    match = re.search(rf"^{re.escape(bundle)}: ([1-9][0-9]*)$", output, re.MULTILINE)
-    if not match:
-        raise RuntimeError("simctl launch did not return the app PID")
-    return int(match.group(1))
+    matches = re.findall(rf"^{re.escape(bundle)}: ([1-9][0-9]*)$", output, re.MULTILINE)
+    if len(matches) != 1:
+        raise RuntimeError("simctl launch did not return a unique app PID")
+    return int(matches[0])
 
 
 def wait_for_service(device, pid, report, timeout=120):
     deadline = time.monotonic() + timeout
     # Flutter sends this announcement through os_log. Follow new entries and
     # also query the preceding five minutes in case it was emitted at launch.
-    prefix = ["xcrun", "simctl", "spawn", device, "log"]
-    flags = ["--style", "compact", "--predicate",
-             'process == "Runner" AND eventMessage CONTAINS "The Dart VM service is listening on"']
     processes = {}
     last_lookup = float("-inf")
 
@@ -56,38 +84,45 @@ def wait_for_service(device, pid, report, timeout=120):
     url = None
     with tempfile.TemporaryDirectory() as directory:
         paths = {name:Path(directory) / name for name in ("stream", "show")}
+        offsets = dict.fromkeys(paths, 0)
         try:
             while True:
-                for path in paths.values():
-                    if path.exists():
-                        with path.open("rb") as log:
-                            log.seek(max(0, path.stat().st_size - 65536))
-                            url = vm_service_url(log.read().decode("utf-8", "replace"), pid)
-                        if url:
+                backlog = False
+                for name, path in paths.items():
+                    if not path.exists():
+                        continue
+                    size = path.stat().st_size
+                    previous = offsets[name]
+                    offsets[name], rows = read_announcements(path, previous)
+                    for row in rows:
+                        if int(row["pid"]) == pid:
+                            url = row["url"]
                             return url
+                    backlog |= previous < offsets[name] < min(size, LOG_BYTE_LIMIT)
+                    if size >= LOG_BYTE_LIMIT and processes[name].poll() is None:
+                        stop(processes[name])
                 now = time.monotonic()
                 if now >= deadline:
                     raise TimeoutError(f"Dart VM service was not announced within {timeout} seconds")
                 for name, path in paths.items():
                     process = processes.get(name)
-                    if name == "stream" and process is not None:
+                    if offsets[name] >= LOG_BYTE_LIMIT or (path.exists() and path.stat().st_size >= LOG_BYTE_LIMIT):
                         continue
-                    if process is not None and process.poll() is None:
-                        if now - last_lookup < 30:
-                            continue
-                        if not stop(process):
-                            continue
-                    if name == "show" and now - last_lookup < 2:
+                    # Give a slow retained query its full share of the existing
+                    # deadline. Restart only completed queries, at most once per five seconds.
+                    if process is not None and (name == "stream" or process.poll() is None):
                         continue
-                    args = [name, "--last", "5m"] if name == "show" else [name]
+                    if name == "show" and now - last_lookup < 5:
+                        continue
                     # Each producer appends. A late writer after simctl exits
                     # must not lose its bytes to truncation on the next probe.
                     with path.open("ab") as log:
-                        processes[name] = subprocess.Popen(prefix + args + flags, stdout=log,
-                                                           stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                        processes[name] = subprocess.Popen(runner_log_command(device, name), stdout=log,
+                                                           stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
                     if name == "show":
                         last_lookup = now
-                time.sleep(min(0.5, max(0, deadline - time.monotonic())))
+                if not backlog:
+                    time.sleep(min(0.5, max(0, deadline - time.monotonic())))
         finally:
             pending = sum(1 for process in processes.values() if not stop(process))
             status = "ready" if url else "unavailable"
@@ -95,6 +130,35 @@ def wait_for_service(device, pid, report, timeout=120):
             (report / "vm-service.log").write_text(
                 f"Runner PID {pid}: VM discovery {status}; stream bytes={counts['stream']}, "
                 f"retained bytes={counts['show']}, pending cleanup={pending}\n", encoding="utf-8")
+
+
+def collect_runner_log(device, report):
+    """Publish fixed announcement markers only. Keep the wider system query private."""
+    deadline = time.monotonic() + 30
+    with tempfile.TemporaryDirectory() as temp:
+        raw = Path(temp) / "compact.log"
+        with raw.open("wb") as stream:
+            proc = subprocess.Popen(runner_log_command(device, "show", "15m"), stdout=stream,
+                                    stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        while proc.poll() is None and time.monotonic() < deadline and raw.stat().st_size < LOG_BYTE_LIMIT:
+            time.sleep(.25)
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+        marks = []
+        offset = 0
+        while offset < min(raw.stat().st_size, LOG_BYTE_LIMIT) and len(marks) < 64:
+            new_offset, rows = read_announcements(raw, offset)
+            marks.extend(f'{row["time"]} Runner PID {row["pid"]}: VM service announced' for row in rows[:64-len(marks)])
+            if new_offset == offset:
+                break
+            offset = new_offset
+        (report / "runner.log").write_text(
+            f"Runner log query exit={proc.poll()}, inspected bytes={offset}\n" +
+            "".join(mark + "\n" for mark in marks), encoding="utf8")
 
 
 DEFAULT_DRIVER = "test_driver/task_flow_driver.dart"
@@ -121,27 +185,43 @@ def main(driver=DEFAULT_DRIVER, private_report=None, reuse_installed=False):
     else:
         print("Installing the prebuilt integration app", flush=True)
         subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=180)
+    # CoreSimulator can take more than a minute to acknowledge this one launch.
+    # Keep the former 60 + 120 second setup ceiling shared with VM discovery.
+    setup_deadline = time.monotonic() + 180
     launch = subprocess.run(
         ["xcrun", "simctl", "launch", device, bundle,
          "--enable-dart-profiling", "--disable-vm-service-publication",
          "--start-paused", "--enable-checked-mode", "--verify-entry-points"],
-        capture_output=True, text=True, timeout=60, check=True,
+        capture_output=True, text=True, timeout=120, check=True,
     )
-    (report / "app-launch.log").write_text(launch.stdout + launch.stderr, encoding="utf-8")
     pid = launch_pid(launch.stdout, bundle)
+    (report / "app-launch.log").write_text(f"{bundle}: {pid}\n", encoding="utf-8")
     try:
-        url = wait_for_service(device, pid, report)
+        remaining = min(120, setup_deadline - time.monotonic())
+        if remaining <= 0:
+            raise TimeoutError("Simulator launch exhausted the VM setup deadline")
+        url = wait_for_service(device, pid, report, timeout=remaining)
         print(f"Dart VM ready; running {driver}", flush=True)
-        with (report / "task-flow.log").open("wb") as log:
+        with tempfile.TemporaryFile() as log:
             # This is the same Dart driver invocation used by Flutter's
             # FlutterDriverService.startTest. Avoid a second device discovery
             # and an unscoped system-log subscription for an existing app.
             dart = Path(os.environ["FLUTTER_ROOT"]) / "bin/cache/dart-sdk/bin/dart"
-            result = subprocess.run(
-                [str(dart), driver],
-                env={**os.environ, "VM_SERVICE_URL": url},
-                stdout=log, stderr=subprocess.STDOUT, timeout=1200 if private_report else 480,
-            )
+            try:
+                result = subprocess.run(
+                    [str(dart), driver],
+                    env={**os.environ, "VM_SERVICE_URL": url},
+                    stdout=log, stderr=subprocess.STDOUT, timeout=1200 if private_report else 480,
+                )
+            finally:
+                length = log.tell()
+                log.seek(max(0, length - 65536))
+                if length > 65536:
+                    log.readline(65536)  # A partial first line may contain part of an address.
+                diagnostic = re.sub(r"(?:https?|wss?)://[^\s<>\"']+", "[address omitted]",
+                                    log.read(65536).decode("utf8", "replace"))
+                token = url.rstrip("/").rsplit("/", 1)[-1]
+                (report / "task-flow.log").write_text(diagnostic.replace(token, "[omitted]"), encoding="utf8")
         if private_report and result.returncode:
             # Share the failed assertion stage with the coordinator. Raw device
             # logs can include a VM token, and a login screenshot can show an OTP.

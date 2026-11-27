@@ -30,7 +30,7 @@ def isolated_children():
 
 
 class StartupTests(unittest.TestCase):
-    def exercise_stages(self, occupied=None, android_result="passed"):
+    def exercise_stages(self, occupied=None, android_result="passed", restore_timeout=False):
         udid = "10000000-0000-0000-0000-000000000001"
         events = []
         state = {"phase":None, "avd":False, "iphone":False}
@@ -75,6 +75,8 @@ class StartupTests(unittest.TestCase):
                     self.assertEqual(state["phase"], "writer-complete")
                     self.assertIn("--reuse-installed", args)
                     self.assertIn("Android released", events)
+                    if restore_timeout:
+                        return Mock(poll=lambda: None)
                     report("ios", {**base, **paid, "device":"ios", "reader_pass":"restore",
                                   "offline_state_after_android_completion":True})
                     proof = {**sibling_proof, "passed":True, "separateLogins":True, "readerSessionRetained":True,
@@ -180,13 +182,15 @@ class StartupTests(unittest.TestCase):
             stack.enter_context(patch.object(runner.sys, "platform", "darwin"))
             stack.enter_context(patch.object(runner, "control_phase", side_effect=lambda:state["phase"]))
             stack.enter_context(patch.object(runner, "control_status", side_effect=android_status))
-            stack.enter_context(patch.object(runner, "control_data", return_value={}))
+            restore_state = {"scenarioRequested":True, "offlineHomeVerified":True, "reconnectRequested":True}
+            stack.enter_context(patch.object(runner, "control_data", side_effect=lambda device: {
+                "phase":state["phase"], "iosRestore":restore_state, "readerAttemptedWhileOffline":False}))
             stack.enter_context(patch.object(runner, "stop_group"))
             stack.enter_context(patch.object(runner, "shutdown_iphone", side_effect=shutdown))
             stack.enter_context(patch.object(runner, "ports_free", side_effect=lambda:occupied != "port"))
             stack.enter_context(patch.object(runner, "one_probe", side_effect=command))
             stack.enter_context(patch.object(runner.subprocess, "Popen", side_effect=launch))
-            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             if occupied:
                 with self.assertRaisesRegex(RuntimeError,"ports already in use"):
                     runner.run()
@@ -203,9 +207,20 @@ class StartupTests(unittest.TestCase):
                         runner.run()
                     if android_result == "stalled login":
                         self.assertLess(now[0], 21 * 60)
+            elif restore_timeout:
+                with patch.object(runner.time, "monotonic", side_effect=range(0, 100000, 5)), patch.object(runner.time, "sleep"):
+                    with self.assertRaisesRegex(RuntimeError, "restored iPhone reader exceeded 21 minutes in writer-complete") as error:
+                        runner.run()
+                facts = "scenarioRequested=yes offlineRequest=no offlineHomeVerified=yes reconnectRequested=yes"
+                self.assertIn(facts, str(error.exception))
+                self.assertEqual(output.getvalue().count("Restored iPhone observations: " + facts), 1)
+                self.assertFalse((runner.RESULTS/"cross_device_sync_ios.json").is_file())
             else:
                 runner.run()
         return events
+
+    def test_restore_observations_survive_timeout_and_cannot_advance_the_phase(self):
+        self.exercise_stages(restore_timeout=True)
 
     def test_staged_boot_and_same_install(self):
         self.assertEqual(self.exercise_stages(), ["backend", "ADB server", "boot iPhone", "initial reader", "stop iPhone",
@@ -240,6 +255,19 @@ class StartupTests(unittest.TestCase):
             self.assertIn("mailbox returned HTTP 429",reason)
             self.assertNotIn("private_marker",reason)
             self.assertNotIn("secret",reason)
+
+    def test_restore_failure_keeps_unknown_fields_and_private_driver_text_out_of_output(self):
+        state = {"readerAttemptedWhileOffline":True, "iosRestore":{
+            "scenarioRequested":True, "offlineHomeVerified":"private_marker", "reconnectRequested":1,
+            "email":"private_marker"}}
+        with tempfile.TemporaryDirectory() as folder, patch.object(runner, "control_data", return_value=state):
+            log = Path(folder)/"driver.log"
+            log.write_text("private_marker timed out after 1200 seconds", encoding="utf8")
+            failure = runner.driver_failure(log, "restored iPhone reader", "exited", "writer-complete")
+            self.assertIn("scenarioRequested=yes offlineRequest=yes offlineHomeVerified=unknown reconnectRequested=unknown", failure)
+            self.assertIn("(Dart driver timed out)", failure)
+            self.assertNotIn("private_marker", failure)
+            self.assertNotIn("iOS restore", runner.driver_failure(log, "initial iPhone reader", "exited", "initial"))
 
     def test_failure_snapshot_only_contains_allowlisted_state_and_counts(self):
         data = {"androidCheckpoint":"otp_received", "private":"private_marker",
