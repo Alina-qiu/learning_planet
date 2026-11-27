@@ -72,6 +72,17 @@ Map<String, dynamic> response(
 };
 const denied = PostgrestException(message: 'denied', code: '42501');
 
+class CatalogTransactionStore extends OfflineStore {
+  CatalogTransactionStore() : super(NativeDatabase.memory());
+  void Function()? afterEviction;
+
+  @override
+  Future<void> customStatement(String statement, [List<dynamic>? args]) async {
+    await super.customStatement(statement, args);
+    if (statement.contains('OFFSET 12')) afterEviction?.call();
+  }
+}
+
 class ScriptedCatalog implements QuestionCatalogRepository {
   ScriptedCatalog(this.read);
   final Future<QuestionCatalogPage> Function(
@@ -371,7 +382,14 @@ void main() {
   test(
     'delayed responses cannot restore snapshots after owner disposal child or membership changes',
     () async {
-      for (final change in ['owner', 'dispose', 'review', 'child', 'family']) {
+      for (final change in [
+        'owner',
+        'dispose',
+        'review',
+        'child',
+        'family',
+        'account',
+      ]) {
         final store = OfflineStore(NativeDatabase.memory());
         String? owner = MockSupabase.firstUser;
         final started = Completer<void>(),
@@ -397,6 +415,8 @@ void main() {
               await store.removeReviewCache(MockSupabase.firstUser);
             case 'child':
               await store.removeChildData('child');
+            case 'account':
+              await store.removeAccountData(MockSupabase.firstUser, 'job');
             case 'family':
               await store.applyFamilyAccess(MockSupabase.firstUser, [
                 FamilyAccessState(
@@ -420,6 +440,52 @@ void main() {
         } finally {
           await store.close();
         }
+      }
+    },
+  );
+
+  test(
+    'an owner change during eviction rolls back the new first page and restores the evicted page',
+    () async {
+      final store = CatalogTransactionStore();
+      String owner = MockSupabase.firstUser;
+      final repository = ScopedQuestionCatalog(
+        store: store,
+        owner: () => owner,
+        fetch: (_, filters, _) async {
+          final keyword = filters['keyword'] as String;
+          return {
+            ...response(scope(keyword: keyword), count: 0),
+            'server_time': DateTime.utc(
+              2026,
+              11,
+              5,
+              0,
+              int.parse(keyword),
+            ).toIso8601String(),
+          };
+        },
+      );
+      try {
+        for (var i = 0; i < 12; i++) {
+          await repository.page(scope(keyword: '$i'));
+        }
+        store.afterEviction = () {
+          owner = MockSupabase.secondUser;
+        };
+        await expectLater(
+          repository.page(scope(keyword: '12')),
+          throwsStateError,
+        );
+        final rows = await store
+            .customSelect('SELECT cache_key FROM offline_cache')
+            .get();
+        expect(rows.map((r) => r.read<String>('cache_key')).toSet(), {
+          for (var i = 0; i < 12; i++)
+            repository.cacheKey(scope(keyword: '$i')),
+        });
+      } finally {
+        await store.close();
       }
     },
   );
@@ -563,7 +629,7 @@ void main() {
   );
 
   testWidgets(
-    'search waits for debounce and both tabs receive matching filter scope',
+    'search debounces and the unopened tab reads the current filters on entry',
     (tester) async {
       final calls = <QuestionCatalogScope>[];
       final repository = ScriptedCatalog((s, _) async {
@@ -571,17 +637,21 @@ void main() {
         return QuestionCatalogPage(items: [], syncedAt: DateTime.utc(2026));
       });
       await mountCatalog(tester, repository);
+      expect(calls.map((s) => s.kind), ['question']);
       await tester.enterText(find.byType(TextField), '银行');
       await tester.pump(const Duration(milliseconds: 200));
       expect(calls.where((s) => s.keyword == '银行'), isEmpty);
       await tester.pump(const Duration(milliseconds: 110));
       await tester.pumpAndSettle();
-      expect(calls.where((s) => s.keyword == '银行').map((s) => s.kind).toSet(), {
+      expect(calls.where((s) => s.keyword == '银行').map((s) => s.kind), [
         'question',
-        'pinyin',
-      });
+      ]);
       await tester.tap(find.text('拼音词库'));
       await tester.pumpAndSettle();
+      expect(calls.where((s) => s.keyword == '银行').map((s) => s.kind), [
+        'question',
+        'pinyin',
+      ]);
       expect(tester.takeException(), isNull);
       await tester.enterText(find.byType(TextField), 'pending');
       await tester.pumpWidget(const SizedBox());

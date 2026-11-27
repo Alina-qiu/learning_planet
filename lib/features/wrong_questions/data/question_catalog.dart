@@ -144,26 +144,24 @@ class ScopedQuestionCatalog implements QuestionCatalogRepository {
     if (_closed || account == null) throw StateError('请重新登录后打开错题本');
     final request = (_requests[key] ?? 0) + 1;
     _requests[key] = request;
-    Future<void> check() async {
-      void current() {
-        if (_closed ||
-            owner() != account ||
-            store?.privacyGeneration != privacy ||
-            store?.reviewGeneration(account) != generation ||
-            _requests[key] != request) {
-          throw StateError('账号、资料或读取请求已变化，请刷新');
-        }
+    void current() {
+      if (_closed ||
+          owner() != account ||
+          store?.privacyGeneration != privacy ||
+          store?.reviewGeneration(account) != generation ||
+          _requests[key] != request) {
+        throw StateError('账号、资料或读取请求已变化，请刷新');
       }
+    }
 
+    Future<void> check() async {
       current();
-      if (store != null &&
-          (await store!.accountDeletionJob(account) != null ||
-              await store!.isChildDeleted(s.child) ||
-              await store!.familyAccessRevoked(
-                account,
-                familyId: s.family,
-                childId: s.child,
-              ))) {
+      if (await store?.childAccessDenial(
+            account,
+            s.child,
+            familyId: s.family,
+          ) !=
+          null) {
         throw StateError('当前孩子资料已不可访问');
       }
       current();
@@ -174,25 +172,35 @@ class ScopedQuestionCatalog implements QuestionCatalogRepository {
     var offline = false;
     try {
       data = await fetch(s.child, catalogFilters(s), cursor);
-      await check();
+      current();
       _validate(data, s, account);
       if (store != null && cursor == null) {
         await store!.transaction(() async {
+          // Read the persistent denials in the same SQLite transaction as the insert and eviction.
           await check();
-          await store!.writeReviewCache(account, key, data, generation!);
-          await check();
+          await store!.customStatement(
+            'INSERT OR REPLACE INTO offline_cache(owner,cache_key,payload) VALUES(?,?,?)',
+            [account, key, jsonEncode(data)],
+          );
           // Keep at most 12 recent first pages per child, including empty searches.
           await store!.customStatement(
             "DELETE FROM offline_cache WHERE owner=? AND cache_key IN (SELECT cache_key FROM offline_cache WHERE owner=? AND cache_key LIKE ? ORDER BY json_extract(payload,'\$.server_time') DESC,cache_key LIMIT -1 OFFSET 12)",
             [account, account, 'review-page:${s.child}:%'],
           );
-          await check();
+          // Roll both writes back if the request or login changed while SQLite was working.
+          current();
         });
       }
     } catch (error) {
       await check();
       if (!isNetworkFailure(error)) {
-        if (store != null) await store!.remove(account, key);
+        if (store != null) {
+          await store!.transaction(() async {
+            // A failed, superseded request must not remove a newer first page.
+            current();
+            await store!.remove(account, key);
+          });
+        }
         rethrow;
       }
       if (cursor != null || store == null) rethrow;

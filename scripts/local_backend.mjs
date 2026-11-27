@@ -8,10 +8,10 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {withAuthBackend} from './fixtures/auth_backend.mjs';
-import {openLocalTrial} from './fixtures/local_trial.mjs';
+import {localSessionKeys, openLocalTrial} from './fixtures/local_trial.mjs';
 import {createStorageBackend} from './fixtures/storage_backend.mjs';
 import {startLocalEdge} from './fixtures/local_edge.mjs';
-import {closeServer, forwardHttp, listen, signedJwt} from './fixtures/http_test_tools.mjs';
+import {closeServer, forwardHttp, listen} from './fixtures/http_test_tools.mjs';
 
 const directory=resolve('.dart_tool/local-backend'), controlPath=join(directory,'control.json');
 const origin='http://127.0.0.1:54321';
@@ -22,7 +22,7 @@ const respond=(response,status,body)=>{
 };
 
 async function start(keepData) {
-  let finish, ready=false, config, backendPort, timer, lifetime, maintenance;
+  let finish, ready=false, config, backendPort, timer, cancelLifetime, maintenance;
   const done=new Promise(resolve=>{finish=resolve;});
   const runId=randomUUID(), shutdownKey=randomBytes(32).toString('hex'), edges=new Map();
   const gateway=createServer((request,response)=>{
@@ -49,10 +49,11 @@ async function start(keepData) {
   try {
     await mkdir(directory,{recursive:true});
     const trial = await openLocalTrial(resolve('.learning-planet-trial'), directory, keepData);
-    await withAuthBackend(async (publicConfig,{database,secret})=>{
+    const apiKeys = localSessionKeys(trial.credentials, keepData);
+    await withAuthBackend(async (publicConfig,{database})=>{
       config=publicConfig;backendPort=Number(new URL(config.url).port);
       await database.client.query('grant service_role to http_authenticator');
-      const service=signedJwt(secret,{role:'service_role',exp:Math.floor(Date.now()/1000)+86400});
+      const service=apiKeys.service;
       for(const [path,kind] of [['worksheet-render','worksheet'],['permanent-cleanup','cleanup'],['account-deletion','account']]) {
         edges.set(`/functions/v1/${path}`,await startLocalEdge(kind,{url:config.url,anon:config.anon,service}));
       }
@@ -77,7 +78,9 @@ async function start(keepData) {
         maintenance=maintain().catch(error=>console.error('Local maintenance failed:',error.code??error.name))
           .finally(()=>{maintenance=null;});
       },60000);
-      lifetime=setTimeout(()=>{console.log('Local session reached its 24-hour lifetime.');finish();},86400000);
+      cancelLifetime=scheduleLocalSessionEnd(apiKeys.expiresAt,()=>{
+        console.log('Local session reached its expiration time.');finish();
+      });
       console.log(`LOCAL_BACKEND_READY ${origin}`);
       console.log(keepData
         ? 'Persistent local trial: use synthetic @example.test accounts. Restart with --keep-data to reopen the same family and files.'
@@ -87,21 +90,33 @@ async function start(keepData) {
       console.log(`Read OTP: ${cli} mail parent@example.test`);
       console.log(`Stop cleanly: ${cli} stop`);
       try {await done;} finally {
-        ready=false;clearInterval(timer);clearTimeout(lifetime);await maintenance;
+        ready=false;clearInterval(timer);cancelLifetime();await maintenance;
         for(const edge of edges.values())await edge.stop();edges.clear();
       }
     }, {
-      createStorage: args => createStorageBackend({...args, minimumObjects: 0,
+      createStorage: args => createStorageBackend({...args, apiKeys, minimumObjects: 0,
         persistentDirectory: trial.storage, requireExisting: trial.requireExisting}),
       persistentDirectory: trial.database, requireExisting: trial.requireExisting,
       verifyTraffic: false, localCredentials: trial.credentials,
     });
   } finally {
-    ready=false;clearInterval(timer);clearTimeout(lifetime);
+    ready=false;clearInterval(timer);cancelLifetime?.();
     for(const edge of edges.values())await edge.stop();
     await closeServer(gateway);
     process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);
   }
+}
+
+export function scheduleLocalSessionEnd(expiresAt, finish) {
+  let timer;
+  function schedule() {
+    const remainingMs = expiresAt * 1000 - Date.now();
+    if (remainingMs <= 0) { finish(); return; }
+    // Node converts a delay greater than 2^31-1 ms to 1 ms. Recheck the absolute deadline between chunks.
+    timer = setTimeout(schedule, Math.min(remainingMs, 0x7fffffff));
+  }
+  schedule();
+  return () => clearTimeout(timer);
 }
 
 // The runtime selected by the launcher may differ from the shell's default Node.

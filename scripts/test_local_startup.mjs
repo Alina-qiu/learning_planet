@@ -4,10 +4,79 @@ import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {localControlInvocation, stopLocalSession} from './local_backend.mjs';
-import {closeServer, listen, localProcess} from './fixtures/http_test_tools.mjs';
+import {localControlInvocation, scheduleLocalSessionEnd, stopLocalSession} from './local_backend.mjs';
+import {closeServer, listen, localProcess, signedJwt} from './fixtures/http_test_tools.mjs';
 import {initializeLocalBucket} from './fixtures/storage_backend.mjs';
-import {initializingTrialDatabase, openLocalTrial} from './fixtures/local_trial.mjs';
+import {initializingTrialDatabase, localSessionKeys, openLocalTrial} from './fixtures/local_trial.mjs';
+
+const daySeconds = 86400;
+const claims = jwt => JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString());
+
+test('a persistent session and its worker credential remain active after the first 24 hours', t => {
+  const createdAt = 1800000000, credentials = {createdAt, secret: 'x'.repeat(64)};
+  t.mock.timers.enable({apis: ['Date', 'setTimeout'], now: createdAt * 1000});
+  const keys = localSessionKeys(credentials, true);
+  let ended = false;
+  const cancel = scheduleLocalSessionEnd(keys.expiresAt, () => { ended = true; });
+  // Request at 23:55, eligible after the ten-minute cancellation window.
+  t.mock.timers.tick((daySeconds + 5 * 60) * 1000);
+  assert.equal(ended, false);
+  const worker = claims(keys.service);
+  assert.equal(worker.role, 'service_role');
+  assert.ok(worker.exp > Date.now() / 1000);
+  assert.equal(worker.exp, createdAt + 3650 * daySeconds);
+  const restarted = localSessionKeys(credentials, true);
+  assert.equal(restarted.anon, signedJwt(credentials.secret, {role: 'anon', iat: createdAt, exp: worker.exp}));
+  assert.equal(restarted.anon, keys.anon);
+  assert.equal(claims(restarted.service).exp, worker.exp);
+  cancel();
+  t.mock.timers.tick((worker.exp - createdAt) * 1000);
+  assert.equal(ended, false);
+});
+
+test('bounded timer chunks recheck the fixed profile expiry across restarts', t => {
+  const createdAt = 1800000000, expiresAt = createdAt + 3650 * daySeconds;
+  const credentials = {createdAt, secret: 'x'.repeat(64)};
+  const maxDelay = 0x7fffffff;
+  t.mock.timers.enable({apis: ['Date', 'setTimeout'], now: expiresAt * 1000 - maxDelay - 30001});
+  const scheduled = t.mock.method(globalThis, 'setTimeout');
+  const keys = localSessionKeys(credentials, true);
+  assert.equal(keys.expiresAt, expiresAt);
+  let expirations = 0;
+  const cancel = scheduleLocalSessionEnd(keys.expiresAt, () => { expirations++; });
+  assert.equal(scheduled.mock.calls.at(-1).arguments[1], maxDelay);
+  t.mock.timers.tick(maxDelay);
+  assert.equal(expirations, 0);
+  assert.equal(scheduled.mock.calls.at(-1).arguments[1], 30001);
+  cancel(); // An operator restarts the service with only 30s remaining.
+  for (const keepData of [true, false]) {
+    const reopened = localSessionKeys(credentials, keepData);
+    assert.equal(reopened.expiresAt, expiresAt);
+    assert.equal(claims(reopened.service).exp, expiresAt);
+    scheduleLocalSessionEnd(reopened.expiresAt, () => { expirations++; });
+  }
+  t.mock.timers.tick(30000);
+  assert.equal(expirations, 0);
+  t.mock.timers.tick(1);
+  assert.equal(expirations, 2);
+  assert.throws(() => localSessionKeys(credentials, true), /expired/);
+});
+
+test('a temporary session retains its one-day limit and the same public APK key', t => {
+  const now = 1800000000, credentials = {createdAt: now - 7 * daySeconds, secret: 'x'.repeat(64)};
+  t.mock.timers.enable({apis: ['Date', 'setTimeout'], now: now * 1000});
+  const keys = localSessionKeys(credentials, false);
+  assert.equal(keys.anon, localSessionKeys(credentials, true).anon);
+  assert.equal(claims(keys.anon).role, 'anon');
+  assert.equal(keys.expiresAt, now + daySeconds);
+  assert.equal(claims(keys.service).exp, keys.expiresAt);
+  let ended = false;
+  scheduleLocalSessionEnd(keys.expiresAt, () => { ended = true; });
+  t.mock.timers.tick(daySeconds * 1000 - 1);
+  assert.equal(ended, false);
+  t.mock.timers.tick(1);
+  assert.equal(ended, true);
+});
 
 async function trialPaths(t) {
   const directory = await mkdtemp(join(tmpdir(), 'learning-planet-profile-'));

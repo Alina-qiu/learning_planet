@@ -4,9 +4,11 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
+本轮改进了已登录家庭冷启动和错题列表。家庭权限、删除记录及在线目录核验完成后，如果目录与加密数据库完全相同且无需清理，首页可以直接使用核验结果。错题本打开时只加载当前标签。持久试用服务可以跨日运行，App 关闭后仍会生成每日复习并处理注销。[首页与列表性能](APP_PERFORMANCE.md) · [错题分页](QUESTION_CATALOG_PAGINATION.md) · [本机试用](LOCAL_DEBUG.md) · [本轮验收记录](../build/trial-acceptance-20261127/DELIVERY.md)
+
 提交 `9cfc243` 的 Android 联调包支持逐张校对本机草稿、按张同意上传，家长可以从家庭概览直接确认指定孩子的标准答案。测试中，家长补正一道题后，该孩子的待办清零，另一名孩子的两题仍在。Android 10 模拟器连续三次强停重开 Release 版，已登录家庭的完整首页分别在 3.70、5.01、4.48 秒内可操作。Windows 和 Linux 各通过 924 项 Flutter 测试。[安装包](ANDROID_BUILD.md) · [本机验收](../build/mobile-acceptance-20261127/DELIVERY.md) · [确认操作与截图](../build/mobile-acceptance-20261127/overview-device/REPORT.md)
 
-同一提交的 iPhone 模拟器完成了两名孩子的在线及离线切换，Android 也确认了任务和奖励。随后 iPhone 重启，测试驱动在重连前超时。单独的 OCR 作业在发现 Dart 测试服务时超时。两次均缺少最终业务回执。此前 `a25c5d3` 的两端同步曾完整通过。[本次配对](https://github.com/Alina-qiu/learning_planet/actions/runs/45934150321) · [本次常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45934150388) · [此前的完整配对](https://github.com/Alina-qiu/learning_planet/actions/runs/45926459657)
+提交 `5d423b0` 修复了 iPhone 模拟器 OCR 测试服务发现。常规 CI 的 11 项作业及双端同步的 3 项作业均通过。iPhone 离线重启并重连后，首次成功取得新快照的请求在 0.514 秒时发出，账本只记了一次奖励。独立的系统推送测试在后台注入后 35 秒内没有观察到 App 接收回调，真机 APNs 仍待验证。[双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45944731154) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45944731173) · [系统推送记录](https://github.com/Alina-qiu/learning_planet/actions/runs/45944731177)
 
 现在可以用同一个本机安装包分几天试用同一测试家庭。在项目目录执行 `& ./scripts/local_backend.ps1 -KeepData` 后，关闭服务再用同一命令启动，家庭账号、孩子、账本和私有文件会保留。[本机运行步骤](LOCAL_DEBUG.md) · [两份调试包的用途](ANDROID_BUILD.md) · [双孩子与首页启动实测](../build/child-isolation-20261127/DELIVERY.md)
 
@@ -129,7 +131,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | TSK-04 状态转换/禁止孩子撤销 | `lib/features/tasks/domain/task_state_machine.dart`、[实际任务流程](LOCAL_DEBUG.md) | 双端并发操作实机验收 |
 | TSK-05 家长补签或纠正 | 补签及[计时纠正](TASK_TIME_CORRECTIONS.md)有原因、审计和版本检查 | 是否还包含撤回误完成，用户尚未答复；不能把这一扩展视为已实现 |
 | TSK-06 智能提醒 | [本地通知](LOCAL_NOTIFICATIONS.md)、[原生授权场景](../build/integration_results/notifications-granted.json) | 用户选择[收到后复查的远程方案](TASK_REMOTE_PUSH.md)，已实现且Swift策略/构建通过，真实供应商与真机仍待验证；可能漏提醒，不能保证系统最终展示时刻 |
-| TSK-07 每日自动复习 | 每个孩子每天最多一项，首次开始前更新到期清单，开始后冻结。题目全部移出时收起当天任务。[选题与自动完成](REVIEW_AUTO_COMPLETION.md) · [两台 Android 模拟器逐题结算](../build/ac11-device-acceptance/summary.json) | 托管环境家庭时区 00:05 调度及真机运行待验证 |
+| TSK-07 每日自动复习 | 每个孩子每天最多一项，首次开始前更新到期清单，开始后冻结。本机持续运行的服务在家庭当地 00:05:58 自动生成任务，零题兄弟及另一时区的孩子按各自资格处理。[空闲调度与选题](REVIEW_AUTO_COMPLETION.md) · [逐题结算](../build/ac11-device-acceptance/summary.json) | 托管环境家庭时区调度及真机运行待验证 |
 | ERR-01 拍照/多图/裁剪 | [OCR管理](OCR_MANAGEMENT.md)、[原生多选报告](../build/integration_results/image-import-native.json)、[中断草稿](OCR_INTERRUPTION.md) | 真机相机权限、系统回收期间选择恢复及真实图片 |
 | ERR-02 逐字段校对 | 多图中每张错题可先在本机校对，重新打开可接着修改。提交时逐张征得同意，孩子录入的标准答案由家长确认。[操作说明](OCR_FIELD_CORRECTION.md) · [更换图片后重新校对](OCR_SOURCE_CHANGES.md) | 真实教材的复杂版式与识别质量仍待评测 |
 | ERR-03 学科/知识点 | [题目目录](QUESTION_CATALOG_PAGINATION.md)、`lib/features/wrong_questions/presentation/review_question_editor.dart` | 双设备编辑与真实数据规模 |
@@ -185,7 +187,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | AC-07 PDF顺序/答案开关/预览一致 | [实际 PDF 联调](PDF_INTEGRATION.md)核对题目顺序和答案页，客户端比较预览与导出的文件字节 | Android API 36 已完成应用预览、系统打印和另存 PDF。[文件与逐页核对](../build/demo-20261127/android-print/verification.json) |
 | AC-08 多孩子隔离 | 两名孩子使用独立任务、余额和错题。Android 重连时停留在第二个孩子的首页，第一个孩子的离线操作仍只为本人结算一次。[界面回归](../test/child_switch_isolation_test.dart) · [设备与服务记录](../build/child-isolation-20261127/DELIVERY.md) | Android 和 iPhone 模拟器均通过。iOS 18.5 在线和断网时从小星切到小月再切回，六次界面核对通过。Android 完成任务后，iPhone 重连取得小星的 7 金币、5 XP，小月保有原来的 23 金币、11 XP。目标真机待验收。[配对作业](https://github.com/Alina-qiu/learning_planet/actions/runs/45886513966) |
 | AC-09 安静时段不推送、不扣分 | Android 闹钟过滤、静默与奖励回归已通过。iOS 18.5 在后台直接调用正式应用委托，安静时段、范围不符及过期提醒均被抑制，允许的提醒送达。[远程提醒与原生检查](TASK_REMOTE_PUSH.md) | 同一提交的独立模拟器接收系统注入后，35 秒内仍未观测到应用委托入口。系统后台递送、真实 APNs 与目标手机待验收。[两条路径的作业记录](https://github.com/Alina-qiu/learning_planet/actions/runs/45896548909) |
-| AC-10 清楚说明并在承诺期限内注销 | [真实删除联调](PRIVACY_INTEGRATION.md)核对 74 个 S3 对象、两个过期租约、分页续办和其他成员的文件摘要 | 本机注销与中断恢复通过。目标环境的调度和 24 小时清理时限仍待验收 |
+| AC-10 清楚说明并在承诺期限内注销 | 本机持久服务在家长关闭客户端后 13 分 53 秒完成注销。另以 48 小时前签发的凭据验证 74 个 S3 对象、过期租约、分页续办及其他家庭文件。[真实注销与后台续办](PRIVACY_INTEGRATION.md) | 托管环境的调度和 24 小时清理时限仍待验收 |
 | AC-11 三题唯一复习、全部作答自动结算 | API 36 与 API 29 对同一家庭独立登录。生成器重跑、零题孩子、系统拨快和拨慢 48 小时、离线冷启与逐题账本均有[同一家庭的验收记录](../build/ac11-device-acceptance/summary.json) | 两台 Android 模拟器连接本机服务通过。新版覆盖安装后保留三道答案和五项待同步操作，重放后任务及账本 ID 均相同 |
 
 ## 本次检查结果及下一阶段

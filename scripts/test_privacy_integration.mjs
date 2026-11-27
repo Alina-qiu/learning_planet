@@ -1,19 +1,29 @@
 // Real services and unmodified Edge entrypoints. No cloud credentials or user data.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {randomBytes, randomUUID} from 'node:crypto';
 import {createServer, request as upstreamRequest} from 'node:http';
 import {resolve} from 'node:path';
+import {mock} from 'node:test';
 import {setTimeout as delay} from 'node:timers/promises';
 import {withAuthBackend} from './fixtures/auth_backend.mjs';
+import {localSessionKeys} from './fixtures/local_trial.mjs';
 import {createStorageBackend} from './fixtures/storage_backend.mjs';
-import {closeServer, forwardHttp, freePort, isolatedEnv, listen, localProcess, signedJwt} from './fixtures/http_test_tools.mjs';
+import {closeServer, forwardHttp, freePort, isolatedEnv, listen, localProcess} from './fixtures/http_test_tools.mjs';
 
 let checks = 0;
-await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage}) => {
+const issuedAt = Math.floor(Date.now() / 1000) - 2 * 86400;
+const localCredentials = {secret: randomBytes(48).toString('base64url'), createdAt: issuedAt};
+// Issue the real trial keys two days in the past, then run every provider and worker on the actual clock.
+const issuanceClock = mock.method(Date, 'now', () => issuedAt * 1000);
+let apiKeys;
+try { apiKeys = localSessionKeys(localCredentials, true); }
+finally { issuanceClock.mock.restore(); }
+await withAuthBackend(async ({url, anon, mailboxKey}, {database, storage}) => {
   const sql = database.client;
   // Only server-side workers receive this key. Flutter tests never receive it.
   await sql.query('grant service_role to http_authenticator');
-  const service = signedJwt(secret, {role: 'service_role'});
+  const service = apiKeys.service;
+  assert.equal(anon, apiKeys.anon);
   async function api(path, token = anon, {method = 'GET', body, type = 'application/json'} = {}) {
     const response = await fetch(`${url}${path}`, {method, headers: {apikey: anon,
       Authorization: `Bearer ${token}`, 'Content-Type': type},
@@ -367,5 +377,6 @@ await withAuthBackend(async ({url, anon, mailboxKey}, {database, secret, storage
     for (const processHandle of edges.reverse()) await processHandle.stop();
     await closeServer(faultProxy);
   }
-}, {createStorage: createStorageBackend});
+}, {localCredentials, createStorage: args => createStorageBackend({...args, apiKeys})});
+console.log('Persistent trial workers completed privacy operations with a service credential issued 48 hours earlier.');
 console.log(`All ${checks} real privacy integration checks passed; simulated job clocks, no cloud SLA claim.`);

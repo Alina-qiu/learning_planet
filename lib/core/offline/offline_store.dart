@@ -118,6 +118,33 @@ class OfflineStore extends GeneratedDatabase {
     return row != null;
   }
 
+  /// An unchanged, fully verified online directory needs no writes. Anything
+  /// requiring reconciliation follows the normal restoration and pruning path.
+  Future<bool> matchesVerifiedFamilyDirectory(
+    String owner,
+    Map<String, dynamic> snapshot,
+    Iterable<String> childIds,
+  ) async {
+    final row = await customSelect(
+      '''
+      SELECT 1 FROM offline_cache c
+      WHERE c.owner=?1 AND c.cache_key='families' AND c.payload=?2
+        AND NOT EXISTS (SELECT 1 FROM deleted_accounts WHERE owner=?1)
+        AND NOT EXISTS (SELECT 1 FROM family_access WHERE owner=?1 AND active=0)
+        AND NOT EXISTS (SELECT 1 FROM offline_cache WHERE owner=?1 AND cache_key GLOB 'directory-hidden:*')
+        AND NOT EXISTS (SELECT 1 FROM offline_cache WHERE owner=?1 AND cache_key GLOB 'invitation-command:*')
+        AND NOT EXISTS (SELECT 1 FROM deleted_children
+          WHERE child_id IN (SELECT value FROM json_each(?3)))
+      ''',
+      variables: [
+        Variable(owner),
+        Variable(jsonEncode(snapshot)),
+        Variable(jsonEncode(childIds.toList())),
+      ],
+    ).getSingleOrNull();
+    return row != null;
+  }
+
   /// Only a fully paginated directory may narrow a cached scope. Keep the
   /// markers account-specific, since absence is not a global deletion notice.
   Future<void> restrictDirectoryAccess(
@@ -697,13 +724,11 @@ class OfflineStore extends GeneratedDatabase {
     ];
   }
 
-  Future<void> enqueue(
+  Future<String?> childAccessDenial(
     String owner,
-    String childId,
-    Map<String, dynamic> command,
-  ) => transaction(() async {
-    // All three denial reasons are evaluated in the same SQLite snapshot, in
-    // the same priority order for standalone and already-transactional callers.
+    String childId, {
+    String? familyId,
+  }) async {
     final access = await customSelect(
       """SELECT CASE
         WHEN EXISTS (SELECT 1 FROM deleted_accounts WHERE owner=?1) THEN 'account'
@@ -712,11 +737,19 @@ class OfflineStore extends GeneratedDatabase {
         END AS denied""",
       variables: [
         Variable(owner),
-        const Variable<String>(null),
+        Variable<String>(familyId),
         Variable(childId),
       ],
     ).getSingle();
-    switch (access.readNullable<String>('denied')) {
+    return access.readNullable<String>('denied');
+  }
+
+  Future<void> enqueue(
+    String owner,
+    String childId,
+    Map<String, dynamic> command,
+  ) => transaction(() async {
+    switch (await childAccessDenial(owner, childId)) {
       case 'account':
         throw StateError('账号已申请注销，不能继续离线打卡');
       case 'child':

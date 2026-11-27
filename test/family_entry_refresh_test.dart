@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:drift/native.dart';
@@ -22,15 +23,45 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'email_login_test.dart' show Harness, session;
 import 'support/mock_supabase.dart' show MockSupabase;
 
+class DirectoryStore extends OfflineStore {
+  DirectoryStore() : super(NativeDatabase.memory());
+  int familyWrites = 0;
+  Completer<void>? entered, resume;
+
+  @override
+  Future<void> write(String owner, String key, Map<String, dynamic> data) {
+    if (key == 'families') familyWrites++;
+    return super.write(owner, key, data);
+  }
+
+  @override
+  Future<bool> matchesVerifiedFamilyDirectory(
+    String owner,
+    Map<String, dynamic> snapshot,
+    Iterable<String> children,
+  ) async {
+    final same = await super.matchesVerifiedFamilyDirectory(
+      owner,
+      snapshot,
+      children,
+    );
+    if (same && entered != null && !entered!.isCompleted) {
+      entered!.complete();
+      await resume!.future;
+    }
+    return same;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Harness h;
-  late OfflineStore store;
+  late DirectoryStore store;
   late OfflineTaskRepository tasks;
   late ProviderContainer container;
   setUp(() {
     h = Harness();
-    store = OfflineStore(NativeDatabase.memory());
+    store = DirectoryStore();
     String? owner() => h.client.auth.currentUser?.id;
     tasks = OfflineTaskRepository(
       store: store,
@@ -150,6 +181,206 @@ void main() {
         '/rest/v1/rpc/accept_family_invitations',
       ]);
       expect(await store.read('parent', 'families'), isNull);
+    },
+  );
+
+  Future<void> prepareDirectory(String Function() nickname) async {
+    await restore(expired: false);
+    await store.remove('parent', 'families');
+    final other = h.handle;
+    h.handle = (r) => r.url.path.endsWith('/families')
+        ? MockSupabase.json(r, [
+            {
+              'id': 'family',
+              'name': 'Family',
+              'timezone': 'UTC',
+              'children': [
+                {
+                  'id': 'child',
+                  'family_id': 'family',
+                  'nickname': nickname(),
+                  'grade': 2,
+                },
+              ],
+            },
+          ])
+        : other(r);
+  }
+
+  test(
+    'an identical verified directory avoids a rewrite while changes and pending invitations reconcile',
+    () async {
+      var nickname = 'first';
+      await prepareDirectory(() => nickname);
+      var membershipChecks = 0, allowMembership = true;
+      final access = FamilyAccessRepository(
+        store: store,
+        accountId: () => 'parent',
+        load: () async {
+          membershipChecks++;
+          if (!allowMembership)
+            throw const PostgrestException(message: 'denied', code: '42501');
+          return {'owner_id': 'parent', 'states': []};
+        },
+        cancelNotifications: (_) async {},
+      );
+      addTearDown(access.dispose);
+      final repository = OfflineFamilyRepository(
+        h.client,
+        store,
+        () => 'parent',
+        access: access,
+      );
+      await repository.loadFamilies();
+      final written = store.familyWrites;
+      final calls = h.calls.length;
+      expect(
+        (await repository.loadFamilies()).single.children.single.nickname,
+        'first',
+      );
+      expect(store.familyWrites, written);
+      expect(membershipChecks, 2);
+      expect(h.calls.skip(calls).map((r) => r.url.pathSegments.last), [
+        'accept_family_invitations',
+        'families',
+        'child_deletion_tombstones',
+        'family_access_revocations',
+      ]);
+      await store.write('parent', 'invitation-command:gone', {
+        'request': 'pending',
+      });
+      await repository.loadFamilies();
+      expect(await store.read('parent', 'invitation-command:gone'), isNull);
+      expect(store.familyWrites, greaterThan(written));
+      nickname = 'changed';
+      expect(
+        (await repository.loadFamilies()).single.children.single.nickname,
+        'changed',
+      );
+      final cached = await store.read('parent', 'families');
+      expect(cached!['items'].single['children'].single['nickname'], 'changed');
+      allowMembership = false;
+      await expectLater(
+        repository.loadFamilies(),
+        throwsA(isA<PostgrestException>()),
+      );
+      expect(await store.read('parent', 'families'), isNull);
+    },
+  );
+
+  for (final change in ['account', 'child', 'membership', 'newer-directory']) {
+    test(
+      'a delayed unchanged-directory result cannot survive $change',
+      () async {
+        var nickname = 'first';
+        await prepareDirectory(() => nickname);
+        final repository = OfflineFamilyRepository(
+          h.client,
+          store,
+          () => 'parent',
+        );
+        await repository.loadFamilies();
+        store.entered = Completer<void>();
+        store.resume = Completer<void>();
+        final stale = expectLater(repository.loadFamilies(), throwsStateError);
+        await store.entered!.future;
+        switch (change) {
+          case 'account':
+            await store.removeAccountData('parent', 'job');
+          case 'child':
+            await store.removeChildData('child');
+          case 'membership':
+            await store.applyFamilyAccess('parent', [
+              FamilyAccessState(
+                familyId: 'family',
+                version: 2,
+                active: false,
+                lastRevokedVersion: 2,
+                childIds: {'child'},
+              ),
+            ]);
+          case 'newer-directory':
+            nickname = 'newer';
+            expect(
+              (await repository.loadFamilies()).single.children.single.nickname,
+              'newer',
+            );
+        }
+        store.resume!.complete();
+        await stale;
+        if (change == 'newer-directory') {
+          final cached = await store.read('parent', 'families');
+          expect(
+            cached!['items'].single['children'].single['nickname'],
+            'newer',
+          );
+        }
+      },
+    );
+  }
+
+  test(
+    'reopening the database compares the stored payload and durable access markers',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'family-directory-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/family.sqlite');
+      final snapshot = {
+        'items': [
+          {
+            'id': 'family',
+            'name': 'Family',
+            'timezone': 'UTC',
+            'children': [
+              {'id': 'child'},
+            ],
+          },
+        ],
+      };
+      final first = OfflineStore(NativeDatabase(file));
+      await first.write('parent', 'families', snapshot);
+      await first.close();
+      final reopened = OfflineStore(NativeDatabase(file));
+      addTearDown(reopened.close);
+      expect(
+        await reopened.matchesVerifiedFamilyDirectory('parent', snapshot, [
+          'child',
+        ]),
+        true,
+      );
+      expect(
+        await reopened.matchesVerifiedFamilyDirectory('different', snapshot, [
+          'child',
+        ]),
+        false,
+      );
+      expect(
+        await reopened.matchesVerifiedFamilyDirectory('parent', {
+          'items': [],
+        }, []),
+        false,
+      );
+      await reopened.write('parent', 'directory-hidden:child:child', {
+        'family_id': 'family',
+      });
+      expect(
+        await reopened.matchesVerifiedFamilyDirectory('parent', snapshot, [
+          'child',
+        ]),
+        false,
+      );
+      await reopened.remove('parent', 'directory-hidden:child:child');
+      await reopened.customStatement('INSERT INTO deleted_children VALUES(?)', [
+        'child',
+      ]);
+      expect(
+        await reopened.matchesVerifiedFamilyDirectory('parent', snapshot, [
+          'child',
+        ]),
+        false,
+      );
     },
   );
 

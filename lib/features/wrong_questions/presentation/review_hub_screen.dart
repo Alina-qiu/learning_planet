@@ -228,9 +228,9 @@ class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
     archive: _archive,
     keyword: _keyword.trim(),
   );
-  Widget _catalogList(bool pinyin, bool authorized) {
+  Widget _catalogList(WidgetRef tabRef, bool pinyin, bool authorized) {
     final scope = _scope(pinyin);
-    return ref
+    return tabRef
         .watch(questionCatalogProvider(scope))
         .when(
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -716,7 +716,10 @@ class _ReviewHubScreenState extends ConsumerState<ReviewHubScreen> {
           body: TabBarView(
             children: [
               for (final pinyin in [false, true])
-                _catalogList(pinyin, authorized),
+                Consumer(
+                  builder: (_, tabRef, _) =>
+                      _catalogList(tabRef, pinyin, authorized),
+                ),
             ],
           ),
         ),

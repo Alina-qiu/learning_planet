@@ -144,6 +144,13 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
         Error.throwWithStackTrace(cause.error, cause.stackTrace);
       }
       await applyDeletions(deleted);
+      final unchanged = await store.matchesVerifiedFamilyDirectory(
+        owner,
+        _snapshot(loaded),
+        visible.values.expand((children) => children),
+      );
+      check();
+      if (unchanged) return loaded;
       await store.transaction(() async {
         check();
         await store.restoreDirectoryAccess(owner, visible);
@@ -164,19 +171,7 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
       ];
       await store.transaction(() async {
         check();
-        await store.write(owner, 'families', {
-          'items': [
-            for (final family in families)
-              {
-                'id': family.id,
-                'name': family.name,
-                'timezone': family.timezone,
-                'children': [
-                  for (final child in family.children) child.toJson(),
-                ],
-              },
-          ],
-        });
+        await store.write(owner, 'families', _snapshot(families));
         check();
       });
       check();
@@ -209,4 +204,16 @@ class OfflineFamilyRepository extends SupabaseFamilyRepository
       ];
     }
   }
+
+  Map<String, dynamic> _snapshot(List<Family> families) => {
+    'items': [
+      for (final family in families)
+        {
+          'id': family.id,
+          'name': family.name,
+          'timezone': family.timezone,
+          'children': [for (final child in family.children) child.toJson()],
+        },
+    ],
+  };
 }

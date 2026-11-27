@@ -1,8 +1,23 @@
 import {randomBytes, randomUUID} from 'node:crypto';
 import {lstat, mkdir, readFile, readdir, realpath, rename, writeFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
+import {signedJwt} from './http_test_tools.mjs';
 
 export const initializingTrialDatabase = 'Initializing the trial database.\n';
+const daySeconds = 86400;
+const profileExpiresAt = credentials => credentials.createdAt + 3650 * daySeconds;
+
+export function localAnonKey(credentials) {
+  return signedJwt(credentials.secret, {role: 'anon', iat: credentials.createdAt, exp: profileExpiresAt(credentials)});
+}
+
+export function localSessionKeys(credentials, keepData) {
+  validateLocalCredentials(credentials);
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = keepData ? profileExpiresAt(credentials) : Math.min(now + daySeconds, profileExpiresAt(credentials));
+  return {anon: localAnonKey(credentials), expiresAt,
+    service: signedJwt(credentials.secret, {role: 'service_role', iat: now, exp: expiresAt})};
+}
 
 async function statIfPresent(path) {
   try { return await lstat(path); }
@@ -54,7 +69,7 @@ export function validateLocalCredentials(value) {
   const now = Math.floor(Date.now() / 1000);
   if (!value || typeof value.secret !== 'string' || !/^[a-zA-Z0-9_-]{64}$/.test(value.secret)
     || !Number.isSafeInteger(value.createdAt) || value.createdAt < 1577836800
-    || value.createdAt > now + 60 || value.createdAt + 315360000 <= now) {
+    || value.createdAt > now + 60 || profileExpiresAt(value) <= now) {
     throw new Error('Invalid or expired local signing credentials. Restore the original file for this debug APK.');
   }
   return value;

@@ -7,7 +7,7 @@ import {constants as osConstants} from 'node:os';
 import {resolve} from 'node:path';
 import {startTestDatabase} from './database.mjs';
 import {localMailbox} from './local_mailbox.mjs';
-import {validateLocalCredentials} from './local_trial.mjs';
+import {localAnonKey, validateLocalCredentials} from './local_trial.mjs';
 import {freePort, listen, closeServer, forwardHttp, isolatedEnv, localProcess, signedJwt, startPostgrest} from './http_test_tools.mjs';
 
 // A cold verifier on a hosted Mac can take longer than the local default.
@@ -145,10 +145,11 @@ export async function withAuthBackend(run, {createStorage, verifyTraffic = true,
     await auth.ready(`http://127.0.0.1:${authPort}/health`);
     startupStage('postgrest');
     rest = await startPostgrest(database, secret);
-    const issuedAt=localCredentials?.createdAt ?? Math.floor(Date.now()/1000);
-    const expiresAt=issuedAt+(localCredentials ? 315360000 : tokenLifetimeSeconds);
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const anon = localCredentials ? localAnonKey(localCredentials) :
+      signedJwt(secret, {role: 'anon', iat: issuedAt, exp: issuedAt + tokenLifetimeSeconds});
     startupStage('scenario');
-    await run({url, anon: signedJwt(secret, {role: 'anon',iat:issuedAt,exp:expiresAt}), mailboxKey}, {
+    await run({url, anon, mailboxKey}, {
       database, secret, storage,
       async quiesce() {
         quiesced = true;

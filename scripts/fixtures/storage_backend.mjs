@@ -73,7 +73,7 @@ async function persistentVolume(directory, secret, requireExisting) {
   };
 }
 
-export async function createStorageBackend({secret, minimumObjects = 4, persistentDirectory, requireExisting = false}) {
+export async function createStorageBackend({secret, apiKeys, minimumObjects = 4, persistentDirectory, requireExisting = false}) {
   assert.ok(Number.isInteger(minimumObjects) && minimumObjects >= 0);
   assert.ok(!requireExisting || persistentDirectory, 'Expected an existing persistent storage directory');
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Storage v1.72.1 requires Node >=24');
@@ -207,6 +207,8 @@ export async function createStorageBackend({secret, minimumObjects = 4, persiste
           UPLOAD_FILE_SIZE_LIMIT: '52428800', UPLOAD_FILE_SIZE_LIMIT_STANDARD: '52428800',
           LOG_LEVEL: 'error', REQUEST_X_FORWARDED_HOST_REGEXP: '',
         });
+        // Use the local worker and APK credentials; Storage otherwise mints new ten-year JWTs on each startup.
+        if (apiKeys) Object.assign(env, {SERVICE_KEY: apiKeys.service, ANON_KEY: apiKeys.anon});
         // Start from a fresh directory so the upstream dotenv loader cannot read developer credentials.
         storage = localProcess(process.execPath, [join(source, 'dist/start/server.js')],
           {env, cwd: directory, name: 'Supabase Storage'});
