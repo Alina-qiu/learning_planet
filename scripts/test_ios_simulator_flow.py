@@ -19,6 +19,7 @@ class VmDiscoveryTests(unittest.TestCase):
         now = [0.0]
         outputs = []
         processes = []
+        retained_paths = []
         announced = False
         url = "http://127.0.0.1:1234/fixture=/"
         stamp = "2026-11-27 04:37:24.122 Df "
@@ -50,11 +51,25 @@ class VmDiscoveryTests(unittest.TestCase):
             self.assertIn(args[5], ("show", "stream"))
             self.assertIn("--style", args)
             self.assertEqual(args[6:8], ["--last", "5m"] if args[5] == "show" else ["--style","compact"])
+            if scenario == "fresh query cannot start" and args[5] == "show" and retained_paths:
+                retained_paths.append(Path(stdout.name))
+                raise OSError("extra probe unavailable")
             child = FakeProcess(args[5])
             outputs.append(os.fdopen(os.dup(stdout.fileno()), "ab", buffering=0))
             processes.append(child)
             if args[5] == "show":
                 self.assertEqual(args[-1], 'process == "Runner"')
+                retained_paths.append(Path(stdout.name))
+                if scenario in ("second query succeeds", "second query wrong pid"):
+                    if len(retained_paths) == 2:
+                        self.assertIsNone(processes[1].poll())
+                        self.assertNotEqual(retained_paths[0], retained_paths[1])
+                        self.assertEqual(retained_paths[0].stat().st_size, 0)
+                        self.assertLessEqual(now[0], timeout / 2 + .5)
+                        outputs[-1].write(entry(123 if scenario == "second query succeeds" else 999))
+                        child.code = 0
+                        outputs[-1].close()
+                    return child
             else:
                 self.assertIn("eventMessage CONTAINS", args[-1])
             outputs[-1].write(entry(999))
@@ -78,8 +93,9 @@ class VmDiscoveryTests(unittest.TestCase):
                 retained.write(entry(123))
                 retained.close()
                 announced = True
-            if not announced and scenario == "slow retained" and now[0] >= 31:
-                self.assertEqual(len(processes), 2)
+            if not announced and scenario in ("slow retained", "fresh query cannot start") and now[0] >= 31:
+                self.assertEqual(len(retained_paths), 2)
+                self.assertIsNone(processes[1].poll())
                 retained.write(entry(123))
                 announced = True
 
@@ -88,7 +104,7 @@ class VmDiscoveryTests(unittest.TestCase):
                 patch.object(runner.time, "sleep", side_effect=advance), \
                 patch.object(runner.subprocess, "Popen", side_effect=start):
             try:
-                if scenario in ("wrong process", "stalled cleanup"):
+                if scenario in ("wrong process", "second query wrong pid", "stalled cleanup"):
                     with self.assertRaises(TimeoutError):
                         runner.wait_for_service("device",123,Path(folder),timeout)
                     self.assertEqual(now[0], timeout)
@@ -96,6 +112,9 @@ class VmDiscoveryTests(unittest.TestCase):
                     self.assertEqual(runner.wait_for_service("device",123,Path(folder),timeout),url)
                     self.assertLess(now[0], timeout)
                 self.assertTrue(all(p.poll() is not None for p in processes))
+                if scenario in ("second query succeeds", "second query wrong pid"):
+                    self.assertEqual(len(retained_paths), 2)
+                    self.assertTrue(all(not path.exists() for path in retained_paths))
                 log = (Path(folder) / "vm-service.log").read_text(encoding="utf8")
                 self.assertNotIn(url, log)
                 if scenario == "stalled cleanup":
@@ -115,6 +134,15 @@ class VmDiscoveryTests(unittest.TestCase):
 
     def test_running_retained_query_can_finish_after_thirty_seconds(self):
         self.simulate("slow retained", 35)
+
+    def test_fresh_query_finds_announcement_while_first_query_has_no_output(self):
+        self.simulate("second query succeeds", 120)
+
+    def test_fresh_query_ignores_other_pid_and_is_not_restarted(self):
+        self.simulate("second query wrong pid", 120)
+
+    def test_slow_first_query_survives_optional_probe_launch_failure(self):
+        self.simulate("fresh query cannot start", 35)
 
     def test_slow_probe_cleanup_cannot_extend_discovery_deadline(self):
         self.simulate("stalled cleanup",5)

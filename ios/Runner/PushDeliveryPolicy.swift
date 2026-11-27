@@ -1,6 +1,32 @@
 import Foundation
 import CoreFoundation
 
+// APNs reports one registration result for every caller currently waiting on this device.
+// Each caller still owns its own timeout, including renewals within the same revision.
+final class PushTokenRequests {
+  private var waiting: [(id: UUID, revision: Int64, reply: (String?) -> Void)] = []
+
+  func add(revision: Int64, reply: @escaping (String?) -> Void) -> UUID {
+    let id = UUID()
+    waiting.append((id, revision, reply))
+    return id
+  }
+
+  func expire(_ id: UUID) {
+    guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+    let request = waiting.remove(at: index)
+    request.reply(nil)
+  }
+
+  func finish(token: String?, revision: Int64) {
+    let requests = waiting
+    waiting.removeAll()
+    for request in requests {
+      request.reply(request.revision == revision ? token : nil)
+    }
+  }
+}
+
 // Pure policy shared by background receipt and foreground presentation. Time
 // comes from a server anchor advanced by the native continuous clock.
 enum PushDeliveryPolicy {

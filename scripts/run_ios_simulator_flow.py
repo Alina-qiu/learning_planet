@@ -65,10 +65,12 @@ def launch_pid(output, bundle):
 
 def wait_for_service(device, pid, report, timeout=120):
     deadline = time.monotonic() + timeout
+    recovery_at = deadline - timeout / 2
     # Flutter sends this announcement through os_log. Follow new entries and
     # also query the preceding five minutes in case it was emitted at launch.
     processes = {}
     last_lookup = float("-inf")
+    recovery_attempted = False
 
     def stop(process):
         if process.poll() is not None:
@@ -83,7 +85,7 @@ def wait_for_service(device, pid, report, timeout=120):
 
     url = None
     with tempfile.TemporaryDirectory() as directory:
-        paths = {name:Path(directory) / name for name in ("stream", "show")}
+        paths = {name:Path(directory) / name for name in ("stream", "show", "recovery")}
         offsets = dict.fromkeys(paths, 0)
         try:
             while True:
@@ -108,17 +110,27 @@ def wait_for_service(device, pid, report, timeout=120):
                     process = processes.get(name)
                     if offsets[name] >= LOG_BYTE_LIMIT or (path.exists() and path.stat().st_size >= LOG_BYTE_LIMIT):
                         continue
-                    # Give a slow retained query its full share of the existing
-                    # deadline. Restart only completed queries, at most once per five seconds.
-                    if process is not None and (name == "stream" or process.poll() is None):
+                    # Only the regular retained query repeats after exiting.
+                    if process is not None and (name != "show" or process.poll() is None):
                         continue
-                    if name == "show" and now - last_lookup < 5:
+                    # A retained query can stall without emitting any bytes. Halfway
+                    # through discovery, allow one fresh snapshot without stopping it.
+                    if name == "recovery" and (recovery_attempted or now < recovery_at):
+                        continue
+                    if name != "stream" and now - last_lookup < 5:
                         continue
                     # Each producer appends. A late writer after simctl exits
                     # must not lose its bytes to truncation on the next probe.
-                    with path.open("ab") as log:
-                        processes[name] = subprocess.Popen(runner_log_command(device, name), stdout=log,
-                                                           stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+                    kind = "stream" if name == "stream" else "show"
+                    if name == "recovery":
+                        recovery_attempted = True
+                    try:
+                        with path.open("ab") as log:
+                            processes[name] = subprocess.Popen(runner_log_command(device, kind), stdout=log,
+                                                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+                    except OSError:
+                        if name != "recovery":
+                            raise
                     if name == "show":
                         last_lookup = now
                 if not backlog:
@@ -129,7 +141,10 @@ def wait_for_service(device, pid, report, timeout=120):
             counts = {name:path.stat().st_size if path.exists() else 0 for name,path in paths.items()}
             (report / "vm-service.log").write_text(
                 f"Runner PID {pid}: VM discovery {status}; stream bytes={counts['stream']}, "
-                f"retained bytes={counts['show']}, pending cleanup={pending}\n", encoding="utf-8")
+                f"retained bytes={counts['show']}, pending cleanup={pending}; "
+                f"recovery attempted={int(recovery_attempted)}, started={int('recovery' in processes)}, "
+                f"recovery bytes={counts['recovery']}\n",
+                encoding="utf-8")
 
 
 def collect_runner_log(device, report):

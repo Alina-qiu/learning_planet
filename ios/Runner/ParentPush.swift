@@ -18,7 +18,7 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
   private var revisionKey: String { taskReminders ? "task_push_revision_v1" : "parent_push_revision_v1" }
   private let planKey = "task_push_plan_v1"
   private var ids: [String] { taskReminders ? ["task-remote-v1"] : ["parent-remote-v1-redemption", "parent-remote-v1-weekly"] }
-  private var pendingTokens: [(Int64, FlutterResult)] = []
+  private let pendingTokens = PushTokenRequests()
   private var clockSample: PushDeliveryPolicy.ClockSample?
   private var pendingAdds = 0
   private var disabledCallbacks: [(Int64, FlutterResult)] = []
@@ -106,9 +106,7 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
     if taskReminders { store.removeObject(forKey: planKey) }
     let saved = store.synchronize()
     cancelVisible()
-    let tokens = pendingTokens
-    pendingTokens.removeAll()
-    tokens.forEach { $0.1(nil) }
+    pendingTokens.finish(token: nil, revision: next)
     guard saved else { error(result); return }
     // Wait for already-submitted UN requests, then cancel again. A late add
     // completion cannot survive a completed logout/disable operation.
@@ -156,21 +154,17 @@ final class ParentPush: NSObject, FlutterApplicationLifeCycleDelegate {
       DispatchQueue.main.async {
         guard self.revision == expected,
           settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { result(nil); return }
-        self.pendingTokens.append((expected, result))
+        let request = self.pendingTokens.add(revision: expected) { token in result(token) }
         UIApplication.shared.registerForRemoteNotifications()
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-          let old = self.pendingTokens.filter { $0.0 == expected }
-          self.pendingTokens.removeAll { $0.0 == expected }
-          old.forEach { $0.1(nil) }
+          self.pendingTokens.expire(request)
         }
       }
     }
   }
   func registered(_ token: Data?) {
     let value = token?.map { String(format: "%02x", $0) }.joined()
-    let waiting = pendingTokens
-    pendingTokens.removeAll()
-    waiting.forEach { $0.1($0.0 == revision ? value : nil) }
+    pendingTokens.finish(token: value, revision: revision)
   }
   private func allowed(_ data: [String: String], _ row: [String: Any], allowSeen: Bool = false) -> Bool {
     PushDeliveryPolicy.allows(data, gate: row, clock: clock(), task: taskReminders,

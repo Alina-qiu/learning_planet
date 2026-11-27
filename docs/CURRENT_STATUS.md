@@ -133,7 +133,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | TSK-02 时间窗/有效计时 | [任务系统](TASK_SYSTEM.md)、[计时纠正](TASK_TIME_CORRECTIONS.md) | 真机后台/重启/时钟行为 |
 | TSK-03 三类优先级 | `lib/features/tasks/domain/task_priority.dart`、[完成反馈](TASK_COMPLETION_FEEDBACK.md) | 孩子理解与读屏试用 |
 | TSK-04 状态转换/禁止孩子撤销 | `lib/features/tasks/domain/task_state_machine.dart`、[实际任务流程](LOCAL_DEBUG.md) | 双端并发操作实机验收 |
-| TSK-05 家长补签或纠正 | 补签及[计时纠正](TASK_TIME_CORRECTIONS.md)有原因、审计和版本检查 | 是否还包含撤回误完成，用户尚未答复；不能把这一扩展视为已实现 |
+| TSK-05 家长补签或纠正 | 家长持有效 PIN 可补签，也可纠正已完成任务的有效时长。两项操作都要求填写原因并记录审计。[补签](TASK_SYSTEM.md) · [计时纠正](TASK_TIME_CORRECTIONS.md) | 双端真机操作待验。PRD 第 8.1 节将已完成列为终态，当前范围涵盖补签和计时纠正。 |
 | TSK-06 智能提醒 | [本地通知](LOCAL_NOTIFICATIONS.md)、[原生授权场景](../build/integration_results/notifications-granted.json) | 用户选择[收到后复查的远程方案](TASK_REMOTE_PUSH.md)，已实现且Swift策略/构建通过，真实供应商与真机仍待验证；可能漏提醒，不能保证系统最终展示时刻 |
 | TSK-07 每日自动复习 | 每个孩子每天最多一项，首次开始前更新到期清单，开始后冻结。本机持续运行的服务在家庭当地 00:05:58 自动生成任务，零题兄弟及另一时区的孩子按各自资格处理。[空闲调度与选题](REVIEW_AUTO_COMPLETION.md) · [逐题结算](../build/ac11-device-acceptance/summary.json) | 托管环境家庭时区调度及真机运行待验证 |
 | ERR-01 拍照/多图/裁剪 | [OCR管理](OCR_MANAGEMENT.md)、[原生多选报告](../build/integration_results/image-import-native.json)、[中断草稿](OCR_INTERRUPTION.md) | 真机相机权限、系统回收期间选择恢复及真实图片 |
@@ -167,7 +167,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 
 | 要求 | 当前证据 | 尚未达到的证明范围 |
 |---|---|---|
-| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | `a34bcbe` 的 API 36 模拟器 3/3 次、Android 10 模拟器 3/4 次确认完整首页在 6 秒内可见。两个环境在 1.5 秒内确认错题本首题可见的次数分别为 2/3 和 1/3。此前 `a25c5d3` 完成普通任务的本机反馈为 191–232 毫秒。[启动与列表逐次记录](APP_PERFORMANCE.md) · [任务反馈](../build/ocr-local-20261127/release/completion-feedback.json) | Android 与 iPhone 真机、重装后首次启动、各主要列表的目标设备耗时 |
+| 冷启动完整首页 ≤6 秒、列表 <1.5 秒、反馈 <500 ms | `eeaa9fb` 在标准 Android API 29 和 36 模拟器上，6 次完整首页冷启动最慢 5.457 秒。错题本 6 次首开最慢 1.305 秒，4 次再次进入最慢 0.627 秒，均点开预期首题。此前 `a25c5d3` 的普通任务完成反馈为 191–232 毫秒。[启动与列表逐次记录](APP_PERFORMANCE.md) · [任务反馈](../build/ocr-local-20261127/release/completion-feedback.json) | Android 与 iPhone 真机、重装后首次启动、各主要列表的目标设备耗时 |
 | 系统大字号、单手入口、14sp | [首页与任务入口](TASK_ACCESSIBILITY.md)、[组卷适配](WORKSHEET_ACCESSIBILITY.md)，Widget回归、中文截图及此前模拟器操作 | 未覆盖所有机型、所有页面字号组合及真实读屏 |
 | 事务、幂等、冲突 | 四个会话重放 80 条离线命令，通过实际 HTTP 检查重复退款和丢失回执后的结算 | 目标云端负载、长时间运行及双端实机 |
 | 恢复网络30秒内开始同步 | API 29 模拟器恢复本机服务连接后，前台 9.34 秒发出首个快照请求。会话过期、离线重开后再次恢复连接，1.48 秒发出首个快照请求，1.56 秒开始补传操作。[同步时间及账本](../build/acceptance-20261124/android-reconnect.json) | 目标手机的无线网络切换、系统后台限制仍待验证 |

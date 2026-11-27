@@ -17,6 +17,8 @@ APNs按[Apple发送请求说明](https://developer.apple.com/documentation/usern
 
 iPhone 上报的 APNs 设备令牌按字节编码为小写十六进制。迁移 079 的注册、续订及发送前检查接受 2 至 4096 个字符的偶数长度令牌，已有设备可继续续订。[数据库迁移](../supabase/migrations/202611270079_parent_apns_token_length.sql) · [发送校验](../supabase/functions/_shared/parent_push_worker.mjs)
 
+iPhone 多次回到前台时，家长提醒和任务提醒都可能再次请求设备令牌。每个请求各自等待最多 10 秒。系统返回结果时，当前授权范围内仍在等待的请求可共同收到令牌。某次请求超时只结束该次等待。关闭提醒或切换授权后，旧请求会以空结果结束。[原生注册入口](../ios/Runner/ParentPush.swift) · [原生回归用例](../scripts/fixtures/push_delivery_policy.swift)
+
 `parent_push_devices`和`parent_push_jobs`是私有表，包括service_role在内的API角色不能直接查询。客户端使用专门RPC，服务端才能领取任务、读取单次发送所需Token。现有39类孩子导出不包含Token、设备密钥和内部队列。
 
 - `prepare_parent_push_device`要求当前家庭的会话PIN。客户端先持久化随机安装UUID、至少32字节随机密钥（base64url后43字符）、递增intent_version和随机scope_nonce，再准备注册。准备有效5分钟，尚不能投递。

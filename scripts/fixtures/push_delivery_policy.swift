@@ -18,6 +18,36 @@ import Foundation
     func check(_ value: Bool, _ label: String) {
       precondition(value, label); count += 1
     }
+    let tokens = PushTokenRequests()
+    var replies: [String: [String?]] = [:]
+    func waitForToken(_ name: String, _ revision: Int64 = 1) -> UUID {
+      tokens.add(revision: revision) { replies[name, default: []].append($0) }
+    }
+    let first = waitForToken("first")
+    tokens.finish(token: "aa", revision: 1)
+    let second = waitForToken("second"), third = waitForToken("third")
+    tokens.expire(first)
+    check(replies == ["first": ["aa"]], "a completed request's old timeout leaves both same-revision renewals pending")
+    tokens.expire(second)
+    _ = waitForToken("fourth")
+    tokens.finish(token: "bb", revision: 1)
+    tokens.expire(third)
+    check(replies == ["first": ["aa"], "second": [nil], "third": ["bb"], "fourth": ["bb"]],
+      "each timeout expires only its own request; registration completes all remaining renewals exactly once")
+    let oldScope = waitForToken("oldScope")
+    tokens.finish(token: nil, revision: 2)
+    _ = waitForToken("newScope", 2)
+    tokens.expire(oldScope)
+    tokens.finish(token: "cc", revision: 2)
+    check(replies["oldScope"] == [nil] && replies["newScope"] == ["cc"], "disable clears old scope and its timer cannot cancel the new scope")
+    _ = waitForToken("stale", 1)
+    _ = waitForToken("renewed", 2)
+    tokens.finish(token: "dd", revision: 2)
+    check(replies["stale"] == [nil] && replies["renewed"] == ["dd"], "registration tokens are delivered only to the current revision")
+    _ = waitForToken("failed1", 2)
+    _ = waitForToken("failed2", 2)
+    tokens.finish(token: nil, revision: 2)
+    check(replies["failed1"] == [nil] && replies["failed2"] == [nil], "registration failure settles all waiting renewals")
     func allowed(_ d: [String: String]? = nil, _ g: [String: Any]? = nil,
       _ p: [String: [String: String]]? = nil, _ wall: Int64? = nil, _ elapsed: Int64 = 1000, _ boot: String = "boot-a") -> Bool {
       PushDeliveryPolicy.allows(d ?? data, gate: g ?? gate, clock: (wall ?? now, elapsed, boot), task: true, plan: p ?? plan)
