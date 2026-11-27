@@ -4,7 +4,7 @@
 
 **Android 本地联调版已可交付。** iOS 已完成未签名编译及指定模拟器测试。Android 本地闹钟、iPhone APNs 推送及两端性能仍需真机验证，云端部署和连续家庭试用尚待完成。
 
-当前交付的 Android 联调 APK 来自 `ce1b5a0`。Android 10 模拟器登录合成家庭后，完整首页三次冷启动上界分别为 3.22、2.93、4.12 秒。后续提交 `af9e3ab` 在 Windows 与 Linux 各通过 914 项 Flutter 测试，本机核心行覆盖率为 90.92%。[首页与安装包实测](../build/child-isolation-20261127/DELIVERY.md) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45896548864) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45896548867)
+当前 Android 联调包支持逐张校对本机草稿。最新 APK 及 SHA-256 见[构建记录](ANDROID_BUILD.md)。此前 `ce1b5a0` 的 Android 10 模拟器登录合成家庭后，完整首页三次冷启动上界分别为 3.22、2.93、4.12 秒。服务端版本 `6bfd0ab` 在 Windows 与 Linux 各通过 914 项 Flutter 测试。[此前首页实测](../build/child-isolation-20261127/release/home-acceptance.json) · [常规 CI](https://github.com/Alina-qiu/learning_planet/actions/runs/45907928103) · [双端同步](https://github.com/Alina-qiu/learning_planet/actions/runs/45907928107)
 
 现在可以用同一个本机安装包分几天试用同一测试家庭。在项目目录执行 `& ./scripts/local_backend.ps1 -KeepData` 后，关闭服务再用同一命令启动，家庭账号、孩子、账本和私有文件会保留。[本机运行步骤](LOCAL_DEBUG.md) · [两份调试包的用途](ANDROID_BUILD.md) · [双孩子与首页启动实测](../build/child-isolation-20261127/DELIVERY.md)
 
@@ -129,7 +129,7 @@ iPhone 的任务和家长提醒在权限回调和主线程等待结束时复查�
 | TSK-06 智能提醒 | [本地通知](LOCAL_NOTIFICATIONS.md)、[原生授权场景](../build/integration_results/notifications-granted.json) | 用户选择[收到后复查的远程方案](TASK_REMOTE_PUSH.md)，已实现且Swift策略/构建通过，真实供应商与真机仍待验证；可能漏提醒，不能保证系统最终展示时刻 |
 | TSK-07 每日自动复习 | 每个孩子每天最多一项，首次开始前更新到期清单，开始后冻结。题目全部移出时收起当天任务。[选题与自动完成](REVIEW_AUTO_COMPLETION.md) · [两台 Android 模拟器逐题结算](../build/ac11-device-acceptance/summary.json) | 托管环境家庭时区 00:05 调度及真机运行待验证 |
 | ERR-01 拍照/多图/裁剪 | [OCR管理](OCR_MANAGEMENT.md)、[原生多选报告](../build/integration_results/image-import-native.json)、[中断草稿](OCR_INTERRUPTION.md) | 真机相机权限、系统回收期间选择恢复及真实图片 |
-| ERR-02 逐字段校对 | [字段校对](OCR_FIELD_CORRECTION.md)、[源图片变更](OCR_SOURCE_CHANGES.md) | 真实教材复杂版式与识别质量，不能以合成图片代替 |
+| ERR-02 逐字段校对 | 多图中每张错题可先在本机校对，重新打开可接着修改。提交时逐张征得同意，孩子录入的标准答案由家长确认。[操作说明](OCR_FIELD_CORRECTION.md) · [更换图片后重新校对](OCR_SOURCE_CHANGES.md) | 真实教材的复杂版式与识别质量仍待评测 |
 | ERR-03 学科/知识点 | [题目目录](QUESTION_CATALOG_PAGINATION.md)、`lib/features/wrong_questions/presentation/review_question_editor.dart` | 双设备编辑与真实数据规模 |
 | ERR-04 错误原因 | 六类人工标签，`test/error_reason_tags_test.dart`、迁移035 | 真机输入与家庭使用 |
 | ERR-05 相似题检索/生成 | [相似题](SIMILAR_QUESTIONS.md)，AI标识、隐藏答案、审核采纳 | 真实模型、复杂题意、答案质量和费用评测 |

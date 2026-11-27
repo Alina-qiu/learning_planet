@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {access, mkdir, mkdtemp, readFile, rm, unlink, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -7,7 +7,7 @@ import {test} from 'node:test';
 import {localControlInvocation, stopLocalSession} from './local_backend.mjs';
 import {closeServer, listen, localProcess} from './fixtures/http_test_tools.mjs';
 import {initializeLocalBucket} from './fixtures/storage_backend.mjs';
-import {openLocalTrial} from './fixtures/local_trial.mjs';
+import {initializingTrialDatabase, openLocalTrial} from './fixtures/local_trial.mjs';
 
 async function trialPaths(t) {
   const directory = await mkdtemp(join(tmpdir(), 'learning-planet-profile-'));
@@ -53,6 +53,34 @@ test('a mismatched key and an incomplete trial are preserved for recovery', asyn
   await assert.rejects(open(true), /signing configuration differ/);
   assert.equal(await readFile(cached, 'utf8'), different);
   assert.equal(await readFile(profile, 'utf8'), original);
+});
+
+test('retry preserves unfamiliar files, process locks and previously published family directories', async t => {
+  const {open, trial} = await trialPaths(t);
+  const first = await open(true), db = first.database, data = join(db, 'data');
+  await mkdir(data, {recursive: true});
+  const marker = join(db, 'initializing-cluster'), lock = join(data, 'postmaster.pid');
+  await writeFile(marker, 'not this application');
+  await assert.rejects(open(true), /Unrecognized first trial initialization/);
+  await writeFile(marker, initializingTrialDatabase);
+  const unknown = join(db, 'other-files');
+  await writeFile(unknown, 'keep');
+  await assert.rejects(open(true), /Unrecognized first trial initialization/);
+  assert.equal(await readFile(unknown, 'utf8'), 'keep');
+  await unlink(unknown);
+  await writeFile(lock, 'still in use');
+  await assert.rejects(open(true), /process lock/);
+  await unlink(lock);
+  await writeFile(join(data, 'customer-file'), 'keep');
+  await assert.rejects(open(true), /Unrecognized unfinished PostgreSQL data/);
+  assert.equal(await readFile(join(data, 'customer-file'), 'utf8'), 'keep');
+  await unlink(join(data, 'customer-file'));
+  await open(false);
+  assert.deepEqual((await readdir(trial)).sort(), ['database', 'profile.json']);
+  await first.markReady();
+  assert.equal((await open(true)).requireExisting, true);
+  assert.deepEqual((await readdir(trial)).sort(), ['database', 'profile.json']);
+  assert.equal(await readFile(marker, 'utf8'), initializingTrialDatabase);
 });
 
 async function withProbe(handler, check) {

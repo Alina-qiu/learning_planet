@@ -21,12 +21,14 @@ class ReviewQuestionEditor extends StatefulWidget {
     this.childId,
     this.collectErrorReasons = true,
     this.childSubmission = false,
+    this.localDraftOnly = false,
     this.imageUrls = const [],
     super.key,
   });
   final bool pinyin;
   final bool collectErrorReasons;
   final bool childSubmission;
+  final bool localDraftOnly;
   final List<String> imageUrls;
   final String? familyId, childId;
   final Map<String, dynamic>? initial;
@@ -146,7 +148,7 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
     });
   }
 
-  void _draftChanged() => widget.onDraftChanged?.call({
+  Map<String, dynamic> get _draftData => {
     'final_text': _prompt.text,
     'answers': _answers.text.split('\n'),
     'pronunciation_context': _context.text,
@@ -161,7 +163,9 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
       'ocr_corrections': _corrections,
       'ocr_field_confirmations': _fieldConfirmed.toList(),
     },
-  });
+  };
+
+  void _draftChanged() => widget.onDraftChanged?.call(_draftData);
 
   List<String> get _orderedReasonTags =>
       errorReasonLabels.keys.where(_reasonTags.contains).toList();
@@ -288,6 +292,10 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
 
   Future<void> _save() async {
     if (_saving || widget.onReauthorize != null) return;
+    if (widget.localDraftOnly) {
+      Navigator.pop(context, _draftData);
+      return;
+    }
     if (!_form.currentState!.validate()) return;
     if (_prompt.text.trim().isEmpty ||
         _prompt.text.length > 2000 ||
@@ -404,7 +412,9 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
   Widget _editor() => Scaffold(
     appBar: AppBar(
       title: Text(
-        widget.childSubmission
+        widget.localDraftOnly
+            ? '本机错题校对'
+            : widget.childSubmission
             ? '校对错题并交家长确认'
             : widget.pinyin
             ? '拼音词语配置'
@@ -569,6 +579,7 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
             decoration: const InputDecoration(labelText: '知识点'),
           ),
           if (!widget.pinyin &&
+              !widget.localDraftOnly &&
               !widget.childSubmission &&
               widget.familyId != null &&
               widget.childId != null)
@@ -624,7 +635,7 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
               },
               title: const Text('我已根据语境确认标准读音，不接受未经确认的多音字猜测'),
             ),
-          if (widget.fromImage)
+          if (widget.fromImage && !widget.localDraftOnly)
             CheckboxListTile(
               value: _ocrConfirmed,
               onChanged: (value) {
@@ -643,6 +654,8 @@ class _ReviewQuestionEditorState extends State<ReviewQuestionEditor> {
             child: Text(
               _saving
                   ? '正在保存…'
+                  : widget.localDraftOnly
+                  ? '保存本机草稿'
                   : widget.childSubmission
                   ? '保存给家长确认'
                   : '保存',

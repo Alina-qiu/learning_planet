@@ -1,6 +1,46 @@
 import {randomBytes, randomUUID} from 'node:crypto';
-import {lstat, mkdir, readFile, rename, writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {lstat, mkdir, readFile, readdir, realpath, rename, writeFile} from 'node:fs/promises';
+import {basename, join} from 'node:path';
+
+export const initializingTrialDatabase = 'Initializing the trial database.\n';
+
+async function statIfPresent(path) {
+  try { return await lstat(path); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+// The caller holds the loopback service port and has verified an unpublished profile.
+async function preserveInterruptedDatabase(trialRoot) {
+  const root = await realpath(trialRoot), database = join(root, 'database');
+  const directory = await statIfPresent(database);
+  if (!directory) return;
+  if (!directory.isDirectory()) throw new Error('Invalid local trial database directory');
+  const entries = await readdir(database, {withFileTypes: true});
+  const pending = 'initializing-cluster';
+  if (entries.some(entry => entry.name === 'learning-planet-cluster.json') ||
+      !entries.some(entry => entry.name === pending)) return;
+  const expectedFile = new Set([pending, 'postgres.log', 'initdb-password']);
+  const recognized = entries.every(entry => entry.name === 'data' ? entry.isDirectory() :
+    entry.isFile() && expectedFile.has(entry.name));
+  if (!recognized || await readFile(join(database, pending), 'utf8') !== initializingTrialDatabase) {
+    throw new Error('Unrecognized first trial initialization. Its files were preserved.');
+  }
+  const data = join(database, 'data');
+  if (await statIfPresent(join(data, 'postmaster.pid'))) {
+    throw new Error('The unfinished trial database has a PostgreSQL process lock. Its files were preserved.');
+  }
+  if (entries.some(entry => entry.name === 'data') && (await readdir(data)).length) {
+    const version = join(data, 'PG_VERSION'), globalDirectory = join(data, 'global');
+    if (!(await statIfPresent(version))?.isFile() || !/^\d+\s*$/.test(await readFile(version, 'utf8')) ||
+        !(await statIfPresent(globalDirectory))?.isDirectory() ||
+        !(await statIfPresent(join(globalDirectory, 'pg_control')))?.isFile()) {
+      throw new Error('Unrecognized unfinished PostgreSQL data. Its files were preserved.');
+    }
+  }
+  const archive = join(root, 'database-interrupted-' + randomUUID());
+  await rename(database, archive);
+  console.log('Previous first trial initialization retained in ' + basename(archive));
+}
 
 async function readJson(path) {
   try { return JSON.parse(await readFile(path, 'utf8')); }
@@ -42,10 +82,7 @@ export async function openLocalTrial(trialRoot, generatedDirectory, keepData) {
     try { await mkdir(trialRoot, {mode: 0o700}); fresh = true; }
     catch (error) { if (error.code !== 'EEXIST') throw error; }
   }
-  const directory = await lstat(trialRoot).catch(error => {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  });
+  const directory = await statIfPresent(trialRoot);
   if (directory && !directory.isDirectory()) throw new Error('Invalid local trial directory');
   const profile = await readJson(profilePath);
   if (profile && (profile.version !== 1 || typeof profile.ready !== 'boolean')) {
@@ -62,6 +99,7 @@ export async function openLocalTrial(trialRoot, generatedDirectory, keepData) {
   if (fresh) await createJson(profilePath, {version: 1, ready: false, credentials});
   if (!cached) await createJson(cachedPath, credentials);
   if (!keepData) return {credentials};
+  if (profile?.ready === false) await preserveInterruptedDatabase(trialRoot);
 
   return {
     credentials,

@@ -14,6 +14,8 @@ import 'package:learning_planet/features/wrong_questions/data/question_media_rep
 import 'package:learning_planet/features/wrong_questions/data/offline_question_media_repository.dart';
 import 'package:learning_planet/features/wrong_questions/presentation/image_drafts_screen.dart';
 import 'package:learning_planet/features/wrong_questions/presentation/question_ocr_screen.dart';
+import 'package:learning_planet/features/wrong_questions/presentation/review_question_editor.dart';
+import 'ocr_fields_test.dart' show seeOcr;
 import 'ocr_management_test.dart' show fixture, FakeImages, FakeMedia;
 
 class PickerStub extends Fake implements ImagePicker {
@@ -561,6 +563,7 @@ void main() {
       WidgetTester tester,
       BatchImages images, {
       bool ocr = false,
+      bool childInput = false,
     }) async {
       await tester.pumpWidget(
         ProviderScope(
@@ -570,12 +573,16 @@ void main() {
             activeParentFamilyProvider.overrideWith(
               (ref) => ref.watch(parentFamilyIdProvider),
             ),
-            parentFamilyIdProvider.overrideWith((ref) => 'family'),
+            parentFamilyIdProvider.overrideWith((ref) => family),
           ],
           child: MaterialApp(
             theme: ThemeData(splashFactory: InkRipple.splashFactory),
             home: ocr
-                ? const QuestionOcrScreen(childId: 'child', familyId: 'family')
+                ? QuestionOcrScreen(
+                    childId: 'child',
+                    familyId: 'family',
+                    childInput: childInput,
+                  )
                 : const ImageDraftsScreen(childId: 'child', familyId: 'family'),
           ),
         ),
@@ -740,6 +747,145 @@ void main() {
             false,
           );
           expect(remote.saves, 0);
+          await tester.pumpWidget(const SizedBox());
+        });
+      },
+    );
+
+    testWidgets(
+      'child can correct two unconsented photos and submit just one for parent review',
+      (tester) async {
+        await tester.runAsync(() async {
+          family = null;
+          final images = BatchImages();
+          Future<void> waitFor(Finder target) async {
+            for (var i = 0; i < 150 && target.evaluate().isEmpty; i++) {
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+              await tester.pump(const Duration(milliseconds: 20));
+            }
+            expect(
+              target,
+              findsOneWidget,
+              reason: tester
+                  .widgetList<Text>(find.byType(Text))
+                  .map((text) => text.data)
+                  .join(' / '),
+            );
+          }
+
+          Future<void> tap(Finder target) async {
+            await seeOcr(tester, target);
+            if (target.hitTestable().evaluate().isEmpty &&
+                find.byType(SnackBar).evaluate().isNotEmpty) {
+              ScaffoldMessenger.of(
+                tester.element(target),
+              ).removeCurrentSnackBar();
+              await tester.pumpAndSettle();
+            }
+            await tester.tap(target);
+            await tester.pumpAndSettle();
+          }
+
+          Future<void> openImage(int index) async {
+            final title = find.text('批量导入 · 第$index/2张');
+            await seeOcr(tester, title);
+            final row = find.ancestor(of: title, matching: find.byType(Card));
+            await tap(find.descendant(of: row, matching: find.text('继续校对')));
+            await seeOcr(tester, find.text('导入图片 · 第$index/2张'));
+          }
+
+          await mount(tester, images, ocr: true, childInput: true);
+          await tap(find.text('多图导入（每次最多10张）'));
+          await waitFor(find.byType(ImageDraftsScreen));
+          final rows = await repo.drafts(
+            'child',
+            'family',
+            includeChildDrafts: true,
+          );
+          expect(rows, hasLength(2));
+          final ids = [for (final row in rows) row['draft_id'] as String];
+          final field = find.widgetWithText(TextFormField, '题目');
+          for (final index in [1, 2]) {
+            await openImage(index);
+            await tap(find.text('设备端识别 / 重试'));
+            await waitFor(find.textContaining('识别完成，以下'));
+            await tap(find.text('校对本机草稿'));
+            await waitFor(find.byType(ReviewQuestionEditor));
+            await seeOcr(tester, field);
+            await tester.enterText(field, '第$index张校对后的题干');
+            tester.testTextInput.hide();
+            await tester.pump();
+            if (index == 1) await tap(find.text('已核对题干的文字与字段归属'));
+            await tap(find.text('保存本机草稿'));
+            await waitFor(find.text('已保存本机草稿'));
+            expect(find.byType(ReviewQuestionEditor), findsNothing);
+            await tester.pageBack();
+            await tester.pumpAndSettle();
+            expect(find.byType(ImageDraftsScreen), findsOneWidget);
+          }
+          await repo.synchronize(retryBlocked: true);
+          expect(remote.saves, 0);
+          for (final index in [1, 2]) {
+            final row = await repo.draft(
+              ids[index - 1],
+              'family',
+              childInput: true,
+            );
+            expect(row['stage'], 'editing');
+            expect(row['metadata']['consent'], false);
+            expect(row['metadata']['config'], isNull);
+            expect(
+              row['metadata']['editor']['ocr_corrections']['prompt'],
+              '第$index张校对后的题干',
+            );
+            expect(
+              row['metadata']['editor']['ocr_field_confirmations'],
+              index == 1 ? ['prompt'] : isEmpty,
+            );
+          }
+
+          await tester.pumpWidget(const SizedBox());
+          await mount(tester, images);
+          await openImage(1);
+          await tap(find.textContaining('同意将原图、处理图'));
+          await tap(find.text('校对、配置答案并保存'));
+          await waitFor(find.byType(ReviewQuestionEditor));
+          await seeOcr(tester, field);
+          expect(
+            tester.widget<TextFormField>(field).controller!.text,
+            '第1张校对后的题干',
+          );
+          await tap(find.text('保存给家长确认'));
+          expect(find.byType(ReviewQuestionEditor), findsOneWidget);
+          expect(
+            (await repo.draft(ids.first, 'family', childInput: true))['stage'],
+            'editing',
+          );
+          final confirm = find.textContaining('我已核对原图和所有题目文字');
+          await seeOcr(tester, confirm, delta: -240);
+          await tester.tap(confirm);
+          await tester.pumpAndSettle();
+          await tap(find.text('保存给家长确认'));
+          await waitFor(find.byType(ImageDraftsScreen));
+          expect(
+            (await repo.draft(ids.first, 'family', childInput: true))['stage'],
+            'queued',
+          );
+          await repo.synchronize();
+          expect(remote.ids, [ids.first]);
+          expect(remote.config!['requires_parent_review'], isTrue);
+          expect(remote.config!['prompt'], '第1张校对后的题干');
+          final sibling = await repo.draft(
+            ids.last,
+            'family',
+            childInput: true,
+          );
+          expect(sibling['stage'], 'editing');
+          expect(sibling['metadata']['consent'], false);
+          expect(
+            sibling['metadata']['editor']['ocr_corrections']['prompt'],
+            '第2张校对后的题干',
+          );
           await tester.pumpWidget(const SizedBox());
         });
       },

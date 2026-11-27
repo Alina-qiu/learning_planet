@@ -1,6 +1,10 @@
 # Android 调试构建
 
-## 2026-11-27 双孩子共用设备
+## 当前安装包
+
+在 Android 模拟器或测试手机上体验完整流程，安装 `app-local-debug.apk`。电脑上用 PowerShell 7 执行 `& ./scripts/local_backend.ps1 -KeepData` 可继续使用同一测试家庭。普通调试包 `app-debug.apk` 使用独立包名，启动后可查看后端配置提示。[联调 APK](../build/app/outputs/flutter-apk/app-local-debug.apk) · [联调包校验值](../build/app/outputs/flutter-apk/app-local-debug.apk.sha256) · [普通包校验值](../build/app/outputs/flutter-apk/app-debug.apk.sha256) · [安装与登录](LOCAL_DEBUG.md)
+
+## 2026-11-27 双孩子共用设备基线
 
 本机联调版用于登录并体验完整流程，普通版用于检查服务配置。两份 APK 的摘要、模拟器上两个孩子的离线打卡结果及已登录家庭冷启动时间，见[本机交付记录](../build/child-isolation-20261127/DELIVERY.md)。[安装与启动本机服务](LOCAL_DEBUG.md)
 

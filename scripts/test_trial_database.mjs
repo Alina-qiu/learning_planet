@@ -6,6 +6,7 @@ import {createServer} from 'node:net';
 import {basename, dirname, join} from 'node:path';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {startTestDatabase} from './fixtures/database.mjs';
+import {openLocalTrial} from './fixtures/local_trial.mjs';
 import {freePort} from './fixtures/http_test_tools.mjs';
 
 const project = await realpath(process.cwd());
@@ -110,6 +111,29 @@ try {
   await writeFile(join(unknown, 'existing'), 'keep');
   await assert.rejects(start({persistentDirectory: unknown}), /Unrecognized or incomplete/);
   assert.deepEqual(await readdir(unknown), ['existing']);
+
+  const trialRoot = join(scratch, '.learning-planet-trial'), config = join(scratch, 'trial-config');
+  await mkdir(config);
+  const initial = await openLocalTrial(trialRoot, config, true);
+  const bootstrap = async () => { throw new Error('Storage service startup interrupted'); };
+  await assert.rejects(start({persistentDirectory: initial.database, bootstrapStorage: bootstrap}), /Storage service startup interrupted/);
+  const partial = await readFile(join(initial.database, 'data', 'global', 'pg_control'));
+  const retry = await openLocalTrial(trialRoot, config, true);
+  assert.deepEqual(retry.credentials, initial.credentials);
+  const [retained] = (await readdir(trialRoot)).filter(name => name.startsWith('database-interrupted-'));
+  assert.ok(retained, 'A stopped first initialization is retained separately');
+  assert.deepEqual(await readFile(join(trialRoot, retained, 'data', 'global', 'pg_control')), partial);
+  db = await start({persistentDirectory: retry.database});
+  assert.equal(db.restored, false);
+  await db.client.query("insert into auth.users values ('30303030-0000-4000-8000-000000000002','recovered@example.test')");
+  await retry.markReady();
+  await stop();
+  const reopened = await openLocalTrial(trialRoot, config, true);
+  db = await start({persistentDirectory: reopened.database, requireExisting: reopened.requireExisting});
+  assert.equal(db.restored, true);
+  assert.equal((await db.client.query('select email from auth.users')).rows[0].email, 'recovered@example.test');
+  await stop();
+  console.log('PASS first persistent trial retries after a stopped incomplete bootstrap and reopens the new family');
   console.log('PASS trial database preserves data and roles, upgrades exact history, and rejects altered or incomplete state');
 } finally {
   await stop();

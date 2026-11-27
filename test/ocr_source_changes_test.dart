@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:learning_planet/core/offline/offline_media_store.dart';
 import 'package:learning_planet/core/offline/offline_store.dart';
 import 'package:learning_planet/features/auth_family/application/family_providers.dart';
 import 'package:learning_planet/features/wrong_questions/data/offline_question_media_repository.dart';
@@ -70,7 +71,7 @@ void main() {
     await store.close();
   });
 
-  Future<void> seed({bool child = false}) async {
+  Future<void> seed({bool child = false, bool consent = true}) async {
     if (child) parent = null;
     for (final id in [draft, otherDraft]) {
       await repository.saveDraft(
@@ -92,7 +93,7 @@ void main() {
             'ocr_corrections': corrections,
             'ocr_field_confirmations': corrections.keys.toList(),
           },
-          'consent': true,
+          'consent': consent,
           'crop': [0.0, 0.0, 1.0, 1.0],
           'turns': 0,
         },
@@ -319,4 +320,52 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   });
+
+  testWidgets(
+    'parent can keep a partial local correction and PIN expiry closes its editor',
+    (tester) async {
+      await tester.runAsync(() async {
+        await seed(consent: false);
+        await mount(tester);
+        await tap(tester, '校对本机草稿');
+        final field = find.widgetWithText(TextFormField, '标准答案（一行一个可接受答案）');
+        await tester.scrollUntilVisible(
+          field,
+          240,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.enterText(field, '');
+        tester.testTextInput.hide();
+        await tap(tester, '保存本机草稿');
+        final initial = await metadata();
+        expect(initial['editor']['answers'], ['']);
+        expect(initial['config'], isNull);
+        expect(initial['consent'], false);
+
+        await tester.pumpWidget(const SizedBox());
+        await mount(tester);
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(QuestionOcrScreen)),
+        );
+        await tap(tester, '校对本机草稿');
+        await tester.scrollUntilVisible(
+          field,
+          240,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(tester.widget<TextFormField>(field).controller!.text, '');
+        parent = null;
+        container.read(parentFamilyIdProvider.notifier).state = null;
+        await tester.pumpAndSettle();
+        expect(find.byType(ReviewQuestionEditor), findsNothing);
+        expect(find.textContaining('家长授权已到期，请返回并重新验证 PIN'), findsOneWidget);
+        await repository.synchronize(retryBlocked: true);
+        expect(remote.saves, 0);
+        final row = await store.imageDraft('owner', draft);
+        expect(row!['stage'], 'editing');
+        expect(row['metadata'], initial);
+        await tester.pumpWidget(const SizedBox());
+      });
+    },
+  );
 }

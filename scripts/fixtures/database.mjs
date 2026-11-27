@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {setTimeout as sleep} from 'node:timers/promises';
 import pg from 'pg';
+import {initializingTrialDatabase} from './local_trial.mjs';
 
 const sqlHash = text => createHash('sha256').update(text).digest('hex');
 
@@ -38,7 +39,7 @@ async function trialCluster(path, compatibility, requireExisting) {
   const pending = join(directory, 'initializing-cluster');
   const files = await readdir(directory);
   if (!files.length && !requireExisting) {
-    await writeFile(pending, 'Initializing the trial database.\n', {flag: 'wx', mode: 0o600});
+    await writeFile(pending, initializingTrialDatabase, {flag: 'wx', mode: 0o600});
     return {directory, reused: false, async finish(id) {
       await writeFile(pending, JSON.stringify({...compatibility, systemIdentifier: id}) + '\n', {flag: 'r+'});
       await rename(pending, marker);

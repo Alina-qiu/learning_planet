@@ -370,12 +370,22 @@ class _QuestionOcrScreenState extends ConsumerState<QuestionOcrScreen> {
     });
     await _persist();
   });
+  bool _editingLocalDraft(QuestionMediaRepository repository) =>
+      !_consent &&
+      _config == null &&
+      repository is OfflineQuestionMediaRepository;
+
   Future<void> _save() => _run(() async {
-    if (!_consent) throw StateError('请同意将图片保存至本家庭的私有错题库');
-    await _process();
+    final localDraftOnly = _editingLocalDraft(
+      ref.read(questionMediaRepositoryProvider),
+    );
+    if (!_consent && !localDraftOnly) {
+      throw StateError('请同意将图片保存至本家庭的私有错题库');
+    }
+    if (_processed == null) await _process();
     if (!mounted) return;
     if (_config == null) {
-      final config = await Navigator.of(context).push<Map<String, dynamic>>(
+      final edited = await Navigator.of(context).push<Map<String, dynamic>>(
         MaterialPageRoute(
           builder: (_) => Consumer(
             builder: (context, ref, _) {
@@ -390,6 +400,7 @@ class _QuestionOcrScreenState extends ConsumerState<QuestionOcrScreen> {
                       pinyin: false,
                       fromImage: true,
                       childSubmission: widget.childInput,
+                      localDraftOnly: localDraftOnly,
                       ocrResult: _result,
                       originalImage: _original,
                       processedImage: _processed,
@@ -416,16 +427,29 @@ class _QuestionOcrScreenState extends ConsumerState<QuestionOcrScreen> {
           ),
         ),
       );
-      if (config == null || !mounted) return;
+      if (edited == null || !mounted) return;
+      _checkParent();
+      if (localDraftOnly) {
+        _editorDraft = edited;
+        await _persist();
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('已保存本机草稿')));
+        }
+        return;
+      }
       setState(
         () => _config = {
-          ...config,
+          ...edited,
           if (widget.childInput) 'requires_parent_review': true,
         },
       );
     }
     _checkParent();
     await _persist();
+    if (!mounted) return;
+    _checkParent();
     await ref
         .read(questionMediaRepositoryProvider)
         .save(
@@ -573,7 +597,9 @@ class _QuestionOcrScreenState extends ConsumerState<QuestionOcrScreen> {
             FilledButton(
               onPressed: !_busy && parent ? _save : null,
               child: Text(
-                _config != null
+                _editingLocalDraft(repository)
+                    ? '校对本机草稿'
+                    : _config != null
                     ? '重试保存已校对的错题'
                     : _result == null
                     ? '转手工校对并保存图片'

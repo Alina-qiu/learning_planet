@@ -1,6 +1,6 @@
 # Android 本机联调
 
-在电脑启动本机服务后，可在 Android 模拟器或连接电脑的 Android 手机上打开“学习星球·本机”。工作区已有[本机联调 APK](../build/app/outputs/flutter-apk/app-local-debug.apk)，包名为 `com.learningplanet.learning_planet.local`。[两款安装包的大小和 SHA-256](../build/child-isolation-20261127/DELIVERY.md) · [Android 构建说明](ANDROID_BUILD.md)
+在电脑启动本机服务后，可在 Android 模拟器或连接电脑的 Android 手机上打开“学习星球·本机”。工作区已有[本机联调 APK](../build/app/outputs/flutter-apk/app-local-debug.apk)，包名为 `com.learningplanet.learning_planet.local`。[联调 APK 的 SHA-256](../build/app/outputs/flutter-apk/app-local-debug.apk.sha256) · [Android 构建说明](ANDROID_BUILD.md)
 
 想分几天试用同一个家庭，每次启动都使用 `-KeepData`。家庭、任务、账本和私有文件会保存在本项目的 `.learning-planet-trial` 目录。只做一次性演示时，可以省略此参数，每次得到独立的空环境。两种模式都使用测试邮箱、虚构昵称和示例图片。
 
@@ -14,6 +14,8 @@
 ```
 
 看到 `LOCAL_BACKEND_READY http://127.0.0.1:54321` 后，保持这个窗口打开。服务仅监听电脑回环地址。已配置服务依赖的其他系统可用 `node scripts/local_backend.mjs start --keep-data` 启动。
+
+如果首次启动在显示就绪前中断，可以在原项目目录重跑同一命令。服务确认数据库属于这次未完成的初始化且已经停止时，会将它保留在 `.learning-planet-trial/database-interrupted-…`，随后重新初始化。如果提示 PostgreSQL 进程锁仍在，请先检查前一个服务窗口和进程。
 
 ## 2. 打开模拟器并安装 APK
 
